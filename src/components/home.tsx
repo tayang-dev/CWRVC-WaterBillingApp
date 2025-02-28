@@ -1,16 +1,40 @@
-import React from "react";
+import React, { useState } from "react";
 import { Droplets } from "lucide-react";
 import LoginForm from "./auth/LoginForm";
+import { useAuth } from "../contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 const Home = () => {
-  const handleLogin = (values: { email: string; password: string }) => {
-    console.log("Login attempt with:", values);
-    // In a real application, this would handle authentication with Firebase
+  const { login, forgotPassword, error, clearError } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const navigate = useNavigate();
+
+  const handleLogin = async (values: { email: string; password: string }) => {
+    setIsLoading(true);
+    setLoginError("");
+    try {
+      await login(values.email, values.password);
+      navigate("/dashboard");
+    } catch (err: any) {
+      setLoginError(
+        err.message || "Failed to login. Please check your credentials.",
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleForgotPassword = () => {
-    console.log("Forgot password clicked");
-    // In a real application, this would trigger password recovery flow
+  const handleForgotPassword = async () => {
+    const email = prompt("Please enter your email address");
+    if (email) {
+      try {
+        await forgotPassword(email);
+        alert("Password reset email sent. Please check your inbox.");
+      } catch (err: any) {
+        alert(err.message || "Failed to send password reset email.");
+      }
+    }
   };
 
   return (
@@ -28,6 +52,8 @@ const Home = () => {
       <LoginForm
         onSubmit={handleLogin}
         onForgotPassword={handleForgotPassword}
+        isLoading={isLoading}
+        error={loginError || error || ""}
       />
 
       <div className="mt-8 text-center text-sm text-gray-500">

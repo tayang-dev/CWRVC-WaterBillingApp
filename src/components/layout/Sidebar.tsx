@@ -179,6 +179,13 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
         <Button
           variant="outline"
           className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
+          onClick={() => {
+            const { signOut } = require("firebase/auth");
+            const { auth } = require("../../../lib/firebase");
+            signOut(auth).then(() => {
+              window.location.href = "/";
+            });
+          }}
         >
           <LogOut className="h-5 w-5 mr-2" />
           Logout
