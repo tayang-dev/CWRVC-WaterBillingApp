@@ -69,7 +69,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
     status: "active",
     joinDate: "2022-05-15",
   },
-  billingHistory = [
+  billingHistory: initialBillingHistory = [
     {
       id: "BILL-001",
       date: "2023-04-01",
@@ -92,7 +92,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
       dueDate: "2023-06-15",
     },
   ],
-  paymentTracking = [
+  paymentTracking: initialPaymentTracking = [
     {
       id: "PAY-001",
       date: "2023-04-10",
@@ -118,8 +118,12 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
 }) => {
   const [isGenerateBillDialogOpen, setIsGenerateBillDialogOpen] =
     useState(true);
-  const [billingHistory, setBillingHistory] = useState<any[]>([]);
-  const [paymentTracking, setPaymentTracking] = useState<any[]>([]);
+  const [billingHistory, setBillingHistory] = useState<any[]>(
+    initialBillingHistory,
+  );
+  const [paymentTracking, setPaymentTracking] = useState<any[]>(
+    initialPaymentTracking,
+  );
   const [loadingBills, setLoadingBills] = useState(true);
   const [loadingPayments, setLoadingPayments] = useState(true);
 
