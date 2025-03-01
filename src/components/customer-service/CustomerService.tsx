@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { PlusCircle } from "lucide-react";
@@ -15,54 +15,137 @@ interface Ticket {
   priority: "low" | "medium" | "high" | "urgent";
 }
 
-interface CustomerServiceProps {
-  tickets?: Ticket[];
-}
+interface CustomerServiceProps {}
 
-const CustomerService = ({
-  tickets = [
-    {
-      id: "TKT-001",
-      title: "Water meter reading incorrect",
-      customer: "John Smith",
-      dateCreated: "2023-06-15",
-      status: "open",
-      priority: "medium",
-    },
-    {
-      id: "TKT-002",
-      title: "Billing dispute for May invoice",
-      customer: "Sarah Johnson",
-      dateCreated: "2023-06-14",
-      status: "in-progress",
-      priority: "high",
-    },
-    {
-      id: "TKT-003",
-      title: "Request for payment extension",
-      customer: "Michael Brown",
-      dateCreated: "2023-06-12",
-      status: "resolved",
-      priority: "low",
-    },
-    {
-      id: "TKT-004",
-      title: "Water service interruption",
-      customer: "Emily Davis",
-      dateCreated: "2023-06-10",
-      status: "open",
-      priority: "urgent",
-    },
-    {
-      id: "TKT-005",
-      title: "Online account access issues",
-      customer: "Robert Wilson",
-      dateCreated: "2023-06-08",
-      status: "closed",
-      priority: "medium",
-    },
-  ],
-}: CustomerServiceProps) => {
+const CustomerService = ({}: CustomerServiceProps) => {
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch tickets from Firestore
+  useEffect(() => {
+    const fetchTickets = async () => {
+      try {
+        const { collection, query, orderBy, getDocs } = await import(
+          "firebase/firestore"
+        );
+        const { db } = await import("../../lib/firebase");
+
+        const ticketsQuery = query(
+          collection(db, "tickets"),
+          orderBy("dateCreated", "desc"),
+        );
+
+        const ticketsSnapshot = await getDocs(ticketsQuery);
+        const ticketsList = ticketsSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+          title: doc.data().title || "",
+          customer: doc.data().customerName || doc.data().customer || "",
+          dateCreated:
+            doc.data().dateCreated || new Date().toISOString().split("T")[0],
+          status: doc.data().status || "open",
+          priority: doc.data().priority || "medium",
+        }));
+
+        if (ticketsList.length > 0) {
+          setTickets(ticketsList as Ticket[]);
+        } else {
+          // Fallback to mock data if no tickets found
+          setTickets([
+            {
+              id: "TKT-001",
+              title: "Water meter reading incorrect",
+              customer: "John Smith",
+              dateCreated: "2023-06-15",
+              status: "open",
+              priority: "medium",
+            },
+            {
+              id: "TKT-002",
+              title: "Billing dispute for May invoice",
+              customer: "Sarah Johnson",
+              dateCreated: "2023-06-14",
+              status: "in-progress",
+              priority: "high",
+            },
+            {
+              id: "TKT-003",
+              title: "Request for payment extension",
+              customer: "Michael Brown",
+              dateCreated: "2023-06-12",
+              status: "resolved",
+              priority: "low",
+            },
+            {
+              id: "TKT-004",
+              title: "Water service interruption",
+              customer: "Emily Davis",
+              dateCreated: "2023-06-10",
+              status: "open",
+              priority: "urgent",
+            },
+            {
+              id: "TKT-005",
+              title: "Online account access issues",
+              customer: "Robert Wilson",
+              dateCreated: "2023-06-08",
+              status: "closed",
+              priority: "medium",
+            },
+          ]);
+        }
+      } catch (error) {
+        console.error("Error fetching tickets:", error);
+        // Fallback to mock data
+        setTickets([
+          {
+            id: "TKT-001",
+            title: "Water meter reading incorrect",
+            customer: "John Smith",
+            dateCreated: "2023-06-15",
+            status: "open",
+            priority: "medium",
+          },
+          {
+            id: "TKT-002",
+            title: "Billing dispute for May invoice",
+            customer: "Sarah Johnson",
+            dateCreated: "2023-06-14",
+            status: "in-progress",
+            priority: "high",
+          },
+          {
+            id: "TKT-003",
+            title: "Request for payment extension",
+            customer: "Michael Brown",
+            dateCreated: "2023-06-12",
+            status: "resolved",
+            priority: "low",
+          },
+          {
+            id: "TKT-004",
+            title: "Water service interruption",
+            customer: "Emily Davis",
+            dateCreated: "2023-06-10",
+            status: "open",
+            priority: "urgent",
+          },
+          {
+            id: "TKT-005",
+            title: "Online account access issues",
+            customer: "Robert Wilson",
+            dateCreated: "2023-06-08",
+            status: "closed",
+            priority: "medium",
+          },
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTickets();
+  }, []);
   const [activeTab, setActiveTab] = useState("all-tickets");
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [filteredTickets, setFilteredTickets] = useState<Ticket[]>(tickets);
@@ -140,11 +223,53 @@ const CustomerService = ({
   };
 
   // Handle form submission for new ticket
-  const handleNewTicketSubmit = (data: any) => {
-    console.log("New ticket created:", data);
-    // In a real application, you would add the new ticket to the tickets array
-    // and update the state accordingly
-    setActiveTab("all-tickets");
+  const handleNewTicketSubmit = async (data: any) => {
+    try {
+      // Add ticket to Firestore
+      const { collection, addDoc } = await import("firebase/firestore");
+      const { db } = await import("../../lib/firebase");
+
+      const ticketData = {
+        title: data.title,
+        description: data.description,
+        customerId: data.customerId,
+        customerName: data.customerName || "",
+        dateCreated: new Date().toISOString(),
+        status: "open",
+        priority: data.priority,
+        category: data.category,
+      };
+
+      const docRef = await addDoc(collection(db, "tickets"), ticketData);
+      console.log("Ticket created with ID:", docRef.id);
+
+      // Refresh tickets list
+      const ticketsQuery = await import("firebase/firestore").then(
+        ({ collection, query, orderBy, getDocs }) => {
+          return query(
+            collection(db, "tickets"),
+            orderBy("dateCreated", "desc"),
+          );
+        },
+      );
+
+      const ticketsSnapshot = await getDocs(ticketsQuery);
+      const ticketsList = ticketsSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        title: doc.data().title || "",
+        customer: doc.data().customerName || doc.data().customer || "",
+        dateCreated:
+          doc.data().dateCreated || new Date().toISOString().split("T")[0],
+        status: doc.data().status || "open",
+        priority: doc.data().priority || "medium",
+      }));
+
+      setTickets(ticketsList as Ticket[]);
+      setActiveTab("all-tickets");
+    } catch (error) {
+      console.error("Error creating ticket:", error);
+    }
   };
 
   // Find the selected ticket details

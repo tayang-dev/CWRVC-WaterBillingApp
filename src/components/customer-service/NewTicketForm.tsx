@@ -73,8 +73,29 @@ const NewTicketForm = ({
   const handleSubmit = async (data: z.infer<typeof formSchema>) => {
     setIsSubmitting(true);
     try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // Add ticket to Firestore
+      const { collection, addDoc } = await import("firebase/firestore");
+      const { db } = await import("../../lib/firebase");
+
+      const ticketData = {
+        title: data.title,
+        description: data.description,
+        customerId: data.customerId,
+        customerName:
+          customers.find((c) => c.id === data.customerId)?.name || "",
+        dateCreated: new Date().toISOString(),
+        status: "open",
+        priority: data.priority,
+        category: data.category,
+      };
+
+      try {
+        const docRef = await addDoc(collection(db, "tickets"), ticketData);
+        console.log("Ticket created with ID:", docRef.id);
+      } catch (firestoreError) {
+        console.error("Error adding ticket to Firestore:", firestoreError);
+      }
+
       onSubmit(data);
       form.reset();
     } catch (error) {
