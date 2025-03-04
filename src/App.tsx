@@ -49,9 +49,69 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/accounts/new"
+            element={
+              <ProtectedRoute>
+                <AdminLayout>
+                  <AccountsManagement initialView="list" />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounts/billing"
+            element={
+              <ProtectedRoute>
+                <AdminLayout>
+                  <AccountsManagement />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounts/payments"
+            element={
+              <ProtectedRoute>
+                <AdminLayout>
+                  <AccountsManagement />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
 
           <Route
             path="/customer-service"
+            element={
+              <ProtectedRoute>
+                <AdminLayout>
+                  <CustomerService />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/customer-service/tickets"
+            element={
+              <ProtectedRoute>
+                <AdminLayout>
+                  <CustomerService />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/customer-service/tickets/new"
+            element={
+              <ProtectedRoute>
+                <AdminLayout>
+                  <CustomerService />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/customer-service/knowledge"
             element={
               <ProtectedRoute>
                 <AdminLayout>
