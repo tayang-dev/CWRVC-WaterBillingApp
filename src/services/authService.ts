@@ -21,7 +21,8 @@ export const signUp = async (
     );
     await updateProfile(userCredential.user, { displayName });
     return userCredential.user;
-  } catch (error) {
+  } catch (error: any) {
+    console.error("Auth error:", error.code, error.message);
     throw error;
   }
 };
@@ -34,7 +35,8 @@ export const signIn = async (email: string, password: string) => {
       password,
     );
     return userCredential.user;
-  } catch (error) {
+  } catch (error: any) {
+    console.error("Auth error:", error.code, error.message);
     throw error;
   }
 };
@@ -42,7 +44,8 @@ export const signIn = async (email: string, password: string) => {
 export const signOut = async () => {
   try {
     await firebaseSignOut(auth);
-  } catch (error) {
+  } catch (error: any) {
+    console.error("Auth error:", error.code, error.message);
     throw error;
   }
 };
@@ -50,7 +53,8 @@ export const signOut = async () => {
 export const resetPassword = async (email: string) => {
   try {
     await sendPasswordResetEmail(auth, email);
-  } catch (error) {
+  } catch (error: any) {
+    console.error("Auth error:", error.code, error.message);
     throw error;
   }
 };

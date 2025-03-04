@@ -17,9 +17,22 @@ const Home = () => {
       await login(values.email, values.password);
       navigate("/dashboard");
     } catch (err: any) {
-      setLoginError(
-        err.message || "Failed to login. Please check your credentials.",
-      );
+      console.error("Login error:", err);
+      if (
+        err.code === "auth/invalid-credential" ||
+        err.code === "auth/user-not-found" ||
+        err.code === "auth/wrong-password"
+      ) {
+        setLoginError("Invalid email or password. Please try again.");
+      } else if (err.code === "auth/too-many-requests") {
+        setLoginError(
+          "Too many failed login attempts. Please try again later or reset your password.",
+        );
+      } else {
+        setLoginError(
+          err.message || "Failed to login. Please check your credentials.",
+        );
+      }
     } finally {
       setIsLoading(false);
     }

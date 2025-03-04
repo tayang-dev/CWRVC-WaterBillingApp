@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Card,
   CardContent,
@@ -29,7 +29,6 @@ import {
   Download,
   Send,
 } from "lucide-react";
-import GenerateBillForm from "./GenerateBillForm";
 
 interface CustomerDetailsProps {
   customer?: {
@@ -69,7 +68,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
     status: "active",
     joinDate: "2022-05-15",
   },
-  billingHistory: initialBillingHistory = [
+  billingHistory = [
     {
       id: "BILL-001",
       date: "2023-04-01",
@@ -92,7 +91,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
       dueDate: "2023-06-15",
     },
   ],
-  paymentTracking: initialPaymentTracking = [
+  paymentTracking = [
     {
       id: "PAY-001",
       date: "2023-04-10",
@@ -118,180 +117,6 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
 }) => {
   const [isGenerateBillDialogOpen, setIsGenerateBillDialogOpen] =
     useState(true);
-  const [billingHistory, setBillingHistory] = useState<any[]>(
-    initialBillingHistory,
-  );
-  const [paymentTracking, setPaymentTracking] = useState<any[]>(
-    initialPaymentTracking,
-  );
-  const [loadingBills, setLoadingBills] = useState(true);
-  const [loadingPayments, setLoadingPayments] = useState(true);
-
-  // Fetch billing history from Firestore
-  useEffect(() => {
-    const fetchBillingHistory = async () => {
-      if (!customer?.id) return;
-
-      try {
-        const { collection, query, where, orderBy, getDocs } = await import(
-          "firebase/firestore"
-        );
-        const { db } = await import("../../lib/firebase");
-
-        const billsQuery = query(
-          collection(db, "bills"),
-          where("customerId", "==", customer.id),
-          orderBy("date", "desc"),
-        );
-
-        const billsSnapshot = await getDocs(billsQuery);
-        const billsList = billsSnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-          status: doc.data().status || "pending",
-        }));
-
-        setBillingHistory(
-          billsList.length > 0
-            ? billsList
-            : [
-                {
-                  id: "BILL-001",
-                  date: "2023-04-01",
-                  amount: 78.5,
-                  status: "paid",
-                  dueDate: "2023-04-15",
-                },
-                {
-                  id: "BILL-002",
-                  date: "2023-05-01",
-                  amount: 82.75,
-                  status: "pending",
-                  dueDate: "2023-05-15",
-                },
-                {
-                  id: "BILL-003",
-                  date: "2023-06-01",
-                  amount: 85.2,
-                  status: "overdue",
-                  dueDate: "2023-06-15",
-                },
-              ],
-        );
-      } catch (error) {
-        console.error("Error fetching billing history:", error);
-        // Fallback to mock data
-        setBillingHistory([
-          {
-            id: "BILL-001",
-            date: "2023-04-01",
-            amount: 78.5,
-            status: "paid",
-            dueDate: "2023-04-15",
-          },
-          {
-            id: "BILL-002",
-            date: "2023-05-01",
-            amount: 82.75,
-            status: "pending",
-            dueDate: "2023-05-15",
-          },
-          {
-            id: "BILL-003",
-            date: "2023-06-01",
-            amount: 85.2,
-            status: "overdue",
-            dueDate: "2023-06-15",
-          },
-        ]);
-      } finally {
-        setLoadingBills(false);
-      }
-    };
-
-    const fetchPaymentTracking = async () => {
-      if (!customer?.id) return;
-
-      try {
-        const { collection, query, where, orderBy, getDocs } = await import(
-          "firebase/firestore"
-        );
-        const { db } = await import("../../lib/firebase");
-
-        const paymentsQuery = query(
-          collection(db, "payments"),
-          where("customerId", "==", customer.id),
-          orderBy("date", "desc"),
-        );
-
-        const paymentsSnapshot = await getDocs(paymentsQuery);
-        const paymentsList = paymentsSnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-          status: doc.data().status || "completed",
-        }));
-
-        setPaymentTracking(
-          paymentsList.length > 0
-            ? paymentsList
-            : [
-                {
-                  id: "PAY-001",
-                  date: "2023-04-10",
-                  amount: 78.5,
-                  method: "Credit Card",
-                  status: "completed",
-                },
-                {
-                  id: "PAY-002",
-                  date: "2023-05-12",
-                  amount: 82.75,
-                  method: "Bank Transfer",
-                  status: "processing",
-                },
-                {
-                  id: "PAY-003",
-                  date: "2023-06-18",
-                  amount: 85.2,
-                  method: "Credit Card",
-                  status: "failed",
-                },
-              ],
-        );
-      } catch (error) {
-        console.error("Error fetching payment tracking:", error);
-        // Fallback to mock data
-        setPaymentTracking([
-          {
-            id: "PAY-001",
-            date: "2023-04-10",
-            amount: 78.5,
-            method: "Credit Card",
-            status: "completed",
-          },
-          {
-            id: "PAY-002",
-            date: "2023-05-12",
-            amount: 82.75,
-            method: "Bank Transfer",
-            status: "processing",
-          },
-          {
-            id: "PAY-003",
-            date: "2023-06-18",
-            amount: 85.2,
-            method: "Credit Card",
-            status: "failed",
-          },
-        ]);
-      } finally {
-        setLoadingPayments(false);
-      }
-    };
-
-    fetchBillingHistory();
-    fetchPaymentTracking();
-  }, [customer?.id]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -357,102 +182,55 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
             onOpenChange={setIsGenerateBillDialogOpen}
           >
             <DialogTrigger asChild>
-              <Button
-                size="sm"
-                onClick={async () => {
-                  try {
-                    // Generate a new bill in Firestore
-                    const { collection, addDoc } = await import(
-                      "firebase/firestore"
-                    );
-                    const { db } = await import("../../lib/firebase");
-
-                    const billData = {
-                      customerId: customer.id,
-                      date: new Date().toISOString().split("T")[0],
-                      amount: 87.5, // This would be calculated based on usage
-                      status: "pending",
-                      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-                        .toISOString()
-                        .split("T")[0], // 30 days from now
-                      description: "Monthly water bill",
-                      billingPeriodStart: new Date(
-                        Date.now() - 30 * 24 * 60 * 60 * 1000,
-                      )
-                        .toISOString()
-                        .split("T")[0],
-                      billingPeriodEnd: new Date().toISOString().split("T")[0],
-                      waterUsage: 2450, // gallons
-                    };
-
-                    const docRef = await addDoc(
-                      collection(db, "bills"),
-                      billData,
-                    );
-                    console.log("Bill generated with ID:", docRef.id);
-
-                    // Refresh billing history
-                    const billsQuery = await import("firebase/firestore").then(
-                      ({ collection, query, where, orderBy, getDocs }) => {
-                        return query(
-                          collection(db, "bills"),
-                          where("customerId", "==", customer.id),
-                          orderBy("date", "desc"),
-                        );
-                      },
-                    );
-
-                    const billsSnapshot = await getDocs(billsQuery);
-                    const billsList = billsSnapshot.docs.map((doc) => ({
-                      id: doc.id,
-                      ...doc.data(),
-                    }));
-
-                    setBillingHistory(billsList);
-
-                    // Close the dialog
-                    setIsGenerateBillDialogOpen(false);
-                  } catch (error) {
-                    console.error("Error generating bill:", error);
-                  }
-                }}
-              >
+              <Button size="sm">
                 <CreditCard className="mr-2 h-4 w-4" />
                 Generate Bill
               </Button>
             </DialogTrigger>
             <DialogContent>
-              <GenerateBillForm
-                customerId={customer.id}
-                customerName={customer.name}
-                accountNumber={customer.accountNumber}
-                onSubmit={async (data) => {
-                  // Refresh billing history after generating bill
-                  try {
-                    const { collection, query, where, orderBy, getDocs } =
-                      await import("firebase/firestore");
-                    const { db } = await import("../../lib/firebase");
-
-                    const billsQuery = query(
-                      collection(db, "bills"),
-                      where("customerId", "==", customer.id),
-                      orderBy("date", "desc"),
-                    );
-
-                    const billsSnapshot = await getDocs(billsQuery);
-                    const billsList = billsSnapshot.docs.map((doc) => ({
-                      id: doc.id,
-                      ...doc.data(),
-                    }));
-
-                    setBillingHistory(billsList);
-                    setIsGenerateBillDialogOpen(false);
-                  } catch (error) {
-                    console.error("Error refreshing billing history:", error);
-                  }
-                }}
-                onCancel={() => setIsGenerateBillDialogOpen(false)}
-              />
+              <DialogHeader>
+                <DialogTitle>Generate New Bill</DialogTitle>
+                <DialogDescription>
+                  Create a new bill for this customer. This will be sent to
+                  their email address.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <p className="text-sm font-medium col-span-1">Customer:</p>
+                  <p className="col-span-3">{customer.name}</p>
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <p className="text-sm font-medium col-span-1">Account:</p>
+                  <p className="col-span-3">{customer.accountNumber}</p>
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <p className="text-sm font-medium col-span-1">
+                    Billing Period:
+                  </p>
+                  <p className="col-span-3">July 1, 2023 - July 31, 2023</p>
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <p className="text-sm font-medium col-span-1">Amount:</p>
+                  <p className="col-span-3">{formatCurrency(87.5)}</p>
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <p className="text-sm font-medium col-span-1">Due Date:</p>
+                  <p className="col-span-3">August 15, 2023</p>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsGenerateBillDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button onClick={() => setIsGenerateBillDialogOpen(false)}>
+                  <Send className="mr-2 h-4 w-4" />
+                  Generate & Send
+                </Button>
+              </DialogFooter>
             </DialogContent>
           </Dialog>
         </div>
