@@ -20,6 +20,6 @@
     }
   },
   "include": ["src"],
-  "exclude": ["src/tempobook"],
+  "exclude": ["src/tempobook", "build", "vite", ";"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -244,13 +244,10 @@ const CustomerService = ({}: CustomerServiceProps) => {
       console.log("Ticket created with ID:", docRef.id);
 
       // Refresh tickets list
-      const ticketsQuery = await import("firebase/firestore").then(
-        ({ collection, query, orderBy, getDocs }) => {
-          return query(
-            collection(db, "tickets"),
-            orderBy("dateCreated", "desc"),
-          );
-        },
+      const { query, orderBy, getDocs } = await import("firebase/firestore");
+      const ticketsQuery = query(
+        collection(db, "tickets"),
+        orderBy("dateCreated", "desc"),
       );
 
       const ticketsSnapshot = await getDocs(ticketsQuery);

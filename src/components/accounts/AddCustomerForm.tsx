@@ -88,7 +88,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
       try {
         const docRef = await addDoc(collection(db, "customers"), customerData);
         console.log("Customer added with ID:", docRef.id);
-        onSubmit({ ...data, id: docRef.id });
+        onSubmit({ ...data });
         form.reset();
       } catch (firestoreError: any) {
         setError(

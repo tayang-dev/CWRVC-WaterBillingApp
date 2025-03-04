@@ -20,7 +20,7 @@ const FirebaseSetupGuide = () => {
         <section>
           <h2 className="text-xl font-semibold mb-3 text-blue-700">Step 2: Register Your Web App</h2>
           <ol className="list-decimal pl-6 space-y-2">
-            <li>From the project overview page, click the web icon (</>) to add a web app</li>
+            <li>From the project overview page, click the web icon () to add a web app</li>
             <li>Register your app with a nickname (e.g., "water-billing-admin")</li>
             <li>Optionally set up Firebase Hosting</li>
             <li>Click "Register app"</li>

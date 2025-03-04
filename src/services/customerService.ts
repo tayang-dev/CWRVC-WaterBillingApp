@@ -80,7 +80,7 @@ export const getAllCustomers = async () => {
     const querySnapshot = await getDocs(collection(db, CUSTOMERS_COLLECTION));
     return querySnapshot.docs.map((doc) => ({
       id: doc.id,
-      ...doc.data(),
+      ...(doc.data() as any),
     })) as Customer[];
   } catch (error) {
     throw error;
@@ -111,7 +111,7 @@ export const searchCustomers = async (searchTerm: string, filters: any) => {
 
     // Filter results by search term client-side (Firestore doesn't support full text search)
     const results = querySnapshot.docs
-      .map((doc) => ({ id: doc.id, ...doc.data() }) as Customer)
+      .map((doc) => ({ id: doc.id, ...(doc.data() as any) }) as Customer)
       .filter((customer) => {
         const searchLower = searchTerm.toLowerCase();
         return (
@@ -155,7 +155,7 @@ export const getPaginatedCustomers = async (
 
     const customers = querySnapshot.docs.map((doc) => ({
       id: doc.id,
-      ...doc.data(),
+      ...(doc.data() as any),
     })) as Customer[];
 
     return {

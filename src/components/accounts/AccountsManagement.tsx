@@ -215,7 +215,7 @@ const AccountsManagement = ({
       // Filter results by search term (client-side)
       const searchLower = query.toLowerCase();
       const filteredCustomers = querySnapshot.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() }))
+        .map((doc) => ({ id: doc.id, ...(doc.data() as any) }))
         .filter(
           (customer) =>
             !searchLower ||
