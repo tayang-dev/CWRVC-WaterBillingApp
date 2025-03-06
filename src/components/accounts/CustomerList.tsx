@@ -196,7 +196,7 @@ const CustomerList: React.FC<CustomerListProps> = ({
                     </Badge>
                   </TableCell>
                   <TableCell>{customer.lastBillingDate}</TableCell>
-                  <TableCell>${customer.amountDue.toFixed(2)}</TableCell>
+                  <TableCell>₱{customer.amountDue.toFixed(2)}</TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>

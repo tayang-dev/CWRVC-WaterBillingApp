@@ -4,6 +4,7 @@ import Home from "./components/home";
 import routes from "tempo-routes";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminLayout from "./components/layout/AdminLayout";
+import PaymentManagement from "./components/payment/PaymentMangement";
 
 // Lazy load components for better performance
 const Dashboard = lazy(() => import("./components/dashboard/Dashboard"));
@@ -70,11 +71,11 @@ function App() {
             }
           />
           <Route
-            path="/accounts/payments"
+            path="/payments"
             element={
               <ProtectedRoute>
                 <AdminLayout>
-                  <AccountsManagement />
+                  <PaymentManagement />
                 </AdminLayout>
               </ProtectedRoute>
             }

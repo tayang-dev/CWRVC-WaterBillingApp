@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   Droplets,
+  CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -123,7 +124,7 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
       <div className="p-4 border-b border-gray-200">
         <div className="flex items-center">
           <Droplets className="h-8 w-8 text-blue-600 mr-2" />
-          <h1 className="text-xl font-bold text-blue-800">Water Billing</h1>
+          <h1 className="text-xl font-bold text-blue-800">CWRVC - Water Billing App</h1>
         </div>
         <p className="text-xs text-gray-500 mt-1">Admin Portal</p>
       </div>
@@ -148,8 +149,14 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
             { label: "All Accounts", path: "/accounts" },
             { label: "Add New Account", path: "/accounts/new" },
             { label: "Billing History", path: "/accounts/billing" },
-            { label: "Payment Records", path: "/accounts/payments" },
           ]}
+        />
+
+        <SidebarItem
+          icon={<CreditCard className="h-5 w-5" />}
+          label="Payment Management"
+          path="/payments"
+          isActive={location.pathname.startsWith("/payments")}
         />
 
         <SidebarItem

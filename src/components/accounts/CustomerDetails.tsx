@@ -164,7 +164,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
-      currency: "USD",
+      currency: "PHP",
     }).format(amount);
   };
 
@@ -340,7 +340,6 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
       <Tabs defaultValue="billing" className="w-full">
         <TabsList className="mb-4">
           <TabsTrigger value="billing">Billing History</TabsTrigger>
-          <TabsTrigger value="payments">Payment Tracking</TabsTrigger>
         </TabsList>
 
         <TabsContent value="billing" className="space-y-4">
@@ -406,77 +405,6 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
               </p>
               <Button variant="outline" size="sm">
                 View All Bills
-              </Button>
-            </CardFooter>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="payments" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Payment Tracking</CardTitle>
-              <CardDescription>
-                Monitor payment history and status
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left py-3 px-4 font-medium">
-                        Payment ID
-                      </th>
-                      <th className="text-left py-3 px-4 font-medium">Date</th>
-                      <th className="text-left py-3 px-4 font-medium">
-                        Amount
-                      </th>
-                      <th className="text-left py-3 px-4 font-medium">
-                        Method
-                      </th>
-                      <th className="text-left py-3 px-4 font-medium">
-                        Status
-                      </th>
-                      <th className="text-right py-3 px-4 font-medium">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paymentTracking.map((payment) => (
-                      <tr
-                        key={payment.id}
-                        className="border-b hover:bg-gray-50"
-                      >
-                        <td className="py-3 px-4">{payment.id}</td>
-                        <td className="py-3 px-4">
-                          {formatDate(payment.date)}
-                        </td>
-                        <td className="py-3 px-4">
-                          {formatCurrency(payment.amount)}
-                        </td>
-                        <td className="py-3 px-4">{payment.method}</td>
-                        <td className="py-3 px-4">
-                          {getStatusBadge(payment.status)}
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <Button variant="ghost" size="sm">
-                            <Download className="h-4 w-4" />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-            <CardFooter className="flex justify-between">
-              <p className="text-sm text-gray-500">
-                Showing {paymentTracking.length} of {paymentTracking.length}{" "}
-                payments
-              </p>
-              <Button variant="outline" size="sm">
-                View All Payments
               </Button>
             </CardFooter>
           </Card>

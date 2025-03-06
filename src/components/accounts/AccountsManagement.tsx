@@ -345,7 +345,6 @@ const AccountsManagement = ({
                         joinDate: customerDetails.joinDate,
                       }}
                       billingHistory={billingHistory}
-                      paymentTracking={paymentTracking}
                     />
                   )}
                 </div>

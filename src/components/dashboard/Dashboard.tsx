@@ -70,8 +70,8 @@ const Dashboard: React.FC<DashboardProps> = ({
           // Fallback to mock data
           setDashboardData({
             totalCustomers: "1,245",
-            totalRevenue: "$48,352",
-            pendingPayments: "$12,430",
+            totalRevenue: "₱48,352",
+            pendingPayments: "₱12,430",
             waterConsumption: "845,210 gal",
             customerGrowth: "+5.2%",
             revenueGrowth: "+10.5%",
