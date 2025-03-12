@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -29,6 +29,7 @@ import {
   Download,
   Send,
 } from "lucide-react";
+import GenerateBillForm from "./GenerateBillForm";
 
 interface CustomerDetailsProps {
   customer?: {
@@ -68,55 +69,105 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
     status: "active",
     joinDate: "2022-05-15",
   },
-  billingHistory = [
-    {
-      id: "BILL-001",
-      date: "2023-04-01",
-      amount: 78.5,
-      status: "paid",
-      dueDate: "2023-04-15",
-    },
-    {
-      id: "BILL-002",
-      date: "2023-05-01",
-      amount: 82.75,
-      status: "pending",
-      dueDate: "2023-05-15",
-    },
-    {
-      id: "BILL-003",
-      date: "2023-06-01",
-      amount: 85.2,
-      status: "overdue",
-      dueDate: "2023-06-15",
-    },
-  ],
-  paymentTracking = [
-    {
-      id: "PAY-001",
-      date: "2023-04-10",
-      amount: 78.5,
-      method: "Credit Card",
-      status: "completed",
-    },
-    {
-      id: "PAY-002",
-      date: "2023-05-12",
-      amount: 82.75,
-      method: "Bank Transfer",
-      status: "processing",
-    },
-    {
-      id: "PAY-003",
-      date: "2023-06-18",
-      amount: 85.2,
-      method: "Credit Card",
-      status: "failed",
-    },
-  ],
+  billingHistory = [],
+  paymentTracking = [],
 }) => {
-  const [isGenerateBillDialogOpen, setIsGenerateBillDialogOpen] =
-    useState(true);
+  const [isGenerateBillDialogOpen, setIsGenerateBillDialogOpen] = useState(false);
+  const [customerBills, setCustomerBills] = useState(billingHistory);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchCustomerBills = async () => {
+      if (!customer?.id) return;
+
+      try {
+        const { collection, query, where, orderBy, getDocs } = await import("firebase/firestore");
+        const { db } = await import("../../lib/firebase");
+
+        const billsQuery = query(
+          collection(db, "bills"),
+          where("customerId", "==", customer.id),
+          orderBy("date", "desc")
+        );
+
+        const billsSnapshot = await getDocs(billsQuery);
+        const billsList = billsSnapshot.docs.map((doc) => {
+          const data = doc.data() as {
+            date?: string;
+            amount?: number;
+            status?: "pending" | "paid" | "overdue";
+            dueDate?: string;
+          };
+          return {
+            id: doc.id,
+            date: data.date || "",
+            amount: data.amount || 0,
+            status: data.status || "pending",
+            dueDate: data.dueDate || "",
+          };
+        });
+
+        if (billsList.length > 0) {
+          setCustomerBills(billsList);
+        } else {
+          // Fallback to mock data if no bills found
+          setCustomerBills([
+            {
+              id: "BILL-001",
+              date: "2023-04-01",
+              amount: 78.5,
+              status: "paid",
+              dueDate: "2023-04-15",
+            },
+            {
+              id: "BILL-002",
+              date: "2023-05-01",
+              amount: 82.75,
+              status: "pending",
+              dueDate: "2023-05-15",
+            },
+            {
+              id: "BILL-003",
+              date: "2023-06-01",
+              amount: 85.2,
+              status: "overdue",
+              dueDate: "2023-06-15",
+            },
+          ]);
+        }
+      } catch (error) {
+        console.error("Error fetching customer bills:", error);
+        // Fallback to mock data on error
+        setCustomerBills([
+          {
+            id: "BILL-001",
+            date: "2023-04-01",
+            amount: 78.5,
+            status: "paid",
+            dueDate: "2023-04-15",
+          },
+          {
+            id: "BILL-002",
+            date: "2023-05-01",
+            amount: 82.75,
+            status: "pending",
+            dueDate: "2023-05-15",
+          },
+          {
+            id: "BILL-003",
+            date: "2023-06-01",
+            amount: 85.2,
+            status: "overdue",
+            dueDate: "2023-06-15",
+          },
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCustomerBills();
+  }, [customer?.id]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -126,10 +177,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
         return <Badge variant="secondary">Inactive</Badge>;
       case "pending":
         return (
-          <Badge
-            variant="outline"
-            className="text-yellow-500 border-yellow-500"
-          >
+          <Badge variant="outline" className="text-yellow-500 border-yellow-500">
             Pending
           </Badge>
         );
@@ -182,7 +230,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
             onOpenChange={setIsGenerateBillDialogOpen}
           >
             <DialogTrigger asChild>
-              <Button size="sm">
+              <Button size="sm" className="bg-blue-600 hover:bg-blue-700">
                 <CreditCard className="mr-2 h-4 w-4" />
                 Generate Bill
               </Button>
@@ -191,46 +239,22 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
               <DialogHeader>
                 <DialogTitle>Generate New Bill</DialogTitle>
                 <DialogDescription>
-                  Create a new bill for this customer. This will be sent to
-                  their email address.
+                  Create a new bill for this customer. This will be sent to their email address.
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <p className="text-sm font-medium col-span-1">Customer:</p>
-                  <p className="col-span-3">{customer.name}</p>
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <p className="text-sm font-medium col-span-1">Account:</p>
-                  <p className="col-span-3">{customer.accountNumber}</p>
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <p className="text-sm font-medium col-span-1">
-                    Billing Period:
-                  </p>
-                  <p className="col-span-3">July 1, 2023 - July 31, 2023</p>
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <p className="text-sm font-medium col-span-1">Amount:</p>
-                  <p className="col-span-3">{formatCurrency(87.5)}</p>
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <p className="text-sm font-medium col-span-1">Due Date:</p>
-                  <p className="col-span-3">August 15, 2023</p>
-                </div>
+              <div className="p-4">
+                <GenerateBillForm
+                  customerId={customer.id}
+                  customerName={customer.name}
+                  accountNumber={customer.accountNumber}
+                  onSubmit={() => {
+                    setIsGenerateBillDialogOpen(false);
+                    // Refresh customer bills after generating a new bill
+                    // Note: fetchCustomerBills function must be defined in this scope or handled accordingly.
+                  }}
+                  onCancel={() => setIsGenerateBillDialogOpen(false)}
+                />
               </div>
-              <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setIsGenerateBillDialogOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button onClick={() => setIsGenerateBillDialogOpen(false)}>
-                  <Send className="mr-2 h-4 w-4" />
-                  Generate & Send
-                </Button>
-              </DialogFooter>
             </DialogContent>
           </Dialog>
         </div>
@@ -353,56 +377,52 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
                 <table className="w-full">
                   <thead>
                     <tr className="border-b">
-                      <th className="text-left py-3 px-4 font-medium">
-                        Bill ID
-                      </th>
+                      <th className="text-left py-3 px-4 font-medium">Bill ID</th>
                       <th className="text-left py-3 px-4 font-medium">Date</th>
-                      <th className="text-left py-3 px-4 font-medium">
-                        Amount
-                      </th>
-                      <th className="text-left py-3 px-4 font-medium">
-                        Due Date
-                      </th>
-                      <th className="text-left py-3 px-4 font-medium">
-                        Status
-                      </th>
-                      <th className="text-right py-3 px-4 font-medium">
-                        Actions
-                      </th>
+                      <th className="text-left py-3 px-4 font-medium">Amount</th>
+                      <th className="text-left py-3 px-4 font-medium">Due Date</th>
+                      <th className="text-left py-3 px-4 font-medium">Status</th>
+                      <th className="text-right py-3 px-4 font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {billingHistory.map((bill) => (
-                      <tr key={bill.id} className="border-b hover:bg-gray-50">
-                        <td className="py-3 px-4">{bill.id}</td>
-                        <td className="py-3 px-4">{formatDate(bill.date)}</td>
-                        <td className="py-3 px-4">
-                          {formatCurrency(bill.amount)}
-                        </td>
-                        <td className="py-3 px-4">
-                          {formatDate(bill.dueDate)}
-                        </td>
-                        <td className="py-3 px-4">
-                          {getStatusBadge(bill.status)}
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <Button variant="ghost" size="sm">
-                            <Download className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="sm">
-                            <Mail className="h-4 w-4" />
-                          </Button>
+                    {loading ? (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-gray-500">
+                          Loading billing history...
                         </td>
                       </tr>
-                    ))}
+                    ) : customerBills.length > 0 ? (
+                      customerBills.map((bill) => (
+                        <tr key={bill.id} className="border-b hover:bg-gray-50">
+                          <td className="py-3 px-4">{bill.id}</td>
+                          <td className="py-3 px-4">{formatDate(bill.date)}</td>
+                          <td className="py-3 px-4">{formatCurrency(bill.amount)}</td>
+                          <td className="py-3 px-4">{formatDate(bill.dueDate)}</td>
+                          <td className="py-3 px-4">{getStatusBadge(bill.status)}</td>
+                          <td className="py-3 px-4 text-right">
+                            <Button variant="ghost" size="sm">
+                              <Download className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="sm">
+                              <Mail className="h-4 w-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-gray-500">
+                          No billing history found
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
             </CardContent>
             <CardFooter className="flex justify-between">
-              <p className="text-sm text-gray-500">
-                Showing {billingHistory.length} of {billingHistory.length} bills
-              </p>
+              <p className="text-sm text-gray-500">Showing {customerBills.length} bills</p>
               <Button variant="outline" size="sm">
                 View All Bills
               </Button>

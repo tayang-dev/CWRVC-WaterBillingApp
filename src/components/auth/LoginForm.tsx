@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Eye, EyeOff, Lock, Mail, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail, AlertCircle, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -22,6 +22,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const formSchema = z.object({
   email: z.string().email({
@@ -30,6 +37,7 @@ const formSchema = z.object({
   password: z.string().min(6, {
     message: "Password must be at least 6 characters.",
   }),
+  role: z.enum(["admin", "staff"]),
 });
 
 interface LoginFormProps {
@@ -52,6 +60,7 @@ const LoginForm = ({
     defaultValues: {
       email: "",
       password: "",
+      role: "admin",
     },
   });
 
@@ -128,6 +137,33 @@ const LoginForm = ({
                         <Eye className="h-4 w-4" />
                       )}
                     </button>
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="role"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Role</FormLabel>
+                  <div className="relative">
+                    <User className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger className="pl-10">
+                          <SelectValue placeholder="Select your role" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="staff">Staff</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <FormMessage />
                 </FormItem>

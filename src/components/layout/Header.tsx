@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, AvatarImage, AvatarFallback } from "../ui/avatar";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -35,6 +36,7 @@ const Header = ({
   onProfileClick = () => console.log("Profile clicked"),
   onSettingsClick = () => console.log("Settings clicked"),
 }: HeaderProps) => {
+  const { userRole } = useAuth();
   const [showNotifications, setShowNotifications] = useState(false);
 
   const notifications = [
@@ -161,7 +163,9 @@ const Header = ({
               </Avatar>
               <div className="flex flex-col items-start text-sm">
                 <span className="font-medium">{userName}</span>
-                <span className="text-xs text-gray-500">Administrator</span>
+                <span className="text-xs text-gray-500">
+                  {userRole === "admin" ? "Administrator" : "Staff"}
+                </span>
               </div>
               <ChevronDown className="h-4 w-4 text-gray-500" />
             </Button>

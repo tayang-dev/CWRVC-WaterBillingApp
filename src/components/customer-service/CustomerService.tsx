@@ -5,6 +5,7 @@ import { PlusCircle } from "lucide-react";
 import TicketSearch from "./TicketSearch";
 import TicketList from "./TicketList";
 import NewTicketForm from "./NewTicketForm";
+import ServiceRequests from "./ServiceRequests";
 
 interface Ticket {
   id: string;
@@ -384,6 +385,7 @@ const CustomerService = ({}: CustomerServiceProps) => {
               Ticket Details
             </TabsTrigger>
             <TabsTrigger value="new-ticket">New Ticket</TabsTrigger>
+            <TabsTrigger value="service-requests">Service Requests</TabsTrigger>
           </TabsList>
 
           <TabsContent value="all-tickets" className="space-y-6">
@@ -406,6 +408,10 @@ const CustomerService = ({}: CustomerServiceProps) => {
 
           <TabsContent value="new-ticket">
             <NewTicketForm onSubmit={handleNewTicketSubmit} />
+          </TabsContent>
+
+          <TabsContent value="service-requests">
+            <ServiceRequests />
           </TabsContent>
         </Tabs>
       </div>

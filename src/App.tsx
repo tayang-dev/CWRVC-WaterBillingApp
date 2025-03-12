@@ -3,8 +3,13 @@ import { useRoutes, Routes, Route } from "react-router-dom";
 import Home from "./components/home";
 import routes from "tempo-routes";
 import ProtectedRoute from "./components/ProtectedRoute";
+import RoleBasedRoute from "./components/RoleBasedRoute";
 import AdminLayout from "./components/layout/AdminLayout";
 import PaymentManagement from "./components/payment/PaymentMangement";
+import CustomerSupport from "./components/chat/CustomerSupport";
+import UserManagement from "./components/users/UserManagement";
+import SettingsPage from "./components/settings/SettingPage";
+import BillingHistory from "./components/accounts/BillingHistory";
 
 // Lazy load components for better performance
 const Dashboard = lazy(() => import("./components/dashboard/Dashboard"));
@@ -43,33 +48,15 @@ function App() {
           <Route
             path="/accounts"
             element={
-              <ProtectedRoute>
+              <RoleBasedRoute allowedRoles={["admin"]}>
                 <AdminLayout>
                   <AccountsManagement />
                 </AdminLayout>
-              </ProtectedRoute>
+              </RoleBasedRoute>
             }
           />
-          <Route
-            path="/accounts/new"
-            element={
-              <ProtectedRoute>
-                <AdminLayout>
-                  <AccountsManagement initialView="list" />
-                </AdminLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/accounts/billing"
-            element={
-              <ProtectedRoute>
-                <AdminLayout>
-                  <AccountsManagement />
-                </AdminLayout>
-              </ProtectedRoute>
-            }
-          />
+
+          {/* Billing history route removed as requested */}
           <Route
             path="/payments"
             element={
@@ -82,41 +69,33 @@ function App() {
           />
 
           <Route
-            path="/customer-service"
+            path="/customer-support"
             element={
               <ProtectedRoute>
                 <AdminLayout>
-                  <CustomerService />
+                  <CustomerSupport />
                 </AdminLayout>
               </ProtectedRoute>
             }
           />
+
           <Route
-            path="/customer-service/tickets"
+            path="/users"
             element={
-              <ProtectedRoute>
+              <RoleBasedRoute allowedRoles={["admin"]}>
                 <AdminLayout>
-                  <CustomerService />
+                  <UserManagement />
                 </AdminLayout>
-              </ProtectedRoute>
+              </RoleBasedRoute>
             }
           />
+
           <Route
-            path="/customer-service/tickets/new"
+            path="/settings"
             element={
               <ProtectedRoute>
                 <AdminLayout>
-                  <CustomerService />
-                </AdminLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/customer-service/knowledge"
-            element={
-              <ProtectedRoute>
-                <AdminLayout>
-                  <CustomerService />
+                  <SettingsPage />
                 </AdminLayout>
               </ProtectedRoute>
             }

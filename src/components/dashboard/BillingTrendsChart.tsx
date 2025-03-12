@@ -101,7 +101,7 @@ const BillingTrendsChart: React.FC<BillingTrendsChartProps> = ({
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="month" />
                 <YAxis />
-                <Tooltip />
+                <Tooltip formatter={(value) => `₱${value}`} />
                 <Legend />
                 <Line
                   type="monotone"
@@ -134,7 +134,7 @@ const BillingTrendsChart: React.FC<BillingTrendsChartProps> = ({
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="month" />
                 <YAxis />
-                <Tooltip />
+                <Tooltip formatter={(value) => `₱${value}`} />
                 <Legend />
                 <Line
                   type="monotone"
@@ -155,7 +155,7 @@ const BillingTrendsChart: React.FC<BillingTrendsChartProps> = ({
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="month" />
                 <YAxis />
-                <Tooltip />
+                <Tooltip formatter={(value) => `₱${value}`} />
                 <Legend />
                 <Line
                   type="monotone"
@@ -176,7 +176,7 @@ const BillingTrendsChart: React.FC<BillingTrendsChartProps> = ({
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="month" />
                 <YAxis />
-                <Tooltip />
+                <Tooltip formatter={(value) => `₱${value}`} />
                 <Legend />
                 <Line
                   type="monotone"

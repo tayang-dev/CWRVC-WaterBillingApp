@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { PlusCircle, Users, FileText, Download } from "lucide-react";
+import { PlusCircle, Users, Download } from "lucide-react";
 import CustomerSearch from "./CustomerSearch";
 import CustomerList from "./CustomerList";
 import CustomerDetails from "./CustomerDetails";
@@ -125,56 +125,6 @@ const AccountsManagement = ({
     fetchCustomers();
   }, []);
 
-  // Mock billing history data
-  const billingHistory = [
-    {
-      id: "BILL-001",
-      date: "2023-04-01",
-      amount: 78.5,
-      status: "paid" as const,
-      dueDate: "2023-04-15",
-    },
-    {
-      id: "BILL-002",
-      date: "2023-05-01",
-      amount: 82.75,
-      status: "pending" as const,
-      dueDate: "2023-05-15",
-    },
-    {
-      id: "BILL-003",
-      date: "2023-06-01",
-      amount: 85.2,
-      status: "overdue" as const,
-      dueDate: "2023-06-15",
-    },
-  ];
-
-  // Mock payment tracking data
-  const paymentTracking = [
-    {
-      id: "PAY-001",
-      date: "2023-04-10",
-      amount: 78.5,
-      method: "Credit Card",
-      status: "completed" as const,
-    },
-    {
-      id: "PAY-002",
-      date: "2023-05-12",
-      amount: 82.75,
-      method: "Bank Transfer",
-      status: "processing" as const,
-    },
-    {
-      id: "PAY-003",
-      date: "2023-06-18",
-      amount: 85.2,
-      method: "Credit Card",
-      status: "failed" as const,
-    },
-  ];
-
   const handleSearch = async (query: string, filters: any) => {
     setSearchFilters({ query, filters });
     setLoading(true);
@@ -288,20 +238,13 @@ const AccountsManagement = ({
         <div className="bg-white rounded-lg shadow-sm overflow-hidden">
           <Tabs defaultValue="accounts" className="w-full">
             <div className="border-b px-6 py-3">
-              <TabsList className="grid w-full max-w-md grid-cols-2">
+              <TabsList className="grid w-full max-w-md grid-cols-1">
                 <TabsTrigger
                   value="accounts"
                   className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700"
                 >
                   <Users className="h-4 w-4 mr-2" />
                   Customer Accounts
-                </TabsTrigger>
-                <TabsTrigger
-                  value="reports"
-                  className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700"
-                >
-                  <FileText className="h-4 w-4 mr-2" />
-                  Reports
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -344,7 +287,6 @@ const AccountsManagement = ({
                         status: customerDetails.status,
                         joinDate: customerDetails.joinDate,
                       }}
-                      billingHistory={billingHistory}
                     />
                   )}
                 </div>
@@ -394,18 +336,6 @@ const AccountsManagement = ({
                   />
                 </div>
               )}
-            </TabsContent>
-
-            <TabsContent value="reports" className="p-6">
-              <div className="text-center py-12">
-                <h3 className="text-lg font-medium text-gray-700">
-                  Reports Feature Coming Soon
-                </h3>
-                <p className="text-gray-500 mt-2">
-                  This feature is currently under development. Check back later
-                  for billing reports, usage analytics, and more.
-                </p>
-              </div>
             </TabsContent>
           </Tabs>
         </div>

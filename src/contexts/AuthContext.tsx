@@ -12,12 +12,18 @@ interface AuthContextType {
   currentUser: User | null;
   loading: boolean;
   error: string | null;
-  login: (email: string, password: string) => Promise<User>;
+  userRole: "admin" | "staff" | null;
+  login: (
+    email: string,
+    password: string,
+    role: "admin" | "staff",
+  ) => Promise<User>;
   logout: () => Promise<void>;
   register: (
     email: string,
     password: string,
     displayName: string,
+    role: "admin" | "staff",
   ) => Promise<User>;
   forgotPassword: (email: string) => Promise<void>;
   clearError: () => void;
@@ -39,20 +45,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<"admin" | "staff" | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
+
+      if (user) {
+        try {
+          // Get user role from localStorage
+          const savedRole = localStorage.getItem("userRole");
+          if (savedRole === "admin" || savedRole === "staff") {
+            setUserRole(savedRole);
+          } else {
+            // Default to admin if no role is found
+            setUserRole("admin");
+          }
+        } catch (error) {
+          console.error("Error getting user role:", error);
+          setUserRole("admin"); // Default fallback
+        }
+      } else {
+        setUserRole(null);
+      }
+
       setLoading(false);
     });
 
     return unsubscribe;
   }, []);
 
-  const login = async (email: string, password: string) => {
+  const login = async (
+    email: string,
+    password: string,
+    role: "admin" | "staff",
+  ) => {
     setLoading(true);
     try {
       const user = await signIn(email, password);
+      setUserRole(role);
+      localStorage.setItem("userRole", role);
       setError(null);
       return user;
     } catch (err: any) {
@@ -67,6 +99,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     setLoading(true);
     try {
       await signOut();
+      setUserRole(null);
+      localStorage.removeItem("userRole");
       setError(null);
     } catch (err: any) {
       setError(err.message || "Failed to logout");
@@ -80,10 +114,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     email: string,
     password: string,
     displayName: string,
+    role: "admin" | "staff",
   ) => {
     setLoading(true);
     try {
       const user = await signUp(email, password, displayName);
+      setUserRole(role);
+      localStorage.setItem("userRole", role);
       setError(null);
       return user;
     } catch (err: any) {
@@ -115,6 +152,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     currentUser,
     loading,
     error,
+    userRole,
     login,
     logout,
     register,

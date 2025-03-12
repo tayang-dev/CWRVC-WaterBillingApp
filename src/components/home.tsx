@@ -10,11 +10,15 @@ const Home = () => {
   const [loginError, setLoginError] = useState("");
   const navigate = useNavigate();
 
-  const handleLogin = async (values: { email: string; password: string }) => {
+  const handleLogin = async (values: {
+    email: string;
+    password: string;
+    role: "admin" | "staff";
+  }) => {
     setIsLoading(true);
     setLoginError("");
     try {
-      await login(values.email, values.password);
+      await login(values.email, values.password, values.role);
       navigate("/dashboard");
     } catch (err: any) {
       console.error("Login error:", err);

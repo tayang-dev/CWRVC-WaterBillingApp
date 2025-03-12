@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -11,6 +12,7 @@ import {
   ChevronRight,
   Droplets,
   CreditCard,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -109,6 +111,7 @@ interface SidebarProps {
 const Sidebar = ({ className = "" }: SidebarProps) => {
   const location = useLocation();
   const [openSection, setOpenSection] = useState<string | null>("accounts");
+  const { userRole } = useAuth();
 
   const toggleSection = (section: string) => {
     setOpenSection(openSection === section ? null : section);
@@ -124,7 +127,7 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
       <div className="p-4 border-b border-gray-200">
         <div className="flex items-center">
           <Droplets className="h-8 w-8 text-blue-600 mr-2" />
-          <h1 className="text-xl font-bold text-blue-800">CWRVC - Water Billing App</h1>
+          <h1 className="text-xl font-bold text-blue-800">Water Billing</h1>
         </div>
         <p className="text-xs text-gray-500 mt-1">Admin Portal</p>
       </div>
@@ -137,20 +140,22 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
           isActive={location.pathname === "/dashboard"}
         />
 
-        <SidebarItem
-          icon={<Users className="h-5 w-5" />}
-          label="Accounts Management"
-          path="/accounts"
-          isActive={location.pathname.startsWith("/accounts")}
-          hasSubItems={true}
-          isOpen={openSection === "accounts"}
-          onClick={() => toggleSection("accounts")}
-          subItems={[
-            { label: "All Accounts", path: "/accounts" },
-            { label: "Add New Account", path: "/accounts/new" },
-            { label: "Billing History", path: "/accounts/billing" },
-          ]}
-        />
+        {userRole === "admin" && (
+          <>
+            <SidebarItem
+              icon={<Users className="h-5 w-5" />}
+              label="Accounts Management"
+              path="/accounts"
+              isActive={location.pathname.startsWith("/accounts")}
+            />
+            <SidebarItem
+              icon={<Users className="h-5 w-5" />}
+              label="User Management"
+              path="/users"
+              isActive={location.pathname.startsWith("/users")}
+            />
+          </>
+        )}
 
         <SidebarItem
           icon={<CreditCard className="h-5 w-5" />}
@@ -162,17 +167,11 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
         <SidebarItem
           icon={<MessageSquare className="h-5 w-5" />}
           label="Customer Service"
-          path="/customer-service"
-          isActive={location.pathname.startsWith("/customer-service")}
-          hasSubItems={true}
-          isOpen={openSection === "customer-service"}
-          onClick={() => toggleSection("customer-service")}
-          subItems={[
-            { label: "Support Tickets", path: "/customer-service/tickets" },
-            { label: "New Ticket", path: "/customer-service/tickets/new" },
-            { label: "Knowledge Base", path: "/customer-service/knowledge" },
-          ]}
+          path="/customer-support"
+          isActive={location.pathname.startsWith("/customer-support")}
         />
+
+        {/* Billing history removed as requested */}
 
         <SidebarItem
           icon={<Settings className="h-5 w-5" />}

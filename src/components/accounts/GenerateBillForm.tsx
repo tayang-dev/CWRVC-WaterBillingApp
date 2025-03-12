@@ -80,6 +80,8 @@ const GenerateBillForm: React.FC<GenerateBillFormProps> = ({
 
       const billData = {
         customerId,
+        customerName,
+        accountNumber,
         date: new Date().toISOString().split("T")[0],
         amount: parseFloat(data.amount),
         status: "pending",
@@ -100,6 +102,11 @@ const GenerateBillForm: React.FC<GenerateBillFormProps> = ({
           lastBillingDate: new Date().toISOString().split("T")[0],
           amountDue: parseFloat(data.amount),
         });
+
+        // Send email notification (mock)
+        console.log(
+          `Email notification sent to ${customerName} for bill ${docRef.id}`,
+        );
 
         onSubmit(data);
       } catch (firestoreError: any) {
@@ -156,7 +163,7 @@ const GenerateBillForm: React.FC<GenerateBillFormProps> = ({
               name="amount"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Amount ($)</FormLabel>
+                  <FormLabel>Amount (₱)</FormLabel>
                   <FormControl>
                     <Input type="number" step="0.01" {...field} />
                   </FormControl>

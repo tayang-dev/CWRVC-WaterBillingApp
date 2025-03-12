@@ -1,54 +1,12 @@
 import React from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  ArrowUpCircle,
-  ArrowDownCircle,
+  ArrowUpRight,
+  ArrowDownRight,
   Users,
-  DollarSign,
-  Droplets,
+  CreditCard,
+  Clock,
+  Droplet,
 } from "lucide-react";
-
-interface KpiCardProps {
-  title: string;
-  value: string;
-  change?: string;
-  isPositive?: boolean;
-  icon?: React.ReactNode;
-}
-
-const KpiCard = ({
-  title = "Metric",
-  value = "0",
-  change = "+0%",
-  isPositive = true,
-  icon = <DollarSign className="h-5 w-5" />,
-}: KpiCardProps) => {
-  return (
-    <Card className="bg-white">
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          {title}
-        </CardTitle>
-        <div className="rounded-full bg-blue-50 p-2 text-blue-600">{icon}</div>
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
-        <div className="flex items-center mt-1">
-          {isPositive ? (
-            <ArrowUpCircle className="h-4 w-4 text-green-500 mr-1" />
-          ) : (
-            <ArrowDownCircle className="h-4 w-4 text-red-500 mr-1" />
-          )}
-          <span
-            className={`text-sm ${isPositive ? "text-green-500" : "text-red-500"}`}
-          >
-            {change}
-          </span>
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
 
 interface KpiCardsProps {
   totalCustomers?: string;
@@ -61,47 +19,130 @@ interface KpiCardsProps {
   consumptionChange?: string;
 }
 
-const KpiCards = ({
+const KpiCards: React.FC<KpiCardsProps> = ({
   totalCustomers = "1,245",
-  totalRevenue = "$48,352",
-  pendingPayments = "$12,430",
+  totalRevenue = "₱48,352",
+  pendingPayments = "₱12,430",
   waterConsumption = "845,210 gal",
   customerGrowth = "+5.2%",
   revenueGrowth = "+10.5%",
   pendingChange = "+2.4%",
   consumptionChange = "-3.1%",
-}: KpiCardsProps) => {
+}) => {
   return (
-    <div className="w-full bg-white p-4 rounded-lg">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard
-          title="Total Customers"
-          value={totalCustomers}
-          change={customerGrowth}
-          isPositive={true}
-          icon={<Users className="h-5 w-5" />}
-        />
-        <KpiCard
-          title="Total Revenue"
-          value={totalRevenue}
-          change={revenueGrowth}
-          isPositive={true}
-          icon={<DollarSign className="h-5 w-5" />}
-        />
-        <KpiCard
-          title="Pending Payments"
-          value={pendingPayments}
-          change={pendingChange}
-          isPositive={false}
-          icon={<DollarSign className="h-5 w-5" />}
-        />
-        <KpiCard
-          title="Water Consumption"
-          value={waterConsumption}
-          change={consumptionChange}
-          isPositive={false}
-          icon={<Droplets className="h-5 w-5" />}
-        />
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+        <div className="flex justify-between items-start">
+          <div>
+            <p className="text-sm font-medium text-gray-500 mb-1">
+              Total Customers
+            </p>
+            <h3 className="text-2xl font-bold text-gray-900">
+              {totalCustomers}
+            </h3>
+          </div>
+          <div className="p-2 bg-blue-50 rounded-full">
+            <Users className="h-6 w-6 text-blue-500" />
+          </div>
+        </div>
+        <div className="mt-4 flex items-center">
+          <span
+            className={`text-xs font-medium ${customerGrowth.startsWith("+") ? "text-green-600" : "text-red-600"}`}
+          >
+            {customerGrowth}
+          </span>
+          {customerGrowth.startsWith("+") ? (
+            <ArrowUpRight className="h-3 w-3 text-green-600 ml-1" />
+          ) : (
+            <ArrowDownRight className="h-3 w-3 text-red-600 ml-1" />
+          )}
+          <span className="text-xs text-gray-500 ml-1.5">from last month</span>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+        <div className="flex justify-between items-start">
+          <div>
+            <p className="text-sm font-medium text-gray-500 mb-1">
+              Total Revenue
+            </p>
+            <h3 className="text-2xl font-bold text-gray-900">{totalRevenue}</h3>
+          </div>
+          <div className="p-2 bg-green-50 rounded-full">
+            <CreditCard className="h-6 w-6 text-green-500" />
+          </div>
+        </div>
+        <div className="mt-4 flex items-center">
+          <span
+            className={`text-xs font-medium ${revenueGrowth.startsWith("+") ? "text-green-600" : "text-red-600"}`}
+          >
+            {revenueGrowth}
+          </span>
+          {revenueGrowth.startsWith("+") ? (
+            <ArrowUpRight className="h-3 w-3 text-green-600 ml-1" />
+          ) : (
+            <ArrowDownRight className="h-3 w-3 text-red-600 ml-1" />
+          )}
+          <span className="text-xs text-gray-500 ml-1.5">from last month</span>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+        <div className="flex justify-between items-start">
+          <div>
+            <p className="text-sm font-medium text-gray-500 mb-1">
+              Pending Payments
+            </p>
+            <h3 className="text-2xl font-bold text-gray-900">
+              {pendingPayments}
+            </h3>
+          </div>
+          <div className="p-2 bg-yellow-50 rounded-full">
+            <Clock className="h-6 w-6 text-yellow-500" />
+          </div>
+        </div>
+        <div className="mt-4 flex items-center">
+          <span
+            className={`text-xs font-medium ${pendingChange.startsWith("+") ? "text-red-600" : "text-green-600"}`}
+          >
+            {pendingChange}
+          </span>
+          {pendingChange.startsWith("+") ? (
+            <ArrowUpRight className="h-3 w-3 text-red-600 ml-1" />
+          ) : (
+            <ArrowDownRight className="h-3 w-3 text-green-600 ml-1" />
+          )}
+          <span className="text-xs text-gray-500 ml-1.5">from last month</span>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+        <div className="flex justify-between items-start">
+          <div>
+            <p className="text-sm font-medium text-gray-500 mb-1">
+              Water Consumption
+            </p>
+            <h3 className="text-2xl font-bold text-gray-900">
+              {waterConsumption}
+            </h3>
+          </div>
+          <div className="p-2 bg-blue-50 rounded-full">
+            <Droplet className="h-6 w-6 text-blue-500" />
+          </div>
+        </div>
+        <div className="mt-4 flex items-center">
+          <span
+            className={`text-xs font-medium ${consumptionChange.startsWith("-") ? "text-green-600" : "text-red-600"}`}
+          >
+            {consumptionChange}
+          </span>
+          {consumptionChange.startsWith("-") ? (
+            <ArrowDownRight className="h-3 w-3 text-green-600 ml-1" />
+          ) : (
+            <ArrowUpRight className="h-3 w-3 text-red-600 ml-1" />
+          )}
+          <span className="text-xs text-gray-500 ml-1.5">from last month</span>
+        </div>
       </div>
     </div>
   );
