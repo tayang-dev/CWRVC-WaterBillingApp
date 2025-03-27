@@ -1,3 +1,4 @@
+// Updated CustomerSearch.tsx
 import React, { useState } from "react";
 import { Search, Filter, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -17,9 +18,8 @@ interface CustomerSearchProps {
 }
 
 interface CustomerSearchFilters {
-  status: string;
-  billingCycle: string;
-  location: string;
+  site: string;
+  isSenior: string;
 }
 
 const CustomerSearch = ({
@@ -29,9 +29,8 @@ const CustomerSearch = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<CustomerSearchFilters>({
-    status: "all",
-    billingCycle: "all",
-    location: "all",
+    site: "all",
+    isSenior: "all",
   });
 
   const handleSearch = () => {
@@ -40,7 +39,7 @@ const CustomerSearch = ({
 
   const handleFilterChange = (
     key: keyof CustomerSearchFilters,
-    value: string,
+    value: string
   ) => {
     setFilters((prev) => ({
       ...prev,
@@ -54,9 +53,8 @@ const CustomerSearch = ({
 
   const clearFilters = () => {
     setFilters({
-      status: "all",
-      billingCycle: "all",
-      location: "all",
+      site: "all",
+      isSenior: "all",
     });
   };
 
@@ -71,7 +69,7 @@ const CustomerSearch = ({
             <div className="relative flex-grow">
               <Input
                 type="text"
-                placeholder="Search by name, account number, or email..."
+                placeholder="Search by name, account number, or phone..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10 pr-4 py-2 w-full"
@@ -109,71 +107,41 @@ const CustomerSearch = ({
                   Clear All
                 </Button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-700">
-                    Status
+                    Site
                   </label>
                   <Select
-                    value={filters.status}
-                    onValueChange={(value) =>
-                      handleFilterChange("status", value)
-                    }
+                    value={filters.site}
+                    onValueChange={(value) => handleFilterChange("site", value)}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select status" />
+                      <SelectValue placeholder="Select site" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Statuses</SelectItem>
-                      <SelectItem value="active">Active</SelectItem>
-                      <SelectItem value="inactive">Inactive</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="overdue">Overdue</SelectItem>
+                      <SelectItem value="all">All Sites</SelectItem>
+                      <SelectItem value="site1">Site 1</SelectItem>
+                      <SelectItem value="site2">Site 2</SelectItem>
+                      <SelectItem value="site3">Site 3</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-700">
-                    Billing Cycle
+                    Senior Citizen
                   </label>
                   <Select
-                    value={filters.billingCycle}
-                    onValueChange={(value) =>
-                      handleFilterChange("billingCycle", value)
-                    }
+                    value={filters.isSenior}
+                    onValueChange={(value) => handleFilterChange("isSenior", value)}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select billing cycle" />
+                      <SelectValue placeholder="Select senior status" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Cycles</SelectItem>
-                      <SelectItem value="monthly">Monthly</SelectItem>
-                      <SelectItem value="quarterly">Quarterly</SelectItem>
-                      <SelectItem value="biannual">Bi-Annual</SelectItem>
-                      <SelectItem value="annual">Annual</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-gray-700">
-                    Location
-                  </label>
-                  <Select
-                    value={filters.location}
-                    onValueChange={(value) =>
-                      handleFilterChange("location", value)
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select location" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Locations</SelectItem>
-                      <SelectItem value="north">North District</SelectItem>
-                      <SelectItem value="south">South District</SelectItem>
-                      <SelectItem value="east">East District</SelectItem>
-                      <SelectItem value="west">West District</SelectItem>
-                      <SelectItem value="central">Central District</SelectItem>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="true">Senior Citizen</SelectItem>
+                      <SelectItem value="false">Not Senior</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

@@ -116,20 +116,37 @@ const CustomerList: React.FC<CustomerListProps> = ({
   useEffect(() => {
     fetchCustomers();
   }, []);
-
+  
   const fetchCustomers = async () => {
     try {
       const customersCollection = collection(db, "customers");
       const customersSnapshot = await getDocs(customersCollection);
+  
+      // Fetch updatedPayments collection
+      const paymentsCollection = collection(db, "updatedPayments");
+      const paymentsSnapshot = await getDocs(paymentsCollection);
+      
+      // Create a map of accountNumber -> amount from updatedPayments
+      const paymentsMap: { [key: string]: number } = {};
+      paymentsSnapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.accountNumber && data.amount) {
+          paymentsMap[data.accountNumber] = data.amount;
+        }
+      });
   
       let customersList = await Promise.all(
         customersSnapshot.docs.map(async (customerDoc) => {
           const customerData = customerDoc.data();
           const accountNumber = customerData.accountNumber;
   
-          // Fetch the latest bill from `bills/{accountNumber}/records/`
           let latestAmountDue = 0;
-          if (accountNumber) {
+  
+          // Check if amount is available in updatedPayments
+          if (accountNumber && paymentsMap[accountNumber] !== undefined) {
+            latestAmountDue = paymentsMap[accountNumber];
+          } else if (accountNumber) {
+            // Fetch the latest bill from `bills/{accountNumber}/records/`
             const billsCollection = collection(db, "bills", accountNumber, "records");
             const billsQuery = query(billsCollection, orderBy("date", "desc"));
             const billsSnapshot = await getDocs(billsQuery);
@@ -143,7 +160,7 @@ const CustomerList: React.FC<CustomerListProps> = ({
           return {
             id: customerDoc.id,
             name: customerData.name,
-            email: customerData.email,
+            email: customerData.email || customerData.phone, // Use phone if email is missing
             address: customerData.address,
             accountNumber: accountNumber,
             status: customerData.status,
@@ -161,6 +178,8 @@ const CustomerList: React.FC<CustomerListProps> = ({
       console.error("Error fetching customers:", error);
     }
   };
+  
+  
 
   // Edit Customer Handler
   const handleEditCustomer = async (data: z.infer<typeof formSchema>) => {
@@ -437,7 +456,7 @@ const CustomerList: React.FC<CustomerListProps> = ({
             <TableRow>
               <TableHead>Account #</TableHead>
               <TableHead>Name</TableHead>
-              <TableHead>Email</TableHead>
+              <TableHead>Email/Phone</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Last Billing</TableHead>
               <TableHead>Amount Due</TableHead>

@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { PlusCircle, Users, Download } from "lucide-react";
-import CustomerSearch from "./CustomerSearch";
 import CustomerList from "./CustomerList";
 import CustomerDetails from "./CustomerDetails";
 import AddCustomerForm from "./AddCustomerForm";
@@ -90,160 +89,102 @@ const AccountsManagement = ({
 
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedSite, setSelectedSite] = useState<string>("all");
+  const [selectedSenior, setSelectedSenior] = useState<string>("all");
 
-  // Fetch customers from Firestore
-  useEffect(() => {
-    const fetchCustomers = async () => {
-      try {
-        const { collection, getDocs } = await import("firebase/firestore");
-        const { db } = await import("../../lib/firebase");
 
-        const customersCollection = collection(db, "customers");
-        const customersSnapshot = await getDocs(customersCollection);
-
-        const customersList = customersSnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-          status: doc.data().status || "active",
-          lastBillingDate:
-            doc.data().lastBillingDate ||
-            new Date().toISOString().split("T")[0],
-          amountDue: doc.data().amountDue || 0,
-        }));
-
-        setCustomers(customersList);
-      } catch (error) {
-        console.error("Error fetching customers:", error);
-        // Fallback to mock data if there's an error
-        setCustomers([
-          {
-            id: "1",
-            name: "John Doe",
-            email: "john.doe@example.com",
-            phone: "(555) 123-4567",
-            address: "123 Main St, Anytown, USA 12345",
-            accountNumber: "WB-10001",
-            status: "active",
-            lastBillingDate: "2023-04-15",
-            amountDue: 78.5,
-            joinDate: "2022-05-15",
-          },
-          {
-            id: "2",
-            name: "Jane Smith",
-            email: "jane.smith@example.com",
-            phone: "(555) 987-6543",
-            address: "456 Oak Ave, Somewhere, USA 67890",
-            accountNumber: "WB-10002",
-            status: "active",
-            lastBillingDate: "2023-04-15",
-            amountDue: 65.75,
-            joinDate: "2022-06-20",
-          },
-          {
-            id: "3",
-            name: "Robert Johnson",
-            email: "robert.johnson@example.com",
-            phone: "(555) 456-7890",
-            address: "789 Pine Rd, Elsewhere, USA 54321",
-            accountNumber: "WB-10003",
-            status: "inactive",
-            lastBillingDate: "2023-03-15",
-            amountDue: 0,
-            joinDate: "2022-03-10",
-          },
-          {
-            id: "4",
-            name: "Sarah Williams",
-            email: "sarah.williams@example.com",
-            phone: "(555) 234-5678",
-            address: "101 Cedar Ln, Nowhere, USA 13579",
-            accountNumber: "WB-10004",
-            status: "pending",
-            lastBillingDate: "2023-04-15",
-            amountDue: 92.25,
-            joinDate: "2022-07-05",
-          },
-          {
-            id: "5",
-            name: "Michael Brown",
-            email: "michael.brown@example.com",
-            phone: "(555) 876-5432",
-            address: "202 Elm St, Anyplace, USA 24680",
-            accountNumber: "WB-10005",
-            status: "active",
-            lastBillingDate: "2023-04-15",
-            amountDue: 45.0,
-            joinDate: "2022-04-25",
-          },
-        ]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchCustomers();
-  }, []);
-
-  const handleSearch = async (query: string, filters: any) => {
-    setSearchFilters({ query, filters });
-    setLoading(true);
-
+ // Fetch customers from Firestore with site and senior filters
+useEffect(() => {
+  const fetchCustomers = async () => {
     try {
-      // Search customers in Firestore
-      const {
-        collection,
-        query: firestoreQuery,
-        where,
-        getDocs,
-      } = await import("firebase/firestore");
+      const { collection, getDocs, where, query } = await import("firebase/firestore");
       const { db } = await import("../../lib/firebase");
 
       let customersRef = collection(db, "customers");
       let constraints = [];
 
-      // Add filters if they exist
-      if (filters.status && filters.status !== "all") {
-        constraints.push(where("status", "==", filters.status));
+      if (selectedSite !== "all") {
+        constraints.push(where("site", "==", selectedSite));
       }
 
-      if (filters.billingCycle && filters.billingCycle !== "all") {
-        constraints.push(where("billingCycle", "==", filters.billingCycle));
+      if (selectedSenior !== "all") {
+        const isSeniorBoolean = selectedSenior === "true"; // Convert to boolean
+        constraints.push(where("isSenior", "==", isSeniorBoolean));
       }
 
-      if (filters.location && filters.location !== "all") {
-        constraints.push(where("location", "==", filters.location));
-      }
+      const q = constraints.length > 0 ? query(customersRef, ...constraints) : customersRef;
+      const customersSnapshot = await getDocs(q);
 
-      const q =
-        constraints.length > 0
-          ? firestoreQuery(customersRef, ...constraints)
-          : firestoreQuery(customersRef);
+      const customersList = customersSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        status: doc.data().status || "active",
+        lastBillingDate: doc.data().lastBillingDate || new Date().toISOString().split("T")[0],
+        amountDue: doc.data().amountDue || 0,
+      }));
 
-      const querySnapshot = await getDocs(q);
-
-      // Filter results by search term (client-side)
-      const searchLower = query.toLowerCase();
-      const filteredCustomers = querySnapshot.docs
-        .map((doc) => ({ id: doc.id, ...(doc.data() as any) }))
-        .filter(
-          (customer) =>
-            !searchLower ||
-            customer.name?.toLowerCase().includes(searchLower) ||
-            customer.email?.toLowerCase().includes(searchLower) ||
-            customer.accountNumber?.toLowerCase().includes(searchLower) ||
-            customer.phone?.toLowerCase().includes(searchLower),
-        );
-
-      if (filteredCustomers.length > 0) {
-        setCustomers(filteredCustomers);
-      }
+      setCustomers(customersList);
     } catch (error) {
-      console.error("Error searching customers:", error);
+      console.error("Error fetching customers:", error);
     } finally {
       setLoading(false);
     }
   };
+
+  fetchCustomers();
+}, [selectedSite, selectedSenior]); // Re-fetch when filters change
+
+
+const handleSearch = async (query: string, filters: any) => {
+  setSearchFilters({ query, filters });
+  setLoading(true);
+
+  try {
+    const { collection, query: firestoreQuery, where, getDocs } = await import("firebase/firestore");
+    const { db } = await import("../../lib/firebase");
+
+    let customersRef = collection(db, "customers");
+    let constraints = [];
+
+    // Apply status filter
+    if (filters.status && filters.status !== "all") {
+      constraints.push(where("status", "==", filters.status));
+    }
+
+    // Apply site filter
+    if (filters.site && filters.site !== "all") {
+      constraints.push(where("site", "==", filters.site));
+    }
+
+    // Apply senior filter
+    if (filters.isSenior && filters.isSenior !== "all") {
+      const isSeniorBoolean = filters.isSenior === "true";
+      constraints.push(where("isSenior", "==", isSeniorBoolean));
+    }
+
+    const q = constraints.length > 0 ? firestoreQuery(customersRef, ...constraints) : firestoreQuery(customersRef);
+    const querySnapshot = await getDocs(q);
+
+    // Client-side filtering for search query
+    const searchLower = query.toLowerCase();
+    const filteredCustomers = querySnapshot.docs
+      .map((doc) => ({ id: doc.id, ...(doc.data() as any) }))
+      .filter(
+        (customer) =>
+          !searchLower ||
+          customer.name?.toLowerCase().includes(searchLower) ||
+          customer.email?.toLowerCase().includes(searchLower) ||
+          customer.accountNumber?.toLowerCase().includes(searchLower) ||
+          customer.phone?.toLowerCase().includes(searchLower)
+      );
+
+    setCustomers(filteredCustomers);
+  } catch (error) {
+    console.error("Error searching customers:", error);
+  } finally {
+    setLoading(false);
+  }
+};
 
   // Function to handle export button click
   const handleExportData = () => {
@@ -318,7 +259,7 @@ const AccountsManagement = ({
             <TabsContent value="accounts" className="p-0">
               {view === "list" ? (
                 <div className="space-y-6 p-6">
-                  <CustomerSearch onSearch={handleSearch} />
+              
                   {loading ? (
                     <div className="flex justify-center items-center h-64">
                       <p>Loading customers...</p>
