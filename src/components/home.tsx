@@ -30,11 +30,11 @@ const Home = () => {
         setLoginError("Invalid email or password. Please try again.");
       } else if (err.code === "auth/too-many-requests") {
         setLoginError(
-          "Too many failed login attempts. Please try again later or reset your password.",
+          "Too many failed login attempts. Please try again later or reset your password."
         );
       } else {
         setLoginError(
-          err.message || "Failed to login. Please check your credentials.",
+          err.message || "Failed to login. Please check your credentials."
         );
       }
     } finally {
@@ -55,30 +55,47 @@ const Home = () => {
   };
 
   return (
-    <div className="min-h-screen w-full bg-gray-50 flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md mb-8 flex flex-col items-center">
-        <div className="flex items-center justify-center mb-4">
-          <Droplets className="h-12 w-12 text-blue-600 mr-2" />
-          <h1 className="text-3xl font-bold text-blue-800">Water Billing</h1>
+    <div className="relative min-h-screen w-full">
+      {/* Background Image */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{
+          backgroundImage: "url('/src/assets/background.jpg')",
+        }}
+      ></div>
+
+      {/* Gradient Overlay for readability */}
+    
+
+      {/* Main Content */}
+      <div className="relative z-10 flex items-center justify-end min-h-screen p-6 sm:p-8">
+        {/* Login Card */}
+        <div className="w-full max-w-md bg-white/90 backdrop-blur-sm rounded-xl shadow-2xl p-8">
+          <div className="flex flex-col items-center mb-6">
+            <div className="flex items-center justify-center mb-3">
+              <Droplets className="h-14 w-14 text-blue-600 mr-2" />
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-blue-800">
+                CWRVC Water Billing
+              </h1>
+            </div>
+            <p className="text-gray-600 text-sm sm:text-base text-center">
+              Secure access for authorized personnel only
+            </p>
+          </div>
+
+          <LoginForm
+            onSubmit={handleLogin}
+            onForgotPassword={handleForgotPassword}
+            isLoading={isLoading}
+            error={loginError || error || ""}
+          />
+
+          <div className="mt-8 text-center text-xs text-gray-500">
+            <p>
+              &copy; {new Date().getFullYear()} Water Utility Company. All rights reserved.
+            </p>
+          </div>
         </div>
-        <p className="text-gray-600 text-center">
-          Admin Portal for Water Utility Billing Management
-        </p>
-      </div>
-
-      <LoginForm
-        onSubmit={handleLogin}
-        onForgotPassword={handleForgotPassword}
-        isLoading={isLoading}
-        error={loginError || error || ""}
-      />
-
-      <div className="mt-8 text-center text-sm text-gray-500">
-        <p>Secure access for authorized personnel only</p>
-        <p className="mt-2">
-          &copy; {new Date().getFullYear()} Water Utility Company. All rights
-          reserved.
-        </p>
       </div>
     </div>
   );

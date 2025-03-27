@@ -9,7 +9,6 @@ import PaymentManagement from "./components/payment/PaymentMangement";
 import CustomerSupport from "./components/chat/CustomerSupport";
 import UserManagement from "./components/users/UserManagement";
 import SettingsPage from "./components/settings/SettingPage";
-import BillingHistory from "./components/accounts/BillingHistory";
 
 // Lazy load components for better performance
 const Dashboard = lazy(() => import("./components/dashboard/Dashboard"));
@@ -18,6 +17,12 @@ const AccountsManagement = lazy(
 );
 const CustomerService = lazy(
   () => import("./components/customer-service/CustomerService"),
+);
+const RequestsPage = lazy(
+  () => import("./components/requests/Requests"),
+);
+const ReportsPage = lazy(
+  () => import("./components/reports/Reports"),
 );
 
 function App() {
@@ -56,7 +61,6 @@ function App() {
             }
           />
 
-          {/* Billing history route removed as requested */}
           <Route
             path="/payments"
             element={
@@ -87,6 +91,28 @@ function App() {
                   <UserManagement />
                 </AdminLayout>
               </RoleBasedRoute>
+            }
+          />
+
+          <Route
+            path="/requests"
+            element={
+              <ProtectedRoute>
+                <AdminLayout>
+                  <RequestsPage />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports"
+            element={
+              <ProtectedRoute>
+                <AdminLayout>
+                  <ReportsPage />
+                </AdminLayout>
+              </ProtectedRoute>
             }
           />
 

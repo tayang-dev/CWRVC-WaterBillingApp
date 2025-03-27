@@ -10,15 +10,9 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "../ui/dialog";
+import { collection, query, orderBy, getDocs } from "firebase/firestore";
+import { db } from "../../lib/firebase"; // Ensure correct path to `firebase.ts`
+
 import {
   FileText,
   Mail,
@@ -29,7 +23,6 @@ import {
   Download,
   Send,
 } from "lucide-react";
-import GenerateBillForm from "./GenerateBillForm";
 
 interface CustomerDetailsProps {
   customer?: {
@@ -41,6 +34,9 @@ interface CustomerDetailsProps {
     accountNumber: string;
     status: "active" | "inactive" | "pending";
     joinDate: string;
+    lastBillingDate?: string;
+    lastReading?: number;
+    amountDue?: number;
   };
   billingHistory?: Array<{
     id: string;
@@ -48,13 +44,7 @@ interface CustomerDetailsProps {
     amount: number;
     status: "paid" | "pending" | "overdue";
     dueDate: string;
-  }>;
-  paymentTracking?: Array<{
-    id: string;
-    date: string;
-    amount: number;
-    method: string;
-    status: "completed" | "processing" | "failed";
+    waterUsage?: number;
   }>;
 }
 
@@ -68,106 +58,85 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
     accountNumber: "ACC-10001",
     status: "active",
     joinDate: "2022-05-15",
+    lastBillingDate: "",
+    lastReading: 0,
+    amountDue: 0,
   },
   billingHistory = [],
-  paymentTracking = [],
 }) => {
   const [isGenerateBillDialogOpen, setIsGenerateBillDialogOpen] = useState(false);
   const [customerBills, setCustomerBills] = useState(billingHistory);
   const [loading, setLoading] = useState(true);
+  const [accountSummary, setAccountSummary] = useState({
+    currentBalance: 0,
+    dueDate: "",
+    lastPayment: 0,
+    lastPaymentDate: "",
+    averageUsage: 0,
+  });
 
   useEffect(() => {
     const fetchCustomerBills = async () => {
-      if (!customer?.id) return;
-
+      if (!customer?.accountNumber) return;
+    
+      setLoading(true);
       try {
-        const { collection, query, where, orderBy, getDocs } = await import("firebase/firestore");
-        const { db } = await import("../../lib/firebase");
-
-        const billsQuery = query(
-          collection(db, "bills"),
-          where("customerId", "==", customer.id),
-          orderBy("date", "desc")
-        );
-
+        const billsCollection = collection(db, "bills", customer.accountNumber, "records");
+        const billsQuery = query(billsCollection, orderBy("date", "desc"));
         const billsSnapshot = await getDocs(billsQuery);
-        const billsList = billsSnapshot.docs.map((doc) => {
-          const data = doc.data() as {
-            date?: string;
-            amount?: number;
-            status?: "pending" | "paid" | "overdue";
-            dueDate?: string;
-          };
+    
+        const fetchedBills = billsSnapshot.docs.map((doc) => {
+          const data = doc.data();
           return {
             id: doc.id,
             date: data.date || "",
             amount: data.amount || 0,
+            amountAfterDue: data.amountAfterDue || 0,
+            currentAmountDue: data.currentAmountDue ?? data.amount, // ✅ Ensure correct outstanding balance
             status: data.status || "pending",
             dueDate: data.dueDate || "",
+            billingPeriod: data.billingPeriod || "",
+            waterUsage: data.waterUsage || data.meterReading?.consumption || 0,
+            penalty: data.penalty || 0,
+            tax: data.tax || 0,
+            seniorDiscount: data.seniorDiscount || 0,
+            waterCharge: data.waterCharge || 0,
+            waterChargeBeforeTax: data.waterChargeBeforeTax || 0,
           };
         });
-
-        if (billsList.length > 0) {
-          setCustomerBills(billsList);
-        } else {
-          // Fallback to mock data if no bills found
-          setCustomerBills([
-            {
-              id: "BILL-001",
-              date: "2023-04-01",
-              amount: 78.5,
-              status: "paid",
-              dueDate: "2023-04-15",
-            },
-            {
-              id: "BILL-002",
-              date: "2023-05-01",
-              amount: 82.75,
-              status: "pending",
-              dueDate: "2023-05-15",
-            },
-            {
-              id: "BILL-003",
-              date: "2023-06-01",
-              amount: 85.2,
-              status: "overdue",
-              dueDate: "2023-06-15",
-            },
-          ]);
-        }
+    
+        setCustomerBills(fetchedBills);
+    
+        // **Calculate Account Summary**
+        const pendingBill = fetchedBills.find((bill) => bill.status === "pending" || bill.status === "overdue");
+        const lastPaidBill = fetchedBills.find((bill) => bill.status === "paid");
+        const last3Bills = fetchedBills.slice(0, 3);
+        const avgUsage = last3Bills.reduce((sum, bill) => sum + (bill.waterUsage || 0), 0) / (last3Bills.length || 1);
+    
+        setAccountSummary({
+          currentBalance: pendingBill ? pendingBill.currentAmountDue! : 0,
+          dueDate: pendingBill ? pendingBill.dueDate : "",
+          lastPayment: lastPaidBill ? lastPaidBill.amount : 0,
+          lastPaymentDate: lastPaidBill ? lastPaidBill.date : "",
+          averageUsage: avgUsage,
+        });
       } catch (error) {
         console.error("Error fetching customer bills:", error);
-        // Fallback to mock data on error
-        setCustomerBills([
-          {
-            id: "BILL-001",
-            date: "2023-04-01",
-            amount: 78.5,
-            status: "paid",
-            dueDate: "2023-04-15",
-          },
-          {
-            id: "BILL-002",
-            date: "2023-05-01",
-            amount: 82.75,
-            status: "pending",
-            dueDate: "2023-05-15",
-          },
-          {
-            id: "BILL-003",
-            date: "2023-06-01",
-            amount: 85.2,
-            status: "overdue",
-            dueDate: "2023-06-15",
-          },
-        ]);
+        setAccountSummary({
+          currentBalance: customer.amountDue || 0,
+          dueDate: "",
+          lastPayment: 0,
+          lastPaymentDate: "",
+          averageUsage: customer.lastReading || 0,
+        });
       } finally {
         setLoading(false);
       }
     };
+    
 
     fetchCustomerBills();
-  }, [customer?.id]);
+  }, [customer?.id, customer?.amountDue, customer?.lastReading]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -185,22 +154,13 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
         return <Badge className="bg-green-500">Paid</Badge>;
       case "overdue":
         return <Badge variant="destructive">Overdue</Badge>;
-      case "completed":
-        return <Badge className="bg-green-500">Completed</Badge>;
-      case "processing":
-        return (
-          <Badge variant="outline" className="text-blue-500 border-blue-500">
-            Processing
-          </Badge>
-        );
-      case "failed":
-        return <Badge variant="destructive">Failed</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
   };
 
   const formatDate = (dateString: string) => {
+    if (!dateString) return "N/A";
     const date = new Date(dateString);
     return date.toLocaleDateString("en-US", {
       year: "numeric",
@@ -225,38 +185,8 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
             <FileText className="mr-2 h-4 w-4" />
             Export
           </Button>
-          <Dialog
-            open={isGenerateBillDialogOpen}
-            onOpenChange={setIsGenerateBillDialogOpen}
-          >
-            <DialogTrigger asChild>
-              <Button size="sm" className="bg-blue-600 hover:bg-blue-700">
-                <CreditCard className="mr-2 h-4 w-4" />
-                Generate Bill
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Generate New Bill</DialogTitle>
-                <DialogDescription>
-                  Create a new bill for this customer. This will be sent to their email address.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="p-4">
-                <GenerateBillForm
-                  customerId={customer.id}
-                  customerName={customer.name}
-                  accountNumber={customer.accountNumber}
-                  onSubmit={() => {
-                    setIsGenerateBillDialogOpen(false);
-                    // Refresh customer bills after generating a new bill
-                    // Note: fetchCustomerBills function must be defined in this scope or handled accordingly.
-                  }}
-                  onCancel={() => setIsGenerateBillDialogOpen(false)}
-                />
-              </div>
-            </DialogContent>
-          </Dialog>
+          
+          
         </div>
       </div>
 
@@ -322,10 +252,12 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
                   <AlertCircle className="h-5 w-5 text-blue-700" />
                 </div>
                 <p className="text-2xl font-bold text-blue-700">
-                  {formatCurrency(85.2)}
+                  {formatCurrency(accountSummary.currentBalance)}
                 </p>
                 <p className="text-xs text-blue-600 mt-1">
-                  Due on {formatDate("2023-07-15")}
+                  {accountSummary.dueDate 
+                    ? `Due on ${formatDate(accountSummary.dueDate)}` 
+                    : "No pending bills"}
                 </p>
               </div>
 
@@ -337,10 +269,12 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
                   <CheckCircle className="h-5 w-5 text-green-700" />
                 </div>
                 <p className="text-2xl font-bold text-green-700">
-                  {formatCurrency(78.5)}
+                  {formatCurrency(accountSummary.lastPayment)}
                 </p>
                 <p className="text-xs text-green-600 mt-1">
-                  Received on {formatDate("2023-04-10")}
+                  {accountSummary.lastPaymentDate 
+                    ? `Received on ${formatDate(accountSummary.lastPaymentDate)}` 
+                    : "No payment history"}
                 </p>
               </div>
 
@@ -351,9 +285,11 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
                   </h3>
                   <Clock className="h-5 w-5 text-amber-700" />
                 </div>
-                <p className="text-2xl font-bold text-amber-700">2,450 gal</p>
+                <p className="text-2xl font-bold text-amber-700">
+                  {accountSummary.averageUsage.toFixed(1)} m³
+                </p>
                 <p className="text-xs text-amber-600 mt-1">
-                  Last 3 months average
+                  Recent billing period
                 </p>
               </div>
             </div>
@@ -380,6 +316,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
                       <th className="text-left py-3 px-4 font-medium">Bill ID</th>
                       <th className="text-left py-3 px-4 font-medium">Date</th>
                       <th className="text-left py-3 px-4 font-medium">Amount</th>
+                      <th className="text-left py-3 px-4 font-medium">Water Usage</th>
                       <th className="text-left py-3 px-4 font-medium">Due Date</th>
                       <th className="text-left py-3 px-4 font-medium">Status</th>
                       <th className="text-right py-3 px-4 font-medium">Actions</th>
@@ -388,7 +325,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
                   <tbody>
                     {loading ? (
                       <tr>
-                        <td colSpan={6} className="py-8 text-center text-gray-500">
+                        <td colSpan={7} className="py-8 text-center text-gray-500">
                           Loading billing history...
                         </td>
                       </tr>
@@ -398,6 +335,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
                           <td className="py-3 px-4">{bill.id}</td>
                           <td className="py-3 px-4">{formatDate(bill.date)}</td>
                           <td className="py-3 px-4">{formatCurrency(bill.amount)}</td>
+                          <td className="py-3 px-4">{bill.waterUsage ? `${bill.waterUsage} m³` : "N/A"}</td>
                           <td className="py-3 px-4">{formatDate(bill.dueDate)}</td>
                           <td className="py-3 px-4">{getStatusBadge(bill.status)}</td>
                           <td className="py-3 px-4 text-right">
@@ -412,7 +350,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={6} className="py-8 text-center text-gray-500">
+                        <td colSpan={7} className="py-8 text-center text-gray-500">
                           No billing history found
                         </td>
                       </tr>

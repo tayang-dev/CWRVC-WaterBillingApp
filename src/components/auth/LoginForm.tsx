@@ -190,7 +190,7 @@ const LoginForm = ({
       </CardContent>
       <CardFooter className="flex flex-col space-y-4 border-t px-6 py-4 bg-gray-50">
         <div className="text-center text-sm text-gray-600">
-          <p>Water Billing System - Admin Portal</p>
+          <p>Water Billing App - Admin Portal</p>
           <p className="mt-1 text-xs text-gray-500">
             &copy; {new Date().getFullYear()} Water Utility Company
           </p>

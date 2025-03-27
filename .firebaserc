@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "waterapp-ac2a4"
-  }
+  },
+  "targets": {
+    "waterapp-ac2a4": {
+      "storage": {
+        "default": [
+          "waterapp-ac2a4.appspot.com"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

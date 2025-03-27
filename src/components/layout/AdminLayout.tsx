@@ -27,7 +27,7 @@ const AdminLayout = ({
         <Header
           userName={userName}
           userAvatar={userAvatar}
-          unreadNotifications={unreadNotifications}
+          
         />
 
         {/* Content Area */}

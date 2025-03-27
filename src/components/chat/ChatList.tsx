@@ -2,21 +2,18 @@ import React, { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
+  CardDescription,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Search, User } from "lucide-react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 
 interface ChatCustomer {
-  // We’ll use the same interface, but now
-  // `id` and `accountNumber` will both refer to the doc.id from "chats"
   id: string;
   name: string;
   avatar?: string;
@@ -24,6 +21,10 @@ interface ChatCustomer {
   lastMessageTime: Date;
   unreadCount: number;
   accountNumber: string;
+  hasNewMessage: boolean;
+  hasNewImage: boolean;
+  lastMessageAdmin: string;
+  lastMessageUser: string;
 }
 
 interface ChatListProps {
@@ -42,57 +43,31 @@ const ChatList: React.FC<ChatListProps> = ({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchCustomersWithChat = async () => {
-      try {
-        // Fetch every doc in the "chats" collection.
-        // Each doc ID is treated as an account number.
-        const chatsSnapshot = await getDocs(collection(db, "chats"));
-
-        const customersList: ChatCustomer[] = [];
-        chatsSnapshot.docs.forEach((chatDoc) => {
-          // The doc.id here is the "accountNumber"
-          const accountNumber = chatDoc.id.trim();
-
-          customersList.push({
-            id: accountNumber,              // Use doc.id as the unique ID
-            name: `Account ${accountNumber}`, // Or just use accountNumber directly
-            avatar: "",                     // Optional: set a placeholder image
-            lastMessage: "Conversation active",
-            lastMessageTime: new Date(),
-            unreadCount: 0,
-            accountNumber,
-          });
-        });
-
-        setCustomers(customersList);
-      } catch (error) {
-        console.error("Error fetching chat accounts:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchCustomersWithChat();
+    // Subscribe to real-time updates from the "chats" collection.
+    const unsubscribe = onSnapshot(collection(db, "chats"), (snapshot) => {
+      const customersList: ChatCustomer[] = snapshot.docs.map((chatDoc) => {
+        const data = chatDoc.data();
+        const accountNumber = chatDoc.id.trim();
+        return {
+          id: accountNumber, // Use doc.id as unique ID
+          name: `Account ${accountNumber}`, // Adjust display name as needed
+          avatar: data.avatar || "", // Optionally stored avatar URL
+          lastMessage: data.lastMessage || "Conversation active",
+          lastMessageTime: data.lastMessageTime ? data.lastMessageTime.toDate() : new Date(),
+          unreadCount: data.unreadCount || 0,
+          accountNumber,
+          hasNewMessage: data.hasNewMessage || false,
+          hasNewImage: data.hasNewImage || false,
+          lastMessageAdmin: data.lastMessageAdmin || "",
+          lastMessageUser: data.lastMessageUser || "",
+        };
+      });
+      setCustomers(customersList);
+      setLoading(false);
+    });
+    return () => unsubscribe();
   }, []);
 
-  const formatTime = (date: Date) => {
-    const now = new Date();
-    const diffInDays = Math.floor(
-      (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24)
-    );
-
-    if (diffInDays === 0) {
-      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    } else if (diffInDays === 1) {
-      return "Yesterday";
-    } else if (diffInDays < 7) {
-      return date.toLocaleDateString([], { weekday: "short" });
-    } else {
-      return date.toLocaleDateString([], { month: "short", day: "numeric" });
-    }
-  };
-
-  // If you want to search by the account number, adjust the filter below
   const filteredCustomers = customers.filter((customer) =>
     customer.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -125,7 +100,7 @@ const ChatList: React.FC<ChatListProps> = ({
               {filteredCustomers.map((customer) => (
                 <div
                   key={customer.id}
-                  className={`p-4 hover:bg-gray-50 cursor-pointer ${
+                  className={`relative p-4 hover:bg-gray-50 cursor-pointer ${
                     selectedCustomerId === customer.id ? "bg-blue-50" : ""
                   }`}
                   onClick={() =>
@@ -133,30 +108,43 @@ const ChatList: React.FC<ChatListProps> = ({
                   }
                 >
                   <div className="flex items-center space-x-3">
-                    <Avatar>
-                      <AvatarImage src={customer.avatar} alt={customer.name} />
-                      <AvatarFallback>
-                        <User className="h-5 w-5" />
-                      </AvatarFallback>
-                    </Avatar>
+                    <div className="relative">
+                      <Avatar>
+                        <AvatarImage src={customer.avatar} alt={customer.name} />
+                        <AvatarFallback>
+                          <User className="h-5 w-5" />
+                        </AvatarFallback>
+                      </Avatar>
+                      {/* Display badge only if the last message from the user is non-empty */}
+                      {customer.lastMessageUser.trim() !== "" &&
+                        (customer.unreadCount > 0 ||
+                          customer.hasNewMessage ||
+                          customer.hasNewImage) && (
+                          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 flex items-center justify-center rounded-full">
+                            {customer.unreadCount > 0 ? customer.unreadCount : "1"}
+                          </span>
+                        )}
+                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-center">
-                        <h4 className="text-sm font-medium truncate">
+                        <h4
+                          className={`text-sm truncate ${
+                            customer.hasNewMessage ? "font-bold text-blue-700" : "font-medium"
+                          }`}
+                        >
                           {customer.name}
                         </h4>
                         <span className="text-xs text-gray-500">
-                          {formatTime(customer.lastMessageTime)}
+                          {customer.lastMessageTime.toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
                         </span>
                       </div>
                       <div className="flex justify-between items-center mt-1">
                         <p className="text-xs text-gray-500 truncate">
                           {customer.lastMessage}
                         </p>
-                        {customer.unreadCount > 0 && (
-                          <Badge className="ml-2 bg-blue-500">
-                            {customer.unreadCount}
-                          </Badge>
-                        )}
                       </div>
                     </div>
                   </div>

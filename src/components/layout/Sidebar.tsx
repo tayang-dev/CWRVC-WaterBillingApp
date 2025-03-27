@@ -10,9 +10,11 @@ import {
   LogOut,
   ChevronDown,
   ChevronRight,
-  Droplets,
   CreditCard,
-  FileText,
+  BarChart,
+  ClipboardList,
+  Menu,
+  ArrowLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +22,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import logo from "../../assets/logo.png";
 
 interface SidebarItemProps {
   icon: React.ReactNode;
@@ -30,6 +33,7 @@ interface SidebarItemProps {
   isOpen?: boolean;
   onClick?: () => void;
   subItems?: Array<{ label: string; path: string }>;
+  collapsed: boolean;
 }
 
 const SidebarItem = ({
@@ -41,65 +45,59 @@ const SidebarItem = ({
   isOpen = false,
   onClick = () => {},
   subItems = [],
+  collapsed,
 }: SidebarItemProps) => {
-  return (
-    <div className="mb-1">
-      {hasSubItems ? (
+  const baseClasses =
+    "flex items-center px-3 py-2 rounded-md transition-colors";
+  const activeClasses =
+    "bg-blue-100 text-blue-700";
+  const inactiveClasses =
+    "text-gray-700 hover:bg-blue-50 hover:text-blue-600";
+
+  // Content for the main button
+  const content = (
+    <div className={cn(baseClasses, isActive ? activeClasses : inactiveClasses)}>
+      <span className="mr-3">{icon}</span>
+      {!collapsed && <span className="font-medium">{label}</span>}
+    </div>
+  );
+
+  // If the item has sub-items, only show them when not collapsed
+  if (hasSubItems) {
+    return (
+      <div className="mb-1">
         <Collapsible open={isOpen} onOpenChange={onClick}>
           <CollapsibleTrigger className="w-full">
-            <div
-              className={cn(
-                "flex items-center justify-between px-3 py-2 rounded-md transition-colors",
-                isActive
-                  ? "bg-blue-100 text-blue-700"
-                  : "text-gray-700 hover:bg-blue-50 hover:text-blue-600",
-              )}
-            >
-              <div className="flex items-center">
-                <span className="mr-3">{icon}</span>
-                <span className="font-medium">{label}</span>
-              </div>
-              {isOpen ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
-            </div>
+            {content}
           </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="pl-10 mt-1 space-y-1">
-              {subItems.map((item, index) => (
-                <Link to={item.path} key={index}>
-                  <div
-                    className={cn(
-                      "px-3 py-2 rounded-md text-sm transition-colors",
-                      path === item.path
-                        ? "bg-blue-50 text-blue-700"
-                        : "text-gray-600 hover:bg-blue-50 hover:text-blue-600",
-                    )}
-                  >
-                    {item.label}
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </CollapsibleContent>
+          {!collapsed && (
+            <CollapsibleContent>
+              <div className="pl-10 mt-1 space-y-1">
+                {subItems.map((item, index) => (
+                  <Link to={item.path} key={index}>
+                    <div
+                      className={cn(
+                        "px-3 py-2 rounded-md text-sm transition-colors",
+                        path === item.path
+                          ? "bg-blue-50 text-blue-700"
+                          : "text-gray-600 hover:bg-blue-50 hover:text-blue-600"
+                      )}
+                    >
+                      {item.label}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </CollapsibleContent>
+          )}
         </Collapsible>
-      ) : (
-        <Link to={path}>
-          <div
-            className={cn(
-              "flex items-center px-3 py-2 rounded-md transition-colors",
-              isActive
-                ? "bg-blue-100 text-blue-700"
-                : "text-gray-700 hover:bg-blue-50 hover:text-blue-600",
-            )}
-          >
-            <span className="mr-3">{icon}</span>
-            <span className="font-medium">{label}</span>
-          </div>
-        </Link>
-      )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-1">
+      <Link to={path}>{content}</Link>
     </div>
   );
 };
@@ -111,6 +109,7 @@ interface SidebarProps {
 const Sidebar = ({ className = "" }: SidebarProps) => {
   const location = useLocation();
   const [openSection, setOpenSection] = useState<string | null>("accounts");
+  const [collapsed, setCollapsed] = useState<boolean>(false);
   const { userRole } = useAuth();
 
   const toggleSection = (section: string) => {
@@ -120,41 +119,66 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
   return (
     <div
       className={cn(
-        "w-64 h-full bg-white border-r border-gray-200 flex flex-col",
-        className,
+        collapsed ? "w-20" : "w-64",
+        "h-full bg-white border-r border-gray-200 flex flex-col transition-all duration-300",
+        className
       )}
     >
-      <div className="p-4 border-b border-gray-200">
+      {/* Header with Logo and Collapse Toggle */}
+      <div className="p-4 border-b border-gray-200 flex items-center justify-between">
         <div className="flex items-center">
-          <Droplets className="h-8 w-8 text-blue-600 mr-2" />
-          <h1 className="text-xl font-bold text-blue-800">Water Billing</h1>
+          <img
+            src={logo}
+            alt="CWRVC Logo"
+            className="h-10 w-10 object-contain mr-2"
+          />
+          {!collapsed && (
+            <div>
+              <h1 className="text-xl font-bold text-blue-800">
+                CWRVC - Water Billing App
+              </h1>
+              <p className="text-xs text-gray-500">Admin Portal</p>
+            </div>
+          )}
         </div>
-        <p className="text-xs text-gray-500 mt-1">Admin Portal</p>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setCollapsed(!collapsed)}
+          className="p-1"
+        >
+          {collapsed ? <Menu className="h-5 w-5" /> : <ArrowLeft className="h-5 w-5" />}
+        </Button>
       </div>
 
+      {/* Navigation */}
       <div className="flex-1 overflow-y-auto p-3">
         <SidebarItem
           icon={<LayoutDashboard className="h-5 w-5" />}
           label="Dashboard"
           path="/dashboard"
           isActive={location.pathname === "/dashboard"}
+          collapsed={collapsed}
         />
 
         {userRole === "admin" && (
-          <>
-            <SidebarItem
-              icon={<Users className="h-5 w-5" />}
-              label="Accounts Management"
-              path="/accounts"
-              isActive={location.pathname.startsWith("/accounts")}
-            />
-            <SidebarItem
-              icon={<Users className="h-5 w-5" />}
-              label="User Management"
-              path="/users"
-              isActive={location.pathname.startsWith("/users")}
-            />
-          </>
+          <SidebarItem
+            icon={<Users className="h-5 w-5" />}
+            label="Customers"
+            path="#"
+            hasSubItems
+            isOpen={openSection === "accounts"}
+            onClick={() => toggleSection("accounts")}
+            isActive={
+              location.pathname.startsWith("/accounts") ||
+              location.pathname.startsWith("/users")
+            }
+            subItems={[
+              { label: "Customer Management", path: "/accounts" },
+              { label: "Accounts", path: "/users" },
+            ]}
+            collapsed={collapsed}
+          />
         )}
 
         <SidebarItem
@@ -162,6 +186,7 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
           label="Payment Management"
           path="/payments"
           isActive={location.pathname.startsWith("/payments")}
+          collapsed={collapsed}
         />
 
         <SidebarItem
@@ -169,18 +194,35 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
           label="Customer Service"
           path="/customer-support"
           isActive={location.pathname.startsWith("/customer-support")}
+          collapsed={collapsed}
         />
 
-        {/* Billing history removed as requested */}
+        <SidebarItem
+          icon={<ClipboardList className="h-5 w-5" />}
+          label="Service Requests"
+          path="/requests"
+          isActive={location.pathname.startsWith("/requests")}
+          collapsed={collapsed}
+        />
+
+        <SidebarItem
+          icon={<BarChart className="h-5 w-5" />}
+          label="Reports"
+          path="/reports"
+          isActive={location.pathname.startsWith("/reports")}
+          collapsed={collapsed}
+        />
 
         <SidebarItem
           icon={<Settings className="h-5 w-5" />}
           label="Settings"
           path="/settings"
           isActive={location.pathname === "/settings"}
+          collapsed={collapsed}
         />
       </div>
 
+      {/* Footer */}
       <div className="p-3 border-t border-gray-200">
         <Button
           variant="outline"
@@ -197,7 +239,7 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
           }}
         >
           <LogOut className="h-5 w-5 mr-2" />
-          Logout
+          {!collapsed && "Logout"}
         </Button>
       </div>
     </div>

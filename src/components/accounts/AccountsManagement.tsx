@@ -6,6 +6,7 @@ import CustomerSearch from "./CustomerSearch";
 import CustomerList from "./CustomerList";
 import CustomerDetails from "./CustomerDetails";
 import AddCustomerForm from "./AddCustomerForm";
+import * as XLSX from "xlsx";
 
 interface AccountsManagementProps {
   initialView?: "list" | "details";
@@ -27,6 +28,65 @@ const AccountsManagement = ({
       location: "all",
     },
   });
+
+  const exportToExcel = (data: any[], filename: string) => {
+    if (data.length === 0) {
+      alert("No data to export!");
+      return;
+    }
+  
+    // Define columns explicitly
+    const formattedData = data.map((item) => ({
+      "User ID": item.id || "",
+      "Name": item.name || "",
+      "Email": item.email || "",
+      "Phone": item.phone || "",
+      "Address": item.address || "",
+      "Account Number": item.accountNumber || "",
+      "Site": item.site || "",
+      "Status": item.status || "",
+      "Amount Due": item.amountDue || "",
+      "Last Reading": item.lastReading || "",
+      "Last Billing Date": item.lastBilling || "",
+      "Verified At": item.verifiedAt ? new Date(item.verifiedAt).toLocaleDateString() : "",
+      "User Verified": item.userVerified ? "Yes" : "No",
+      "Is Senior": item.isSenior ? "Yes" : "No",
+      "Join Date": item.joinDate ? new Date(item.joinDate).toLocaleDateString() : "",
+    }));
+  
+    // Convert to worksheet
+    const worksheet = XLSX.utils.json_to_sheet(formattedData, {
+      header: [
+        "User ID",
+        "Name",
+        "Email",
+        "Phone",
+        "Address",
+        "Account Number",
+        "Site",
+        "Status",
+        "Amount Due",
+        "Last Reading",
+        "Last Billing Date",
+        "Verified At",
+        "User Verified",
+        "Is Senior",
+        "Join Date",
+      ],
+    });
+  
+    // Auto-adjust column width
+    const columnWidths = formattedData.length
+      ? Object.keys(formattedData[0]).map((key) => ({ wch: key.length + 5 }))
+      : [];
+  
+    worksheet["!cols"] = columnWidths;
+  
+    // Create workbook and export
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Customers");
+    XLSX.writeFile(workbook, `${filename}.xlsx`);
+  };
 
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -185,6 +245,11 @@ const AccountsManagement = ({
     }
   };
 
+  // Function to handle export button click
+  const handleExportData = () => {
+    exportToExcel(customers, "customers_data");
+  };
+
   const handleViewCustomer = (customerId: string) => {
     setSelectedCustomer(customerId);
     setView("details");
@@ -214,14 +279,15 @@ const AccountsManagement = ({
         <div className="flex justify-between items-center mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">
-              Accounts Management
+              Customer Management
             </h1>
             <p className="text-gray-600 mt-1">
-              Manage customer accounts, billing, and payment information
+              Manage customer accounts, users, and payment information
             </p>
           </div>
           <div className="flex space-x-3">
-            <Button variant="outline" className="flex items-center gap-2">
+            {/* Export Data Button */}
+            <Button variant="outline" className="flex items-center gap-2" onClick={handleExportData}>
               <Download className="h-4 w-4" />
               Export Data
             </Button>
@@ -261,8 +327,8 @@ const AccountsManagement = ({
                     <CustomerList
                       customers={customers}
                       onViewCustomer={handleViewCustomer}
-                      onEditCustomer={handleEditCustomer}
-                      onDeleteCustomer={handleDeleteCustomer}
+                      
+                      
                     />
                   )}
                 </div>

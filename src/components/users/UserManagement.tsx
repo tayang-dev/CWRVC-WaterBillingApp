@@ -45,9 +45,9 @@ interface User {
   email: string;
   phone: string;
   dateOfBirth: string;
-  imageName: string;      // Full URL for profile image
-  idImageUrl: string;     // Full URL for ID document
-  selfieImageUrl: string; // Full URL for selfie image
+  imageName: string;
+  idImageUrl: string;
+  selfieImageUrl: string;
   consumerAccounts: string[];
   verificationStatus: "pending" | "verified" | "rejected";
   verified: boolean;
@@ -76,13 +76,8 @@ const UserManagement = () => {
       const { collection, getDocs, query, orderBy } = await import("firebase/firestore");
       const { db } = await import("../../lib/firebase");
 
-      console.log("Fetching users from Firestore...");
       const usersQuery = query(collection(db, "users"), orderBy("lastName"));
       const usersSnapshot = await getDocs(usersQuery);
-
-      if (usersSnapshot.empty) {
-        console.warn("No users found in Firestore.");
-      }
 
       const usersList: User[] = usersSnapshot.docs.map((doc) => {
         const userData = doc.data();
@@ -94,17 +89,17 @@ const UserManagement = () => {
           phone: userData.phone || "No Phone",
           dateOfBirth: userData.dateOfBirth || "Unknown DOB",
           imageName: userData.imageName || "",
-          // Here we expect full URLs, same as profile image URL.
           idImageUrl: userData.idImageUrl || "",
           selfieImageUrl: userData.selfieImageUrl || "",
           consumerAccounts: userData.consumerAccounts || [],
-          verificationStatus: userData.verification ? "verified" : "pending",
+          // Use the stored verificationStatus if available,
+          // otherwise determine it from the "verification" field.
+          verificationStatus: userData.verificationStatus || (userData.verification ? "verified" : "pending"),
           verified: userData.verification || false,
           uploaded: userData.uploaded || false,
         };
       });
 
-      console.log("Fetched users:", usersList);
       setUsers(usersList);
     } catch (error) {
       console.error("Error fetching users:", error);
@@ -114,6 +109,45 @@ const UserManagement = () => {
     }
   };
 
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "pending":
+        return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300">Pending</Badge>;
+      case "verified":
+        return <Badge className="bg-green-100 text-green-800 border-green-300">Verified</Badge>;
+      case "rejected":
+        return <Badge className="bg-red-100 text-red-800 border-red-300">Rejected</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
+    }
+  };
+
+  // "All Users" filter: show all users with their actual verificationStatus.
+  const filteredUsers = users.filter((user) => {
+    const matchesSearch =
+      searchTerm === "" ||
+      `${user.firstName} ${user.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.phone.includes(searchTerm) ||
+      (user.consumerAccounts && user.consumerAccounts.some((account) => account.includes(searchTerm)));
+
+    const matchesStatus = statusFilter === "all" || user.verificationStatus === statusFilter;
+
+    return matchesSearch && matchesStatus;
+  });
+
+  // "Pending Verification": include users who are still pending,
+  // plus rejected users only if they have re-uploaded their ID and selfie.
+  const pendingUsers = users.filter(
+    (user) =>
+      user.verificationStatus === "pending" ||
+      (user.verificationStatus === "rejected" &&
+        user.uploaded &&
+        user.idImageUrl &&
+        user.selfieImageUrl)
+  );
+
+  // -- Verification Functions --
   const handleViewUserDetails = (user: User) => {
     setSelectedUser(user);
     setIsDetailsDialogOpen(true);
@@ -126,114 +160,114 @@ const UserManagement = () => {
     setIsVerificationDialogOpen(true);
   };
 
+
+
   const handleSubmitVerification = async () => {
-    if (!selectedUser) return;
-    try {
-      const { doc, updateDoc } = await import("firebase/firestore");
-      const { db } = await import("../../lib/firebase");
+  if (!selectedUser) return;
+  try {
+    const { doc, updateDoc, collection, setDoc } = await import("firebase/firestore");
+    const { db } = await import("../../lib/firebase");
 
-      await updateDoc(doc(db, "users", selectedUser.id), {
-        verificationStatus: verificationStatus,
-        verified: verificationStatus === "verified",
-        verification: verificationStatus === "verified",
-        verificationNote: verificationNote,
-        verifiedAt: new Date().toISOString(),
-      });
+    // Update the user's verification status
+    await updateDoc(doc(db, "users", selectedUser.id), {
+      verificationStatus: verificationStatus,
+      verified: verificationStatus === "verified",
+      verification: verificationStatus === "verified",
+      verificationNote: verificationNote,
+      verifiedAt: new Date().toISOString(),
+    });
 
-      // If verified, update any linked consumer accounts
-      if (verificationStatus === "verified" && selectedUser.consumerAccounts?.length > 0) {
-        const { collection, query, where, getDocs, updateDoc } = await import("firebase/firestore");
-
-        for (const accountNumber of selectedUser.consumerAccounts) {
-          try {
-            const accountsQuery = query(
-              collection(db, "customers"),
-              where("accountNumber", "==", accountNumber)
-            );
-            const accountsSnapshot = await getDocs(accountsQuery);
-
-            if (!accountsSnapshot.empty) {
-              const accountDoc = accountsSnapshot.docs[0];
-              await updateDoc(doc(db, "customers", accountDoc.id), {
-                userId: selectedUser.id,
-                userVerified: true,
-                verifiedAt: new Date().toISOString(),
-              });
-            }
-          } catch (accountError) {
-            console.error(`Error updating account ${accountNumber}:`, accountError);
+    // If verified, update any linked consumer accounts
+    if (verificationStatus === "verified" && selectedUser.consumerAccounts?.length > 0) {
+      const { query, where, getDocs, updateDoc } = await import("firebase/firestore");
+      for (const accountNumber of selectedUser.consumerAccounts) {
+        try {
+          const accountsQuery = query(
+            collection(db, "customers"),
+            where("accountNumber", "==", accountNumber)
+          );
+          const accountsSnapshot = await getDocs(accountsQuery);
+          if (!accountsSnapshot.empty) {
+            const accountDoc = accountsSnapshot.docs[0];
+            await updateDoc(doc(db, "customers", accountDoc.id), {
+              userId: selectedUser.id,
+              userVerified: true,
+              verifiedAt: new Date().toISOString(),
+            });
           }
+        } catch (accountError) {
+          console.error(`Error updating account ${accountNumber}:`, accountError);
         }
       }
+    }
 
-      setUsers(
-        users.map((user) =>
-          user.id === selectedUser.id
-            ? {
-                ...user,
-                verificationStatus: verificationStatus,
-                verified: verificationStatus === "verified",
-                verification: verificationStatus === "verified",
-              }
-            : user
-        )
+    // Update the local state
+    setUsers(
+      users.map((user) =>
+        user.id === selectedUser.id
+          ? {
+              ...user,
+              verificationStatus: verificationStatus,
+              verified: verificationStatus === "verified",
+              verification: verificationStatus === "verified",
+            }
+          : user
+      )
+    );
+
+    // Determine contact info: use phone if valid; otherwise, use email.
+    const validPhone = selectedUser.phone && selectedUser.phone !== "No Phone";
+    const validEmail = selectedUser.email && selectedUser.email !== "No Email";
+    const contactInfo = validPhone ? selectedUser.phone : validEmail ? selectedUser.email : "";
+
+    // Prepare notification data
+    const notificationData = {
+      type: "user_verification",
+      userId: selectedUser.id,
+      status: verificationStatus,
+      contactInfo, // This will now be a valid phone or email.
+      message:
+        verificationStatus === "verified"
+          ? "Your account has been approved."
+          : "Your account has been rejected. Please re-upload your documents.",
+      createdAt: new Date().toISOString(),
+    };
+
+    // Use the contactInfo (phone/email) as the document ID.
+    if (selectedUser.consumerAccounts && selectedUser.consumerAccounts.length > 0) {
+      const accountNumber = selectedUser.consumerAccounts[0];
+      await setDoc(
+        doc(db, "notifications", accountNumber, "records", contactInfo),
+        { ...notificationData, accountNumber }
       );
-
-      setIsVerificationDialogOpen(false);
-      setSelectedUser(null);
-      setVerificationStatus("verified");
-      setVerificationNote("");
-    } catch (error) {
-      console.error("Error updating user verification:", error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`Failed to update verification status: ${errorMessage}`);
+    } else {
+      await setDoc(doc(db, "notifications", contactInfo), {
+        ...notificationData,
+        accountNumber: null,
+      });
     }
-  };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "pending":
-        return (
-          <Badge variant="outline" className="bg-yellow-100 text-yellow-800 border-yellow-300">
-            Pending
-          </Badge>
-        );
-      case "verified":
-        return (
-          <Badge variant="outline" className="bg-green-100 text-green-800 border-green-300">
-            Verified
-          </Badge>
-        );
-      case "rejected":
-        return (
-          <Badge variant="outline" className="bg-red-100 text-red-800 border-red-300">
-            Rejected
-          </Badge>
-        );
-      default:
-        return <Badge variant="outline">{status}</Badge>;
-    }
-  };
+    setIsVerificationDialogOpen(false);
+    setSelectedUser(null);
+    setVerificationStatus("verified");
+    setVerificationNote("");
+  } catch (error) {
+    console.error("Error updating user verification:", error);
+    alert(
+      `Failed to update verification status: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+};
 
-  const filteredUsers = users.filter((user) => {
-    const matchesSearch =
-      searchTerm === "" ||
-      `${user.firstName} ${user.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.phone.includes(searchTerm) ||
-      (user.consumerAccounts && user.consumerAccounts.some((account) => account.includes(searchTerm)));
-    const matchesStatus = statusFilter === "all" || user.verificationStatus === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
-
-  const pendingUsers = users.filter((user) => user.verificationStatus === "pending");
+  
+  
 
   return (
     <div className="w-full h-full bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-blue-800">User Management</h1>
-        </div>
+        <h1 className="text-2xl font-bold text-blue-800 mb-6">User Management</h1>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="mb-6">
@@ -243,6 +277,7 @@ const UserManagement = () => {
             </TabsTrigger>
           </TabsList>
 
+          {/* All Users */}
           <TabsContent value="all-users" className="space-y-6">
             <Card>
               <CardHeader>
@@ -289,7 +324,6 @@ const UserManagement = () => {
                     </div>
                   </div>
                 </div>
-
                 {loading ? (
                   <div className="flex justify-center items-center h-64">
                     <p>Loading users...</p>
@@ -314,13 +348,9 @@ const UserManagement = () => {
                               <TableCell className="font-medium">
                                 <div className="flex items-center space-x-3">
                                   <Avatar>
-                                    <AvatarImage
-                                      src={user.imageName}
-                                      alt={`${user.firstName} ${user.lastName}`}
-                                    />
+                                    <AvatarImage src={user.imageName} alt={`${user.firstName} ${user.lastName}`} />
                                     <AvatarFallback>
-                                      {user.firstName[0]}
-                                      {user.lastName[0]}
+                                      {user.firstName[0]}{user.lastName[0]}
                                     </AvatarFallback>
                                   </Avatar>
                                   <span>
@@ -331,37 +361,27 @@ const UserManagement = () => {
                               <TableCell>{user.email}</TableCell>
                               <TableCell>{user.phone}</TableCell>
                               <TableCell>
-                                {user.consumerAccounts && user.consumerAccounts.length > 0 ? (
-                                  <div className="flex flex-wrap gap-1">
-                                    {user.consumerAccounts.map((account, index) => (
-                                      <Badge key={index} variant="outline" className="bg-blue-50">
-                                        {account}
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <span className="text-gray-500">No accounts</span>
-                                )}
+                                {user.consumerAccounts && user.consumerAccounts.length > 0
+                                  ? user.consumerAccounts.join(", ")
+                                  : "No accounts"}
                               </TableCell>
                               <TableCell>{getStatusBadge(user.verificationStatus)}</TableCell>
                               <TableCell className="text-right">
-                                <div className="flex justify-end space-x-2">
-                                  <Button variant="outline" size="sm" onClick={() => handleViewUserDetails(user)}>
-                                    <Eye className="h-4 w-4 mr-2" />
-                                    Details
+                                <Button variant="outline" size="sm" onClick={() => handleViewUserDetails(user)}>
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  Details
+                                </Button>
+                                {user.verificationStatus === "pending" && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleVerifyUser(user)}
+                                    className="bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                  >
+                                    <ExternalLink className="h-4 w-4 mr-2" />
+                                    Verify
                                   </Button>
-                                  {user.verificationStatus === "pending" && (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => handleVerifyUser(user)}
-                                      className="bg-blue-50 text-blue-700 hover:bg-blue-100"
-                                    >
-                                      <ExternalLink className="h-4 w-4 mr-2" />
-                                      Verify
-                                    </Button>
-                                  )}
-                                </div>
+                                )}
                               </TableCell>
                             </TableRow>
                           ))
@@ -380,6 +400,7 @@ const UserManagement = () => {
             </Card>
           </TabsContent>
 
+          {/* Pending Verification */}
           <TabsContent value="pending-verification" className="space-y-6">
             <Card>
               <CardHeader>
@@ -409,13 +430,9 @@ const UserManagement = () => {
                             <TableCell className="font-medium">
                               <div className="flex items-center space-x-3">
                                 <Avatar>
-                                  <AvatarImage
-                                    src={user.imageName}
-                                    alt={`${user.firstName} ${user.lastName}`}
-                                  />
+                                  <AvatarImage src={user.imageName} alt={`${user.firstName} ${user.lastName}`} />
                                   <AvatarFallback>
-                                    {user.firstName[0]}
-                                    {user.lastName[0]}
+                                    {user.firstName[0]}{user.lastName[0]}
                                   </AvatarFallback>
                                 </Avatar>
                                 <span>
@@ -426,34 +443,24 @@ const UserManagement = () => {
                             <TableCell>{user.email}</TableCell>
                             <TableCell>{user.phone}</TableCell>
                             <TableCell>
-                              {user.consumerAccounts && user.consumerAccounts.length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {user.consumerAccounts.map((account, index) => (
-                                    <Badge key={index} variant="outline" className="bg-blue-50">
-                                      {account}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              ) : (
-                                <span className="text-gray-500">No accounts</span>
-                              )}
+                              {user.consumerAccounts && user.consumerAccounts.length > 0
+                                ? user.consumerAccounts.join(", ")
+                                : "No accounts"}
                             </TableCell>
                             <TableCell className="text-right">
-                              <div className="flex justify-end space-x-2">
-                                <Button variant="outline" size="sm" onClick={() => handleViewUserDetails(user)}>
-                                  <Eye className="h-4 w-4 mr-2" />
-                                  Details
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleVerifyUser(user)}
-                                  className="bg-blue-50 text-blue-700 hover:bg-blue-100"
-                                >
-                                  <ExternalLink className="h-4 w-4 mr-2" />
-                                  Verify
-                                </Button>
-                              </div>
+                              <Button variant="outline" size="sm" onClick={() => handleViewUserDetails(user)}>
+                                <Eye className="h-4 w-4 mr-2" />
+                                Details
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleVerifyUser(user)}
+                                className="bg-blue-50 text-blue-700 hover:bg-blue-100"
+                              >
+                                <ExternalLink className="h-4 w-4 mr-2" />
+                                Verify
+                              </Button>
                             </TableCell>
                           </TableRow>
                         ))}
@@ -464,9 +471,7 @@ const UserManagement = () => {
                   <div className="flex justify-center items-center h-64 bg-gray-50 rounded-md border border-gray-200">
                     <div className="text-center">
                       <Check className="h-12 w-12 text-green-500 mx-auto mb-4" />
-                      <h3 className="text-lg font-medium text-gray-900 mb-1">
-                        No Pending Verifications
-                      </h3>
+                      <h3 className="text-lg font-medium text-gray-900 mb-1">No Pending Verifications</h3>
                       <p className="text-gray-500">All user accounts have been verified</p>
                     </div>
                   </div>
@@ -487,13 +492,9 @@ const UserManagement = () => {
               <div className="grid gap-6">
                 <div className="flex flex-col items-center space-y-3">
                   <Avatar className="h-24 w-24">
-                    <AvatarImage
-                      src={selectedUser.imageName}
-                      alt={`${selectedUser.firstName} ${selectedUser.lastName}`}
-                    />
+                    <AvatarImage src={selectedUser.imageName} alt={`${selectedUser.firstName} ${selectedUser.lastName}`} />
                     <AvatarFallback className="text-2xl">
-                      {selectedUser.firstName[0]}
-                      {selectedUser.lastName[0]}
+                      {selectedUser.firstName[0]}{selectedUser.lastName[0]}
                     </AvatarFallback>
                   </Avatar>
                   <div className="text-center">
@@ -504,7 +505,6 @@ const UserManagement = () => {
                     {getStatusBadge(selectedUser.verificationStatus)}
                   </div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label className="text-sm text-gray-500">Phone Number</Label>
@@ -515,7 +515,6 @@ const UserManagement = () => {
                     <p className="font-medium">{selectedUser.dateOfBirth}</p>
                   </div>
                 </div>
-
                 <div>
                   <Label className="text-sm text-gray-500">Account Numbers</Label>
                   {selectedUser.consumerAccounts && selectedUser.consumerAccounts.length > 0 ? (
@@ -530,7 +529,6 @@ const UserManagement = () => {
                     <p className="text-gray-500">No accounts linked</p>
                   )}
                 </div>
-
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label className="text-sm text-gray-500">ID Document</Label>
@@ -561,24 +559,24 @@ const UserManagement = () => {
                     </div>
                   </div>
                 </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => { setIsDetailsDialogOpen(false); setSelectedUser(null); }}>
+                    Close
+                  </Button>
+                  {selectedUser && selectedUser.verificationStatus === "pending" && (
+                    <Button
+                      onClick={() => {
+                        setIsDetailsDialogOpen(false);
+                        handleVerifyUser(selectedUser);
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      Verify User
+                    </Button>
+                  )}
+                </DialogFooter>
               </div>
             )}
-            <DialogFooter>
-              <Button variant="outline" onClick={() => { setIsDetailsDialogOpen(false); setSelectedUser(null); }}>
-                Close
-              </Button>
-              {selectedUser && selectedUser.verificationStatus === "pending" && (
-                <Button
-                  onClick={() => {
-                    setIsDetailsDialogOpen(false);
-                    handleVerifyUser(selectedUser);
-                  }}
-                  className="bg-blue-600 hover:bg-blue-700"
-                >
-                  Verify User
-                </Button>
-              )}
-            </DialogFooter>
           </DialogContent>
         </Dialog>
 
@@ -595,23 +593,16 @@ const UserManagement = () => {
               <div className="grid gap-4 py-4">
                 <div className="flex items-center space-x-3">
                   <Avatar>
-                    <AvatarImage
-                      src={selectedUser.imageName}
-                      alt={`${selectedUser.firstName} ${selectedUser.lastName}`}
-                    />
+                    <AvatarImage src={selectedUser.imageName} alt={`${selectedUser.firstName} ${selectedUser.lastName}`} />
                     <AvatarFallback>
-                      {selectedUser.firstName[0]}
-                      {selectedUser.lastName[0]}
+                      {selectedUser.firstName[0]}{selectedUser.lastName[0]}
                     </AvatarFallback>
                   </Avatar>
                   <div>
-                    <p className="font-medium">
-                      {selectedUser.firstName} {selectedUser.lastName}
-                    </p>
+                    <p className="font-medium">{selectedUser.firstName} {selectedUser.lastName}</p>
                     <p className="text-sm text-gray-500">{selectedUser.email}</p>
                   </div>
                 </div>
-
                 <div>
                   <Label className="text-sm text-gray-500">Account Numbers</Label>
                   {selectedUser.consumerAccounts && selectedUser.consumerAccounts.length > 0 ? (
@@ -626,7 +617,6 @@ const UserManagement = () => {
                     <p className="text-gray-500">No accounts linked</p>
                   )}
                 </div>
-
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label className="text-sm text-gray-500">ID Document</Label>
@@ -657,7 +647,6 @@ const UserManagement = () => {
                     </div>
                   </div>
                 </div>
-
                 <div className="mt-4">
                   <Label htmlFor="verification-status">Verification Decision</Label>
                   <div className="flex gap-4 mt-1">

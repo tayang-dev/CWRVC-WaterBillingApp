@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react"; 
 import {
   ChevronLeft,
   ChevronRight,
@@ -8,10 +8,22 @@ import {
   Edit,
   Trash,
   Eye,
+  AlertCircle,
 } from "lucide-react";
 
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { 
+  collection, 
+  query, 
+  orderBy, 
+  getDocs, 
+  doc, 
+  updateDoc, 
+  deleteDoc 
+} from "firebase/firestore";
+import { db } from "../../lib/firebase";
+
 import {
   Table,
   TableBody,
@@ -27,6 +39,48 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { Badge } from "../ui/badge";
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogDescription 
+} from "../ui/dialog";
+import { 
+  AlertDialog, 
+  AlertDialogAction, 
+  AlertDialogCancel, 
+  AlertDialogContent, 
+  AlertDialogDescription, 
+  AlertDialogFooter, 
+  AlertDialogHeader, 
+  AlertDialogTitle, 
+  AlertDialogTrigger 
+} from "../ui/alert-dialog";
+
+// Reuse the form schema from AddCustomerForm
+import * as z from "zod";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+
+const formSchema = z.object({
+  name: z.string().min(2, { message: "Name must be at least 2 characters." }),
+  email: z.string().email().optional().or(z.literal("")),
+  phone: z.string().min(10, { message: "Phone number must be at least 10 characters." }),
+  site: z.string().min(1, { message: "Please select a site location." }),
+  isSenior: z.boolean().default(false),
+  accountNumber: z.string().min(7, { message: "Invalid account number format." }),
+});
 
 interface Customer {
   id: string;
@@ -37,84 +91,296 @@ interface Customer {
   status: "active" | "inactive" | "pending";
   lastBillingDate: string;
   amountDue: number;
+  site?: string;
+  isSenior?: boolean;
+  phone?: string;
 }
 
 interface CustomerListProps {
-  customers?: Customer[];
+  customers: Customer[];
   onViewCustomer?: (customerId: string) => void;
-  onEditCustomer?: (customerId: string) => void;
-  onDeleteCustomer?: (customerId: string) => void;
 }
 
 const CustomerList: React.FC<CustomerListProps> = ({
-  customers = [
-    {
-      id: "1",
-      name: "John Doe",
-      email: "john.doe@example.com",
-      address: "123 Main St, Anytown, USA",
-      accountNumber: "WB-10001",
-      status: "active",
-      lastBillingDate: "2023-04-15",
-      amountDue: 78.5,
-    },
-    {
-      id: "2",
-      name: "Jane Smith",
-      email: "jane.smith@example.com",
-      address: "456 Oak Ave, Somewhere, USA",
-      accountNumber: "WB-10002",
-      status: "active",
-      lastBillingDate: "2023-04-15",
-      amountDue: 65.75,
-    },
-    {
-      id: "3",
-      name: "Robert Johnson",
-      email: "robert.johnson@example.com",
-      address: "789 Pine Rd, Elsewhere, USA",
-      accountNumber: "WB-10003",
-      status: "inactive",
-      lastBillingDate: "2023-03-15",
-      amountDue: 0,
-    },
-    {
-      id: "4",
-      name: "Sarah Williams",
-      email: "sarah.williams@example.com",
-      address: "101 Cedar Ln, Nowhere, USA",
-      accountNumber: "WB-10004",
-      status: "pending",
-      lastBillingDate: "2023-04-15",
-      amountDue: 92.25,
-    },
-    {
-      id: "5",
-      name: "Michael Brown",
-      email: "michael.brown@example.com",
-      address: "202 Elm St, Anyplace, USA",
-      accountNumber: "WB-10005",
-      status: "active",
-      lastBillingDate: "2023-04-15",
-      amountDue: 45.0,
-    },
-  ],
   onViewCustomer = (id) => console.log(`View customer ${id}`),
-  onEditCustomer = (id) => console.log(`Edit customer ${id}`),
-  onDeleteCustomer = (id) => console.log(`Delete customer ${id}`),
 }) => {
-  const [currentPage, setCurrentPage] = useState(1);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
-
+  const [currentPage, setCurrentPage] = useState(1);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
   const itemsPerPage = 10;
-  const totalPages = Math.ceil(customers.length / itemsPerPage);
+
+  useEffect(() => {
+    fetchCustomers();
+  }, []);
+
+  const fetchCustomers = async () => {
+    try {
+      const customersCollection = collection(db, "customers");
+      const customersSnapshot = await getDocs(customersCollection);
+  
+      let customersList = await Promise.all(
+        customersSnapshot.docs.map(async (customerDoc) => {
+          const customerData = customerDoc.data();
+          const accountNumber = customerData.accountNumber;
+  
+          // Fetch the latest bill from `bills/{accountNumber}/records/`
+          let latestAmountDue = 0;
+          if (accountNumber) {
+            const billsCollection = collection(db, "bills", accountNumber, "records");
+            const billsQuery = query(billsCollection, orderBy("date", "desc"));
+            const billsSnapshot = await getDocs(billsQuery);
+  
+            if (!billsSnapshot.empty) {
+              const latestBill = billsSnapshot.docs[0].data();
+              latestAmountDue = latestBill.currentAmountDue ?? latestBill.amount ?? 0;
+            }
+          }
+  
+          return {
+            id: customerDoc.id,
+            name: customerData.name,
+            email: customerData.email,
+            address: customerData.address,
+            accountNumber: accountNumber,
+            status: customerData.status,
+            lastBillingDate: customerData.lastBillingDate || "N/A",
+            amountDue: latestAmountDue,
+            site: customerData.site,
+            isSenior: customerData.isSenior,
+            phone: customerData.phone,
+          };
+        })
+      );
+  
+      setCustomers(customersList);
+    } catch (error) {
+      console.error("Error fetching customers:", error);
+    }
+  };
+
+  // Edit Customer Handler
+  const handleEditCustomer = async (data: z.infer<typeof formSchema>) => {
+    if (!editingCustomer) return;
+
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      const siteAddresses = {
+        site1: "Site 1, Brgy. Dayap, Calauan, Laguna",
+        site2: "Site 2, Brgy. Dayap, Calauan, Laguna",
+        site3: "Site 3, Brgy. Dayap, Calauan, Laguna",
+      };
+
+      const customerRef = doc(db, "customers", editingCustomer.id);
+      await updateDoc(customerRef, {
+        ...data,
+        email: data.email || null,
+        address: siteAddresses[data.site as keyof typeof siteAddresses],
+      });
+
+      // Refresh customer list
+      await fetchCustomers();
+      
+      // Close dialog
+      setEditingCustomer(null);
+    } catch (error: any) {
+      setError(error.message || "An error occurred while updating the customer");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Delete Customer Handler
+  const handleDeleteCustomer = async () => {
+    if (!deletingCustomer) return;
+
+    setIsSubmitting(true);
+
+    try {
+      const customerRef = doc(db, "customers", deletingCustomer.id);
+      await deleteDoc(customerRef);
+
+      // Refresh customer list
+      await fetchCustomers();
+      
+      // Close dialog
+      setDeletingCustomer(null);
+    } catch (error: any) {
+      console.error("Error deleting customer:", error);
+      setError(error.message || "An error occurred while deleting the customer");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Edit Customer Form
+  const EditCustomerDialog = () => {
+    const form = useForm<z.infer<typeof formSchema>>({
+      resolver: zodResolver(formSchema),
+      defaultValues: editingCustomer ? {
+        name: editingCustomer.name,
+        email: editingCustomer.email || "",
+        phone: editingCustomer.phone || "",
+        site: editingCustomer.site || "site1",
+        isSenior: editingCustomer.isSenior || false,
+        accountNumber: editingCustomer.accountNumber,
+      } : undefined,
+    });
+
+    return (
+      <Dialog open={!!editingCustomer} onOpenChange={() => setEditingCustomer(null)}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Edit Customer</DialogTitle>
+            <DialogDescription>
+              Update customer information for {editingCustomer?.name}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {error && (
+            <div className="flex items-center gap-2 p-3 mb-4 text-sm rounded-md bg-red-50 text-red-600">
+              <AlertCircle className="h-4 w-4" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleEditCustomer)} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <FormField control={form.control} name="name" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Customer Name</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={form.control} name="email" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email Address (Optional)</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={form.control} name="phone" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Phone Number</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={form.control} name="accountNumber" render={() => (
+                  <FormItem>
+                    <FormLabel>Account Number</FormLabel>
+                    <FormControl>
+                      <Input 
+                        value={editingCustomer?.accountNumber} 
+                        disabled 
+                      />
+                    </FormControl>
+                  </FormItem>
+                )} />
+
+                <FormField control={form.control} name="site" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Site Location</FormLabel>
+                    <Select 
+                      onValueChange={field.onChange} 
+                      defaultValue={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select site location" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="site1">Site 1</SelectItem>
+                        <SelectItem value="site2">Site 2</SelectItem>
+                        <SelectItem value="site3">Site 3</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={form.control} name="isSenior" render={({ field }) => (
+                  <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                    <div className="space-y-1 leading-none">
+                      <FormLabel>Senior Citizen</FormLabel>
+                      <FormMessage />
+                    </div>
+                  </FormItem>
+                )} />
+              </div>
+
+              <div className="flex justify-end space-x-2">
+                <Button 
+                  type="button"
+                  variant="outline" 
+                  onClick={() => setEditingCustomer(null)}
+                  disabled={isSubmitting}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  type="submit" 
+                  disabled={isSubmitting}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {isSubmitting ? "Updating..." : "Update Customer"}
+                </Button>
+              </div>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
+  // Delete Confirmation Dialog
+  const DeleteConfirmationDialog = () => (
+    <AlertDialog open={!!deletingCustomer} onOpenChange={() => setDeletingCustomer(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will permanently delete the customer record for {deletingCustomer?.name}. 
+            This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={isSubmitting}>Cancel</AlertDialogCancel>
+          <AlertDialogAction 
+            onClick={handleDeleteCustomer} 
+            disabled={isSubmitting}
+            className="bg-red-600 hover:bg-red-700"
+          >
+            {isSubmitting ? "Deleting..." : "Delete Customer"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 
   // Filter customers based on search term
   const filteredCustomers = customers.filter(
     (customer) =>
       customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       customer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.accountNumber.toLowerCase().includes(searchTerm.toLowerCase()),
+      customer.accountNumber.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   // Get current page customers
@@ -122,13 +388,16 @@ const CustomerList: React.FC<CustomerListProps> = ({
   const indexOfFirstCustomer = indexOfLastCustomer - itemsPerPage;
   const currentCustomers = filteredCustomers.slice(
     indexOfFirstCustomer,
-    indexOfLastCustomer,
+    indexOfLastCustomer
   );
 
   const handlePageChange = (pageNumber: number) => {
     setCurrentPage(pageNumber);
   };
 
+  const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
+
+  // Function to get badge color based on status
   const getStatusBadgeColor = (status: Customer["status"]) => {
     switch (status) {
       case "active":
@@ -145,9 +414,7 @@ const CustomerList: React.FC<CustomerListProps> = ({
   return (
     <div className="w-full bg-white p-6 rounded-lg shadow-sm">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-semibold text-gray-800">
-          Customer Accounts
-        </h2>
+        <h2 className="text-xl font-semibold text-gray-800">Customer Accounts</h2>
         <div className="flex space-x-2">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
@@ -187,12 +454,11 @@ const CustomerList: React.FC<CustomerListProps> = ({
                   <TableCell>{customer.name}</TableCell>
                   <TableCell>{customer.email}</TableCell>
                   <TableCell>
-                    <Badge
-                      variant="outline"
+                    <Badge 
+                      variant="outline" 
                       className={getStatusBadgeColor(customer.status)}
                     >
-                      {customer.status.charAt(0).toUpperCase() +
-                        customer.status.slice(1)}
+                      {customer.status}
                     </Badge>
                   </TableCell>
                   <TableCell>{customer.lastBillingDate}</TableCell>
@@ -205,20 +471,16 @@ const CustomerList: React.FC<CustomerListProps> = ({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => onViewCustomer(customer.id)}
-                        >
+                        <DropdownMenuItem onClick={() => onViewCustomer(customer.id)}>
                           <Eye className="mr-2 h-4 w-4" />
                           View Details
                         </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => onEditCustomer(customer.id)}
-                        >
+                        <DropdownMenuItem onClick={() => setEditingCustomer(customer)}>
                           <Edit className="mr-2 h-4 w-4" />
                           Edit
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          onClick={() => onDeleteCustomer(customer.id)}
+                          onClick={() => setDeletingCustomer(customer)}
                           className="text-red-600 focus:text-red-600"
                         >
                           <Trash className="mr-2 h-4 w-4" />
@@ -231,10 +493,7 @@ const CustomerList: React.FC<CustomerListProps> = ({
               ))
             ) : (
               <TableRow>
-                <TableCell
-                  colSpan={7}
-                  className="text-center py-6 text-gray-500"
-                >
+                <TableCell colSpan={7} className="text-center py-6 text-gray-500">
                   No customers found
                 </TableCell>
               </TableRow>
@@ -281,6 +540,10 @@ const CustomerList: React.FC<CustomerListProps> = ({
           </div>
         </div>
       )}
+
+      {/* Add these dialogs at the end of the return */}
+      <EditCustomerDialog />
+      <DeleteConfirmationDialog />
     </div>
   );
 };

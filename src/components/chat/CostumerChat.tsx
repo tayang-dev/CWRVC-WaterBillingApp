@@ -16,9 +16,13 @@ import {
   collection,
   query,
   orderBy,
-  getDocs,
+  onSnapshot,
   addDoc,
   serverTimestamp,
+  updateDoc,
+  doc,
+  getDoc,
+  increment,
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 
@@ -51,52 +55,79 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
   useEffect(() => {
     if (!accountNumber) return;
 
-    const fetchMessages = async () => {
-      setLoading(true);
-      try {
-        const messagesQuery = query(
-          collection(db, "chats", accountNumber, "messages"),
-          orderBy("timestamp", "asc")
-        );
-        const messagesSnapshot = await getDocs(messagesQuery);
-        const messagesList = messagesSnapshot.docs.map((doc) => ({
-          id: doc.id,
-          message: doc.get("message"),
-          sender: doc.get("sender"),
-          timestamp: doc.get("timestamp")?.toDate() || new Date(),
-        })) as Message[];
-        setMessages(messagesList);
-      } catch (error) {
-        console.error("Error fetching messages:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
+    const messagesQuery = query(
+      collection(db, "chats", accountNumber, "messages"),
+      orderBy("timestamp", "asc")
+    );
+    const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
+      const messagesList = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        message: doc.get("message"),
+        sender: doc.get("sender"),
+        timestamp: doc.get("timestamp")?.toDate() || new Date(),
+      })) as Message[];
+      setMessages(messagesList);
+      setLoading(false);
 
-    fetchMessages();
+      // Automatically mark messages as read when the chat is opened
+      markMessagesAsRead();
+    });
+
+    return () => unsubscribe();
   }, [accountNumber]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !accountNumber) return;
 
-    const messageData: Message = {
-      id: `msg-${Date.now()}`,
-      message: newMessage,
-      sender: userRole,
-      timestamp: new Date(),
-    };
-
-    setMessages([...messages, messageData]);
-    setNewMessage("");
-
     try {
+      // Reference to parent chat document
+      const chatDocRef = doc(db, "chats", accountNumber);
+
+      // Read current chat document to see if an admin reply already exists
+      const chatSnap = await getDoc(chatDocRef);
+      const currentLastMessageAdmin = chatSnap.exists() ? chatSnap.data()?.lastMessageAdmin || "" : "";
+
+      // Send the admin message in the messages subcollection
       await addDoc(collection(db, "chats", accountNumber, "messages"), {
-        message: messageData.message,
-        sender: messageData.sender,
+        message: newMessage,
+        sender: "admin",
         timestamp: serverTimestamp(),
       });
+
+      // Update the parent chat document with the admin reply details
+      await updateDoc(chatDocRef, {
+        lastMessageAdmin: newMessage,
+        lastMessageTime: serverTimestamp(),
+        unreadCount: increment(1),
+        hasNewMessage: true,
+      });
+
+      // If it is the first admin reply, add a notification
+      if (userRole === "admin" && !currentLastMessageAdmin.trim()) {
+        await addDoc(collection(db, "notifications", accountNumber, "records"), {
+          type: "customer_service",
+          message: newMessage,
+          sender: "admin",
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      setNewMessage("");
     } catch (error) {
       console.error("Error sending message:", error);
+    }
+  };
+
+  const markMessagesAsRead = async () => {
+    if (!accountNumber) return;
+
+    try {
+      await updateDoc(doc(db, "chats", accountNumber), {
+        hasNewMessage: false,
+        unreadCount: 0,
+      });
+    } catch (error) {
+      console.error("Error marking messages as read:", error);
     }
   };
 
@@ -125,13 +156,11 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
               {messages.map((msg) => (
                 <div
                   key={msg.id}
-                  className={`flex ${
-                    msg.sender === userRole ? "justify-end" : "justify-start"
-                  }`}
+                  className={`flex ${msg.sender === "admin" ? "justify-end" : "justify-start"}`}
                 >
                   <div
                     className={`max-w-[80%] rounded-lg p-3 ${
-                      msg.sender === userRole ? "bg-blue-100" : "bg-gray-100"
+                      msg.sender === "admin" ? "bg-blue-100" : "bg-gray-100"
                     }`}
                   >
                     <p className="text-sm">{msg.message}</p>

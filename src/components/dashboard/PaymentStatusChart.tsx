@@ -1,4 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { db } from "../../lib/firebase";
 import {
   Card,
   CardContent,
@@ -6,7 +8,6 @@ import {
   CardHeader,
   CardTitle,
 } from "../ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import {
   PieChart,
   Pie,
@@ -23,160 +24,143 @@ import {
   SelectValue,
 } from "../ui/select";
 
-interface PaymentStatusChartProps {
-  data?: Array<{
-    name: string;
-    value: number;
-    color: string;
-  }>;
-  title?: string;
-  description?: string;
-}
+const PaymentStatusChart = () => {
+  const [selectedSite, setSelectedSite] = useState("site1");
+  const [chartData, setChartData] = useState(getDefaultChartData());
 
-const PaymentStatusChart = ({
-  data = [
-    { name: "Paid", value: 540, color: "#4ade80" },
-    { name: "Pending", value: 320, color: "#facc15" },
-    { name: "Overdue", value: 210, color: "#f87171" },
-    { name: "Partially Paid", value: 170, color: "#60a5fa" },
-  ],
-  title = "Payment Status Distribution",
-  description = "Overview of customer payment statuses",
-}: PaymentStatusChartProps) => {
-  const [timeRange, setTimeRange] = useState("monthly");
-  const [viewType, setViewType] = useState("pie");
+  useEffect(() => {
+    const fetchPaymentsBySite = async () => {
+      try {
+        console.log(`🚀 Fetching customers for site: ${selectedSite}`);
 
-  // Custom tooltip for the pie chart
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-white p-3 border rounded-md shadow-md">
-          <p className="font-medium">{`${payload[0].name}: ${payload[0].value}`}</p>
-          <p className="text-sm text-gray-500">{`${Math.round((payload[0].value / total) * 100)}%`}</p>
-        </div>
-      );
-    }
-    return null;
-  };
+        // 🔹 Fetch customers based on the selected site
+        const customersQuery = query(
+          collection(db, "customers"),
+          where("site", "==", selectedSite)
+        );
+        const customersSnapshot = await getDocs(customersQuery);
 
-  // Calculate total for percentage
-  const total = data.reduce((sum, entry) => sum + entry.value, 0);
+        const customers = customersSnapshot.docs.map(doc => ({
+          id: doc.id,
+          accountNumber: doc.data().accountNumber
+        }));
+
+        console.log(`👥 Found ${customers.length} customers in ${selectedSite}:`, customers);
+
+        if (customers.length === 0) {
+          console.warn(`⚠️ No customers found in ${selectedSite}`);
+          setChartData(getDefaultChartData());
+          return;
+        }
+
+        let paymentStatusCounts = { Paid: 0, Pending: 0, Overdue: 0, "Partially Paid": 0 };
+
+        // 🔹 Loop through customers to fetch their bills
+        for (const customer of customers) {
+          console.log(`📄 Fetching bills for account: ${customer.accountNumber}`);
+
+          const recordsQuery = collection(db, "bills", customer.accountNumber, "records");
+          const recordsSnapshot = await getDocs(recordsQuery);
+
+          console.log(`📦 Found ${recordsSnapshot.docs.length} bills for account: ${customer.accountNumber}`);
+
+          recordsSnapshot.docs.forEach((doc) => {
+            const bill = doc.data();
+            console.log(`🔍 Bill Data (${doc.id}):`, bill);
+
+            // ✅ Normalize status (convert to lowercase)
+            const billStatus = bill.status.toLowerCase();
+
+            if (billStatus === "paid") paymentStatusCounts.Paid += 1;
+            else if (billStatus === "pending") paymentStatusCounts.Pending += 1;
+            else if (billStatus === "overdue") paymentStatusCounts.Overdue += 1;
+            else if (billStatus === "partially paid") paymentStatusCounts["Partially Paid"] += 1;
+            else console.warn(`⚠️ Unknown bill status: ${bill.status} in ${doc.id}`);
+          });
+        }
+
+        console.log("📊 Payment status counts:", paymentStatusCounts);
+
+        // ✅ Ensure at least one non-zero value in the dataset
+        const totalBills = Object.values(paymentStatusCounts).reduce((sum, val) => sum + val, 0);
+
+        if (totalBills === 0) {
+          console.warn(`⚠️ No billing data found for ${selectedSite}, showing default values.`);
+          setChartData(getDefaultChartData());
+        } else {
+          setChartData([
+            { name: "Paid", value: paymentStatusCounts.Paid, color: "#4ade80" },
+            { name: "Pending", value: paymentStatusCounts.Pending, color: "#facc15" },
+            { name: "Overdue", value: paymentStatusCounts.Overdue, color: "#f87171" },
+            { name: "Partially Paid", value: paymentStatusCounts["Partially Paid"], color: "#60a5fa" },
+          ]);
+        }
+      } catch (error) {
+        console.error("❌ Error fetching payment data:", error);
+      }
+    };
+
+    fetchPaymentsBySite();
+  }, [selectedSite]);
 
   return (
     <Card className="w-full h-full bg-white">
-      <CardHeader className="pb-2">
+      <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="text-xl font-semibold">{title}</CardTitle>
-            <CardDescription>{description}</CardDescription>
+            <CardTitle className="text-xl font-semibold">
+              Payment Status by Site
+            </CardTitle>
+            <CardDescription>View payments for each site</CardDescription>
           </div>
-          <div className="flex space-x-2">
-            <Select value={timeRange} onValueChange={setTimeRange}>
-              <SelectTrigger className="w-[130px]">
-                <SelectValue placeholder="Select period" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="weekly">Weekly</SelectItem>
-                <SelectItem value="monthly">Monthly</SelectItem>
-                <SelectItem value="quarterly">Quarterly</SelectItem>
-                <SelectItem value="yearly">Yearly</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {/* 🔹 Dropdown for site selection */}
+          <Select value={selectedSite} onValueChange={setSelectedSite}>
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Select Site" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="site1">Site 1</SelectItem>
+              <SelectItem value="site2">Site 2</SelectItem>
+              <SelectItem value="site3">Site 3</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </CardHeader>
+
       <CardContent>
-        <Tabs value={viewType} onValueChange={setViewType} className="w-full">
-          <TabsList className="mb-4">
-            <TabsTrigger value="pie">Pie Chart</TabsTrigger>
-            <TabsTrigger value="donut">Donut Chart</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="pie" className="w-full h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={data}
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="value"
-                  label={({ name, percent }) =>
-                    `${name} ${(percent * 100).toFixed(0)}%`
-                  }
-                  labelLine={false}
-                >
-                  {data.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip content={<CustomTooltip />} />
-                <Legend
-                  layout="horizontal"
-                  verticalAlign="bottom"
-                  align="center"
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </TabsContent>
-
-          <TabsContent value="donut" className="w-full h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={data}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={70}
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="value"
-                  label={({ name, percent }) =>
-                    `${name} ${(percent * 100).toFixed(0)}%`
-                  }
-                  labelLine={false}
-                >
-                  {data.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip content={<CustomTooltip />} />
-                <Legend
-                  layout="horizontal"
-                  verticalAlign="bottom"
-                  align="center"
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </TabsContent>
-        </Tabs>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-4">
-          {data.map((status, index) => (
-            <div
-              key={index}
-              className="flex flex-col items-center p-2 rounded-lg border"
+        <ResponsiveContainer width="100%" height={300}>
+          <PieChart>
+            <Pie
+              data={chartData}
+              cx="50%"
+              cy="50%"
+              outerRadius={100}
+              fill="#8884d8"
+              dataKey="value"
+              label={({ name, percent, value }) =>
+                percent > 0 ? `${name}: ${value} (${(percent * 100).toFixed(0)}%)` : ""
+              }
+              labelLine={false}
             >
-              <div className="flex items-center space-x-2">
-                <div
-                  className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: status.color }}
-                ></div>
-                <span className="font-medium">{status.name}</span>
-              </div>
-              <div className="mt-1">
-                <span className="text-lg font-semibold">{status.value}</span>
-                <span className="text-sm text-gray-500 ml-1">
-                  ({Math.round((status.value / total) * 100)}%)
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
+              {chartData.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={entry.color} />
+              ))}
+            </Pie>
+            <Tooltip />
+            <Legend layout="horizontal" verticalAlign="bottom" align="center" />
+          </PieChart>
+        </ResponsiveContainer>
       </CardContent>
     </Card>
   );
 };
+
+// 🔹 Helper function for default chart values
+const getDefaultChartData = () => [
+  { name: "Paid", value: 1, color: "#4ade80" },
+  { name: "Pending", value: 1, color: "#facc15" },
+  { name: "Overdue", value: 1, color: "#f87171" },
+  { name: "Partially Paid", value: 1, color: "#60a5fa" },
+];
 
 export default PaymentStatusChart;
