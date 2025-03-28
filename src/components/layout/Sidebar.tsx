@@ -116,6 +116,20 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
     setOpenSection(openSection === section ? null : section);
   };
 
+  const handleLogout = async () => {
+    const confirmLogout = window.confirm("Are you sure you want to log out?");
+    if (confirmLogout) {
+      try {
+        const { signOut } = await import("firebase/auth");
+        const { auth } = await import("../../lib/firebase");
+        await signOut(auth);
+        window.location.href = "/";
+      } catch (error) {
+        console.error("Logout error:", error);
+      }
+    }
+  };
+
   return (
     <div
       className={cn(
@@ -227,16 +241,7 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
         <Button
           variant="outline"
           className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
-          onClick={async () => {
-            try {
-              const { signOut } = await import("firebase/auth");
-              const { auth } = await import("../../lib/firebase");
-              await signOut(auth);
-              window.location.href = "/";
-            } catch (error) {
-              console.error("Logout error:", error);
-            }
-          }}
+          onClick={handleLogout}
         >
           <LogOut className="h-5 w-5 mr-2" />
           {!collapsed && "Logout"}

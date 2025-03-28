@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, addDoc, query, where, orderBy, limit } from "firebase/firestore";
+import { collection, addDoc } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 
 import {
@@ -34,19 +34,55 @@ import {
 import { AlertCircle } from "lucide-react";
 
 const formSchema = z.object({
-  name: z.string().min(2, { message: "Name must be at least 2 characters." }),
-  email: z.string().email().optional().or(z.literal("")), // Optional email
-  phone: z.string().min(10, { message: "Phone number must be at least 10 characters." }),
+  name: z.string()
+    .trim()
+    .min(2, { message: "Name must be at least 2 characters." })
+    .regex(/^[A-Za-z.\- ]+$/, "Only letters, dot (.), dash (-) and spaces are allowed")
+    .refine((val) => val.trim().length > 0, { message: "Name cannot be empty or spaces only." }),
+
+  email: z.string()
+    .email("Invalid email address")
+    .optional(),
+
+  phone: z.string()
+    .optional()
+    .refine((val) => !val || (/^0\d{10}$/.test(val)), { message: "Phone must be exactly 11 digits and start with 0" }),
+
   site: z.string().min(1, { message: "Please select a site location." }),
+
   isSenior: z.boolean().default(false),
-  accountNumber: z.string().min(7, { message: "Invalid account number format." }), // Validated format
+
+  accountNumber: z.string(),
+
+  meterNumber: z.string()
+    .min(1, { message: "Meter number is required" })
+    .regex(/^[0-9\-]+$/, "Meter number can only contain numbers and dash (-)"),
+
+  block: z.string()
+    .min(2, { message: "Block must be at least 2 characters." })
+    .max(3, { message: "Block cannot exceed 3 characters." })
+    .regex(/^[A-Za-z0-9]+$/, "Block can only contain letters and numbers"),
+
+  lot: z.string()
+    .min(2, { message: "Lot must be at least 2 characters." })
+    .max(3, { message: "Lot cannot exceed 3 characters." })
+    .regex(/^[A-Za-z0-9]+$/, "Lot can only contain letters and numbers"),
+}).refine((data) => data.email || data.phone, {
+  message: "At least one of email or phone number is required.",
+  path: ["email"],
 });
+
 
 interface AddCustomerFormProps {
   defaultValues?: Partial<z.infer<typeof formSchema>>;
   onSubmit?: (data: z.infer<typeof formSchema>) => void;
   onCancel?: () => void;
 }
+const handleNumberOnly = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (!/^[0-9]$/.test(e.key) && e.key !== "Backspace" && e.key !== "Tab") {
+    e.preventDefault();
+  }
+};
 
 const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
   onSubmit = () => {},
@@ -54,7 +90,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [generatedAccountNumber, setGeneratedAccountNumber] = useState("01-01-001");
+  const [generatedAccountNumber, setGeneratedAccountNumber] = useState("");
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -62,53 +98,40 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
       name: "",
       email: "",
       phone: "",
-      site: "site1",
+      site: "",
       isSenior: false,
-      accountNumber: generatedAccountNumber, // Initial default value
+      accountNumber: "",
+      meterNumber: "",
+      block: "",
+      lot: "",
     },
   });
 
-  // Generate Account Number based on Site
-  const generateAccountNumber = async (selectedSite: string) => {
-    try {
-      const siteCode = selectedSite === "site1" ? "01" :
-                       selectedSite === "site2" ? "02" : "03";
+  // ✨ Generate Account Number based on block, lot, site
+  const generateAccountNumber = (block: string, lot: string, selectedSite: string) => {
+    const siteCode = selectedSite === "site1" ? "15" :
+                     selectedSite === "site2" ? "14" :
+                     selectedSite === "site3" ? "12" : "00";
 
-      const customersRef = collection(db, "customers");
-      const q = query(customersRef, where("site", "==", selectedSite), orderBy("accountNumber", "desc"), limit(1));
-      const querySnapshot = await getDocs(q);
+    if (!block || !lot) return "";
 
-      let newAccountNumber = `${siteCode}-01-001`; // Default first entry
+    const blockNum = block.padStart(2, "0");
+    const blockLot = (block + lot).padStart(4, "0");
 
-      if (!querySnapshot.empty) {
-        const latestAccount = querySnapshot.docs[0].data().accountNumber;
-        console.log("🔍 Latest Account Found:", latestAccount);
-
-        const [latestSite, latestBlock, latestCustomer] = latestAccount.split("-").map(Number);
-
-        let newBlock = latestBlock;
-        let newCustomerNum = latestCustomer + 1;
-
-        if (newCustomerNum > 999) {
-          newCustomerNum = 1;
-          newBlock++;
-        }
-
-        newAccountNumber = `${siteCode}-${String(newBlock).padStart(2, "0")}-${String(newCustomerNum).padStart(3, "0")}`;
-      }
-
-      console.log(`✅ Generated Account Number: ${newAccountNumber}`);
-      setGeneratedAccountNumber(newAccountNumber);
-      form.setValue("accountNumber", newAccountNumber); // Updates form value
-    } catch (error) {
-      console.error("❌ Error generating account number:", error);
-    }
+    return `${blockNum}-${siteCode}-${blockLot}`;
   };
 
-  // Generate new account number when form loads
+  // Auto-generate account number when block, lot or site changes
   useEffect(() => {
-    generateAccountNumber("site1");
-  }, []);
+    const subscription = form.watch((values) => {
+      if (values.block && values.lot && values.site) {
+        const accountNum = generateAccountNumber(values.block, values.lot, values.site);
+        setGeneratedAccountNumber(accountNum);
+        form.setValue("accountNumber", accountNum);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [form]);
 
   const handleSubmit = async (data: z.infer<typeof formSchema>) => {
     setIsSubmitting(true);
@@ -123,22 +146,19 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
 
       const customerData = {
         ...data,
-        email: data.email || null, // Store empty email as `null`
-        accountNumber: generatedAccountNumber, // Assign generated account number
+        email: data.email || null,
+        accountNumber: generatedAccountNumber,
         address: siteAddresses[data.site as keyof typeof siteAddresses],
         joinDate: new Date().toISOString().split("T")[0],
         lastBillingDate: new Date().toISOString().split("T")[0],
         amountDue: 0,
-        status: "active", // Set default status to "active"
+        status: "active",
       };
 
-      // Save to Firestore
-      const docRef = await addDoc(collection(db, "customers"), customerData);
-      console.log("✅ Customer added with ID:", docRef.id);
-      
+      await addDoc(collection(db, "customers"), customerData);
       onSubmit({ ...data, accountNumber: generatedAccountNumber });
       form.reset();
-      generateAccountNumber(data.site); // Generate new account number for next customer
+      setGeneratedAccountNumber("");
     } catch (error: any) {
       setError(error.message || "An error occurred while adding the customer");
     } finally {
@@ -162,6 +182,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
         <Form {...form}>
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Customer Name</FormLabel>
@@ -172,7 +193,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
 
               <FormField control={form.control} name="email" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Email Address (Optional)</FormLabel>
+                  <FormLabel>Email Address</FormLabel>
                   <FormControl><Input placeholder="juandelacruz@example.com" {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
@@ -181,15 +202,23 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
               <FormField control={form.control} name="phone" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Phone Number</FormLabel>
-                  <FormControl><Input placeholder="09122341234" {...field} /></FormControl>
+                  <FormControl>
+                    <Input 
+                      placeholder="09123456789" 
+                      maxLength={11} 
+                      inputMode="numeric" 
+                      {...field}
+                      onKeyDown={handleNumberOnly}
+                    />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
 
-              <FormField control={form.control} name="accountNumber" render={() => (
+              <FormField control={form.control} name="accountNumber" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Account Number</FormLabel>
-                  <FormControl><Input value={generatedAccountNumber} disabled /></FormControl>
+                  <FormControl><Input readOnly value={generatedAccountNumber} placeholder="Auto-generated" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -197,10 +226,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
               <FormField control={form.control} name="site" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Site Location</FormLabel>
-                  <Select onValueChange={(value) => {
-                    field.onChange(value);
-                    generateAccountNumber(value);
-                  }} defaultValue={field.value}>
+                  <Select onValueChange={(value) => field.onChange(value)} defaultValue={field.value}>
                     <FormControl><SelectTrigger><SelectValue placeholder="Select site location" /></SelectTrigger></FormControl>
                     <SelectContent>
                       <SelectItem value="site1">Site 1</SelectItem>
@@ -212,13 +238,34 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
                 </FormItem>
               )} />
 
+              <FormField control={form.control} name="meterNumber" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Meter Number</FormLabel>
+                  <FormControl><Input placeholder="Enter meter number" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="block" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Block</FormLabel>
+                  <FormControl><Input placeholder="Block" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="lot" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Lot</FormLabel>
+                  <FormControl><Input placeholder="Lot" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
               <FormField control={form.control} name="isSenior" render={({ field }) => (
                 <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
                   <FormControl>
-                    <Checkbox
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
+                    <Checkbox checked={field.value} onCheckedChange={field.onChange} />
                   </FormControl>
                   <div className="space-y-1 leading-none">
                     <FormLabel>Senior Citizen</FormLabel>
@@ -226,19 +273,14 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
                   </div>
                 </FormItem>
               )} />
+
             </div>
           </form>
         </Form>
       </CardContent>
       <CardFooter className="flex justify-between border-t p-6">
-        <Button variant="outline" onClick={onCancel} disabled={isSubmitting}>
-          Cancel
-        </Button>
-        <Button
-          onClick={form.handleSubmit(handleSubmit)}
-          disabled={isSubmitting}
-          className="bg-blue-600 hover:bg-blue-700"
-        >
+        <Button variant="outline" onClick={onCancel} disabled={isSubmitting}>Cancel</Button>
+        <Button onClick={form.handleSubmit(handleSubmit)} disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700">
           {isSubmitting ? "Adding Customer..." : "Add Customer"}
         </Button>
       </CardFooter>

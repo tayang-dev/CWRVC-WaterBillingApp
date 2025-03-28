@@ -86,7 +86,8 @@ interface Bill {
   id?: string;
   customerId: string;
   date: string;
-  amount: number;
+  amount: number;         // This is the current (remaining) amount due
+  originalAmount: number; // This holds the original bill amount
   status: "pending" | "paid" | "overdue";
   dueDate: string;
   description?: string;
@@ -106,8 +107,9 @@ interface Bill {
   penalty?: number;
   amountAfterDue?: number;
   currentAmountDue?: number;
-  billNumber?: string; // Optional property added for auto-increment
+  billNumber?: string;
 }
+
 
 const PaymentManagement = () => {
   const [activeTab, setActiveTab] = useState("payment-methods");
@@ -517,20 +519,34 @@ const PaymentManagement = () => {
           console.log(`✅ Retrieved accountNumber: ${accountNumber}`);
         }
       }
-      if (!customerId) {
-        const customersCollection = collection(db, "customers");
-        const customerQuery = query(customersCollection, where("accountNumber", "==", accountNumber));
-        const customerSnapshot = await getDocs(customerQuery);
-        if (!customerSnapshot.empty) {
-          const customerDoc = customerSnapshot.docs[0];
-          customerId = customerDoc.id;
-          console.log(`✅ Found customerId: ${customerId} for accountNumber: ${accountNumber}`);
-        } else {
-          console.error(`❌ No customer found with accountNumber: ${accountNumber}`);
-          alert("No customer found with the provided account number.");
-          return;
-        }
+  
+      // Check if accountNumber is valid
+      if (!accountNumber) {
+        console.error("❌ Error: No account number found.");
+        alert("No account number found. Please check the verification details.");
+        return;
       }
+  
+      // Check if the customer exists with the given account number
+      const customersCollection = collection(db, "customers");
+      const customerQuery = query(customersCollection, where("accountNumber", "==", accountNumber));
+      const customerSnapshot = await getDocs(customerQuery);
+      if (customerSnapshot.empty) {
+        console.error(`❌ No customer found with accountNumber: ${accountNumber}`);
+        // Reject the verification if the account number is wrong
+        await deleteDoc(doc(db, "paymentVerifications", selectedVerification.id));
+        alert("No customer found with the provided account number. Payment verification has been rejected.");
+        setSelectedVerification(null);
+        setVerificationStatus("rejected");
+        setVerificationNotes("");
+        setIsVerificationDialogOpen(false);
+        return;
+      }
+  
+      // If customer is found, retrieve customerId
+      const customerDoc = customerSnapshot.docs[0];
+      customerId = customerDoc.id;
+      console.log(`✅ Found customerId: ${customerId} for accountNumber: ${accountNumber}`);
   
       // If verification is rejected, delete verification doc and notify.
       if (verificationStatus === "rejected") {
@@ -671,7 +687,6 @@ const PaymentManagement = () => {
       setIsProcessing(false);
     }
   };
-
 
 
 
@@ -839,7 +854,7 @@ const PaymentManagement = () => {
       const current = parseInt(currentReading) || 0;
       const usage = Math.max(current - previous, 0);
   
-      // Water charge before tax from the helper function.
+      // Calculate charges.
       const waterChargeBeforeTax = calculateWaterCharge(usage);
       const tax = waterChargeBeforeTax * 0.02;
       const rawTotal = waterChargeBeforeTax + tax;
@@ -848,7 +863,7 @@ const PaymentManagement = () => {
       const penalty = discountedTotal * 0.1;
       const totalAmountDue = discountedTotal + penalty;
   
-      // Format due date as dd/mm/yyyy.
+      // Helper to format due date as dd/mm/yyyy.
       const formatToDDMMYYYY = (dateString: string): string => {
         if (!dateString) return "";
         const dateObj = new Date(dateString);
@@ -859,10 +874,12 @@ const PaymentManagement = () => {
       };
   
       // Build the bill data object.
-      const billData: Bill & { billNumber?: string } = {
+      // We extend the Bill type with an optional "arrears" field.
+      const billData: Bill & { arrears?: number } = {
         customerId: selectedCustomer.id,
         date: new Date().toLocaleDateString("en-US"),
-        amount: discountedTotal,
+        amount: discountedTotal,        // Remaining amount, which will decrease with payments.
+        originalAmount: discountedTotal, // Store the original bill amount here.
         status: "pending",
         dueDate: formatToDDMMYYYY(billDueDate),
         billingPeriod,
@@ -878,33 +895,47 @@ const PaymentManagement = () => {
         penalty,
         amountAfterDue: totalAmountDue,
         currentAmountDue: totalAmountDue,
+        // billNumber will be added after auto-increment logic.
       };
   
+      // Import Firestore functions.
       const { collection, addDoc, doc, updateDoc, getDoc, setDoc, getDocs } =
         await import("firebase/firestore");
       const { db } = await import("../../lib/firebase");
   
-      // Auto-increment billNumber based on existing bills.
+      // Reference the customer's bills collection.
       const billsCollectionRef = collection(db, "bills", billAccountNumber, "records");
+  
+      // Get all existing bills (the new bill is not added yet).
       const billsSnapshot = await getDocs(billsCollectionRef);
+  
+      // Sum the amount of all previous bills.
+      let arrears = 0;
+      billsSnapshot.forEach((billDoc) => {
+        const bill = billDoc.data() as Bill;
+        arrears += bill.amount || 0;
+      });
+      // Store the arrears in the new bill data.
+      billData.arrears = arrears;
+  
+      // Auto-increment billNumber based on the number of existing bills.
       const currentBillCount = billsSnapshot.size;
       billData.billNumber = (currentBillCount + 1).toString().padStart(10, "0");
   
-      // Create the bill document.
+      // Create the new bill document.
       await addDoc(billsCollectionRef, billData);
   
       // Update customer's last reading.
       const customerRef = doc(db, "customers", selectedCustomer.id);
       await updateDoc(customerRef, { lastReading: current });
   
-      // Update updatedPayments (add the discountedTotal to existing amount).
+      // Update updatedPayments (add the discountedTotal to the existing amount).
       const updatedPaymentsRef = doc(db, "updatedPayments", billAccountNumber);
       const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
       const previousAmount = updatedPaymentsSnap.exists()
         ? updatedPaymentsSnap.data().amount || 0
         : 0;
       const newAmount = previousAmount + discountedTotal;
-  
       await setDoc(
         updatedPaymentsRef,
         {
@@ -933,6 +964,13 @@ const PaymentManagement = () => {
       setIsProcessing(false);
     }
   };
+  
+
+
+
+
+
+  
 
   const handleDueDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newDueDate = e.target.value;

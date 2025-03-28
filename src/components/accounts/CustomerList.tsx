@@ -73,6 +73,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 
+// Updated form schema to include block, lot, and meterNumber
 const formSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }),
   email: z.string().email().optional().or(z.literal("")),
@@ -80,6 +81,9 @@ const formSchema = z.object({
   site: z.string().min(1, { message: "Please select a site location." }),
   isSenior: z.boolean().default(false),
   accountNumber: z.string().min(7, { message: "Invalid account number format." }),
+  meterNumber: z.string().optional(), // Added meterNumber
+  block: z.string().optional(), // Added block
+  lot: z.string().optional(), // Added lot
 });
 
 interface Customer {
@@ -88,6 +92,9 @@ interface Customer {
   email: string;
   address: string;
   accountNumber: string;
+  meterNumber: string;
+  block: string;
+  lot: string;
   status: "active" | "inactive" | "pending";
   lastBillingDate: string;
   amountDue: number;
@@ -112,6 +119,20 @@ const CustomerList: React.FC<CustomerListProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const itemsPerPage = 10;
+
+  // Account Number Generation Logic
+  const generateAccountNumber = (block: string, lot: string, selectedSite: string) => {
+    const siteCode = selectedSite === "site1" ? "15" :
+                     selectedSite === "site2" ? "14" :
+                     selectedSite === "site3" ? "12" : "00";
+
+    if (!block || !lot) return "";
+
+    const blockNum = block.padStart(2, "0");
+    const blockLot = (block + lot).padStart(4, "0");
+
+    return `${blockNum}-${siteCode}-${blockLot}`;
+  };
 
   useEffect(() => {
     fetchCustomers();
@@ -169,6 +190,9 @@ const CustomerList: React.FC<CustomerListProps> = ({
             site: customerData.site,
             isSenior: customerData.isSenior,
             phone: customerData.phone,
+            meterNumber: customerData.meterNumber || "",   // <-- added
+            block: customerData.block || "",               // <-- added
+            lot: customerData.lot || "",    
           };
         })
       );
@@ -179,8 +203,6 @@ const CustomerList: React.FC<CustomerListProps> = ({
     }
   };
   
-  
-
   // Edit Customer Handler
   const handleEditCustomer = async (data: z.infer<typeof formSchema>) => {
     if (!editingCustomer) return;
@@ -195,17 +217,18 @@ const CustomerList: React.FC<CustomerListProps> = ({
         site3: "Site 3, Brgy. Dayap, Calauan, Laguna",
       };
 
+      // Use the copied account number generation logic
+      const accountNumber = generateAccountNumber(data.block || "", data.lot || "", data.site || "");
+
       const customerRef = doc(db, "customers", editingCustomer.id);
       await updateDoc(customerRef, {
         ...data,
+        accountNumber, // updated account number
         email: data.email || null,
         address: siteAddresses[data.site as keyof typeof siteAddresses],
       });
 
-      // Refresh customer list
       await fetchCustomers();
-      
-      // Close dialog
       setEditingCustomer(null);
     } catch (error: any) {
       setError(error.message || "An error occurred while updating the customer");
@@ -248,6 +271,9 @@ const CustomerList: React.FC<CustomerListProps> = ({
         site: editingCustomer.site || "site1",
         isSenior: editingCustomer.isSenior || false,
         accountNumber: editingCustomer.accountNumber,
+        meterNumber: editingCustomer.meterNumber || "",
+        block: editingCustomer.block || "",
+        lot: editingCustomer.lot || "",
       } : undefined,
     });
 
@@ -281,7 +307,7 @@ const CustomerList: React.FC<CustomerListProps> = ({
 
                 <FormField control={form.control} name="email" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Email Address (Optional)</FormLabel>
+                    <FormLabel>Email Address</FormLabel>
                     <FormControl><Input {...field} /></FormControl>
                     <FormMessage />
                   </FormItem>
@@ -325,6 +351,30 @@ const CustomerList: React.FC<CustomerListProps> = ({
                         <SelectItem value="site3">Site 3</SelectItem>
                       </SelectContent>
                     </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={form.control} name="meterNumber" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Meter Number</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={form.control} name="block" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Block</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={form.control} name="lot" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Lot</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />

@@ -1,42 +1,37 @@
 import React, { useState } from "react";
-import { Droplets } from "lucide-react";
 import LoginForm from "./auth/LoginForm";
 import { useAuth } from "../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 
 const Home = () => {
-  const { login, forgotPassword, error, clearError } = useAuth();
+  const { login, forgotPassword, error } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
   const navigate = useNavigate();
 
-  const handleLogin = async (values: {
-    email: string;
-    password: string;
-    role: "admin" | "staff";
-  }) => {
+  // Define allowed emails
+  const allowedEmails = {
+    admin: "centennialwaterventureresource@gmail.com",
+    staff: "sarahfabella11@gmail.com",
+  };
+
+  const handleLogin = async (values) => {
     setIsLoading(true);
     setLoginError("");
     try {
-      await login(values.email, values.password, values.role);
-      navigate("/dashboard");
-    } catch (err: any) {
-      console.error("Login error:", err);
+      // Check if the email is allowed
       if (
-        err.code === "auth/invalid-credential" ||
-        err.code === "auth/user-not-found" ||
-        err.code === "auth/wrong-password"
+        values.email === allowedEmails.admin ||
+        values.email === allowedEmails.staff
       ) {
-        setLoginError("Invalid email or password. Please try again.");
-      } else if (err.code === "auth/too-many-requests") {
-        setLoginError(
-          "Too many failed login attempts. Please try again later or reset your password."
-        );
+        await login(values.email, values.password, values.role);
+        navigate("/dashboard");
       } else {
-        setLoginError(
-          err.message || "Failed to login. Please check your credentials."
-        );
+        throw new Error("Unauthorized email. Please use a valid email.");
       }
+    } catch (err) {
+      console.error("Login error:", err);
+      setLoginError(err.message || "Invalid email or password. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -48,53 +43,66 @@ const Home = () => {
       try {
         await forgotPassword(email);
         alert("Password reset email sent. Please check your inbox.");
-      } catch (err: any) {
+      } catch (err) {
         alert(err.message || "Failed to send password reset email.");
       }
     }
   };
 
   return (
-    <div className="relative min-h-screen w-full">
+    <div className="relative min-h-screen flex items-center justify-center overflow-hidden">
       {/* Background Image */}
       <div
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        className="absolute inset-0 bg-cover bg-center"
         style={{
-          backgroundImage: "url('/src/assets/background.jpg')",
+          backgroundImage: "url('/assets/background.jpg')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
         }}
-      ></div>
+      />
 
-      {/* Gradient Overlay for readability */}
-    
-
-      {/* Main Content */}
-      <div className="relative z-10 flex items-center justify-end min-h-screen p-6 sm:p-8">
-        {/* Login Card */}
-        <div className="w-full max-w-md bg-white/90 backdrop-blur-sm rounded-xl shadow-2xl p-8">
-          <div className="flex flex-col items-center mb-6">
-            <div className="flex items-center justify-center mb-3">
-              <Droplets className="h-14 w-14 text-blue-600 mr-2" />
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-blue-800">
-                CWRVC Water Billing
-              </h1>
+      {/* Login Container */}
+      <div className="relative z-10 w-full max-w-6xl px-4">
+        <div className="bg-white shadow-2xl rounded-2xl overflow-hidden flex flex-col md:flex-row">
+          {/* Left Side - Company Info */}
+          <div className="md:w-1/2 bg-gradient-to-br from-blue-600 to-blue-800 text-white p-8 md:p-12 flex flex-col justify-center">
+            <div className="flex flex-col md:flex-row items-center mb-6 md:mb-8">
+              <img
+                src="/assets/logo.png"
+                alt="Company Logo"
+                className="h-16 w-16 md:h-20 md:w-20 mb-4 md:mb-0 md:mr-6 rounded-full border-4 border-white shadow-lg"
+              />
+              <h2 className="text-2xl md:text-4xl font-extrabold tracking-tight text-center md:text-left">
+                Centennial Water Resource Venture Corporation
+              </h2>
             </div>
-            <p className="text-gray-600 text-sm sm:text-base text-center">
-              Secure access for authorized personnel only
+            <p className="text-base md:text-xl leading-relaxed opacity-90 mb-4 md:mb-6 text-center md:text-left">
+              Welcome to your water billing portal. Seamlessly manage your water services,
+              track usage, and handle billing with ease and convenience.
             </p>
+            <div className="hidden md:block border-t border-blue-400 pt-6">
+              <p className="text-sm md:text-base italic opacity-75 text-center md:text-left">
+                Empowering communities through efficient water resource management
+              </p>
+            </div>
           </div>
 
-          <LoginForm
-            onSubmit={handleLogin}
-            onForgotPassword={handleForgotPassword}
-            isLoading={isLoading}
-            error={loginError || error || ""}
-          />
-
-          <div className="mt-8 text-center text-xs text-gray-500">
-            <p>
-              &copy; {new Date().getFullYear()} Water Utility Company. All rights reserved.
-            </p>
+          {/* Right Side - Login Form */}
+          <div className="md:w-1/2 p-6 md:p-12 flex items-center justify-center bg-white">
+            <div className="w-full max-w-md">
+              <LoginForm
+                onSubmit={handleLogin}
+                onForgotPassword={handleForgotPassword}
+                isLoading={isLoading}
+                error={loginError || error || ""}
+              />
+            </div>
           </div>
+        </div>
+
+        {/* Mobile-only Tagline */}
+        <div className="md:hidden text-center text-sm text-white mt-4 relative z-10">
+          Empowering communities through efficient water resource management
         </div>
       </div>
     </div>

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Eye, EyeOff, Lock, Mail, AlertCircle, User } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,15 +21,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
+// Define the schema for form validation
 const formSchema = z.object({
   email: z.string().email({
     message: "Please enter a valid email address.",
@@ -37,11 +30,13 @@ const formSchema = z.object({
   password: z.string().min(6, {
     message: "Password must be at least 6 characters.",
   }),
-  role: z.enum(["admin", "staff"]),
 });
 
+// Define the type for form values
+type FormValues = z.infer<typeof formSchema> & { role?: string };
+
 interface LoginFormProps {
-  onSubmit?: (values: z.infer<typeof formSchema>) => void;
+  onSubmit?: (values: FormValues) => void;
   onForgotPassword?: () => void;
   isLoading?: boolean;
   error?: string;
@@ -55,17 +50,35 @@ const LoginForm = ({
 }: LoginFormProps) => {
   const [showPassword, setShowPassword] = useState(false);
 
-  const form = useForm<z.infer<typeof formSchema>>({
+  const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       email: "",
       password: "",
-      role: "admin",
     },
   });
 
-  const handleSubmit = (values: z.infer<typeof formSchema>) => {
-    onSubmit(values);
+  const handleSubmit = (values: FormValues) => {
+    // Define allowed emails
+    const allowedEmails = {
+      admin: "centennialwaterventureresource@gmail.com",
+      staff: "sarahfabella11@gmail.com",
+    };
+
+    // Check if the email is allowed and redirect accordingly
+    if (values.email === allowedEmails.admin) {
+      // Redirect to admin dashboard
+      onSubmit({ ...values, role: "admin" }); // Include role in the submission
+    } else if (values.email === allowedEmails.staff) {
+      // Redirect to staff dashboard
+      onSubmit({ ...values, role: "staff" }); // Include role in the submission
+    } else {
+      // Set an error message if the email is not allowed
+      form.setError("email", {
+        type: "manual",
+        message: "Unauthorized email. Please use a valid email.",
+      });
+    }
   };
 
   return (
@@ -142,33 +155,6 @@ const LoginForm = ({
                 </FormItem>
               )}
             />
-            <FormField
-              control={form.control}
-              name="role"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Role</FormLabel>
-                  <div className="relative">
-                    <User className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-                    <Select
-                      onValueChange={field.onChange}
-                      defaultValue={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger className="pl-10">
-                          <SelectValue placeholder="Select your role" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="admin">Admin</SelectItem>
-                        <SelectItem value="staff">Staff</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
             <div className="flex items-center justify-end">
               <button
                 type="button"
@@ -190,10 +176,10 @@ const LoginForm = ({
       </CardContent>
       <CardFooter className="flex flex-col space-y-4 border-t px-6 py-4 bg-gray-50">
         <div className="text-center text-sm text-gray-600">
-          <p>Water Billing App - Admin Portal</p>
+          <p>Water Billing Web-App - Admin Portal</p>
           <p className="mt-1 text-xs text-gray-500">
-            &copy; {new Date().getFullYear()} Water Utility Company
-          </p>
+            &copy; {new Date().getFullYear()} Water Utility Company          
+            </p>
         </div>
       </CardFooter>
     </Card>

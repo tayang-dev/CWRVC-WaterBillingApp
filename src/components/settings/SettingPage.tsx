@@ -7,7 +7,6 @@ import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -19,7 +18,6 @@ import * as z from "zod";
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -63,7 +61,7 @@ const SettingsPage = () => {
   });
 
   const handleChangePassword = async (
-    values: z.infer<typeof passwordSchema>,
+    values: z.infer<typeof passwordSchema>
   ) => {
     setIsSubmitting(true);
     setSuccessMessage("");
@@ -86,7 +84,7 @@ const SettingsPage = () => {
       // Re-authenticate user before changing password
       const credential = EmailAuthProvider.credential(
         user.email,
-        values.currentPassword,
+        values.currentPassword
       );
 
       await reauthenticateWithCredential(user, credential);
@@ -102,7 +100,7 @@ const SettingsPage = () => {
         setErrorMessage("Current password is incorrect");
       } else if (error.code === "auth/requires-recent-login") {
         setErrorMessage(
-          "For security reasons, please log out and log back in before changing your password",
+          "For security reasons, please log out and log back in before changing your password"
         );
       } else {
         setErrorMessage(error.message || "Failed to change password");
@@ -113,34 +111,41 @@ const SettingsPage = () => {
   };
 
   return (
-    <div className="w-full h-full bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50 py-10 px-4">
       <div className="max-w-4xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-800">Settings</h1>
+        <header className="mb-8 text-center">
+          <h1 className="text-3xl font-bold text-gray-800">Settings</h1>
           <p className="text-gray-500">
-            Manage your account settings and preferences
+            Manage your account and security settings
           </p>
-        </div>
+        </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="mb-6">
-            <TabsTrigger value="account">Account</TabsTrigger>
-            <TabsTrigger value="security">Security</TabsTrigger>
-            <TabsTrigger value="preferences">Preferences</TabsTrigger>
+          <TabsList className="mb-6 flex justify-center space-x-4 border-b">
+            <TabsTrigger value="account" className="px-4 py-2">
+              Account
+            </TabsTrigger>
+            <TabsTrigger value="security" className="px-4 py-2">
+              Security
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="account" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Account Information</CardTitle>
-                <CardDescription>
-                  View and update your account details
+            <Card className="shadow-md border">
+              <CardHeader className="border-b px-6 py-4">
+                <CardTitle className="text-xl font-semibold">
+                  Account Information
+                </CardTitle>
+                <CardDescription className="text-gray-500">
+                  View your account details
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="px-6 py-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <Label htmlFor="email">Email Address</Label>
+                    <Label htmlFor="email" className="block mb-1">
+                      Email Address
+                    </Label>
                     <Input
                       id="email"
                       value={currentUser?.email || ""}
@@ -149,7 +154,9 @@ const SettingsPage = () => {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="role">Role</Label>
+                    <Label htmlFor="role" className="block mb-1">
+                      Role
+                    </Label>
                     <Input
                       id="role"
                       value={userRole === "admin" ? "Administrator" : "Staff"}
@@ -163,23 +170,25 @@ const SettingsPage = () => {
           </TabsContent>
 
           <TabsContent value="security" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Change Password</CardTitle>
-                <CardDescription>
+            <Card className="shadow-md border">
+              <CardHeader className="border-b px-6 py-4">
+                <CardTitle className="text-xl font-semibold">
+                  Change Password
+                </CardTitle>
+                <CardDescription className="text-gray-500">
                   Update your password to keep your account secure
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="px-6 py-4">
                 {successMessage && (
-                  <div className="flex items-center gap-2 p-3 mb-4 text-sm rounded-md bg-green-50 text-green-600">
+                  <div className="flex items-center gap-2 mb-4 p-3 text-sm text-green-600 bg-green-50 rounded-md">
                     <Check className="h-4 w-4" />
                     <span>{successMessage}</span>
                   </div>
                 )}
 
                 {errorMessage && (
-                  <div className="flex items-center gap-2 p-3 mb-4 text-sm rounded-md bg-red-50 text-red-600">
+                  <div className="flex items-center gap-2 mb-4 p-3 text-sm text-red-600 bg-red-50 rounded-md">
                     <AlertCircle className="h-4 w-4" />
                     <span>{errorMessage}</span>
                   </div>
@@ -243,9 +252,7 @@ const SettingsPage = () => {
                             </FormControl>
                             <button
                               type="button"
-                              onClick={() =>
-                                setShowNewPassword(!showNewPassword)
-                              }
+                              onClick={() => setShowNewPassword(!showNewPassword)}
                               className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
                             >
                               {showNewPassword ? (
@@ -297,31 +304,13 @@ const SettingsPage = () => {
 
                     <Button
                       type="submit"
-                      className="mt-4 bg-blue-600 hover:bg-blue-700"
+                      className="w-full mt-4 bg-blue-600 hover:bg-blue-700"
                       disabled={isSubmitting}
                     >
-                      {isSubmitting
-                        ? "Changing Password..."
-                        : "Change Password"}
+                      {isSubmitting ? "Changing Password..." : "Change Password"}
                     </Button>
                   </form>
                 </Form>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="preferences" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Preferences</CardTitle>
-                <CardDescription>
-                  Customize your application experience
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-gray-500 text-center py-8">
-                  Preference settings coming soon
-                </p>
               </CardContent>
             </Card>
           </TabsContent>

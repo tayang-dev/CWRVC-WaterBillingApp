@@ -42,6 +42,7 @@ interface LeakReport {
   leakDescription: string;
   timestamp: any;
   uniqueUserId: string;
+  resolved?: boolean;
 }
 
 interface ReportsProps {}
@@ -87,6 +88,7 @@ const Reports = ({}: ReportsProps) => {
           leakDescription: doc.data().leakDescription || "",
           timestamp: doc.data().timestamp?.toDate() || new Date(),
           uniqueUserId: doc.data().uniqueUserId || "",
+          resolved: doc.data().resolved || false,
         }));
 
         setLeakReports(leaksList);
@@ -111,7 +113,6 @@ const Reports = ({}: ReportsProps) => {
         setStats(stats);
       } catch (error) {
         console.error("Error fetching leak reports:", error);
-        // Fallback to empty array if there's an error
         setLeakReports([]);
         setFilteredReports([]);
       } finally {
@@ -213,7 +214,7 @@ const Reports = ({}: ReportsProps) => {
       headers.join(","),
       ...filteredReports.map(report => [
         report.accountNumber,
-        `"${report.address.replace(/"/g, '""')}"`, // Escape quotes in CSV
+        `"${report.address.replace(/"/g, '""')}"`,
         `"${report.leakDescription.replace(/"/g, '""')}"`,
         report.uniqueUserId,
         formatDate(report.timestamp)
@@ -228,6 +229,43 @@ const Reports = ({}: ReportsProps) => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // Handle marking a report as resolved and writing a notification
+  const markAsResolved = async () => {
+    if (!selectedReport) return;
+    try {
+      const { updateDoc, doc, setDoc } = await import("firebase/firestore");
+      const { db } = await import("../../lib/firebase");
+      
+      // Update the report in the "leaks" collection
+      await updateDoc(doc(db, "leaks", selectedReport.id), {
+        resolved: true,
+      });
+      
+      // Optionally update local state (for example, mark the report as resolved)
+      setLeakReports(prev =>
+        prev.map(report =>
+          report.id === selectedReport.id ? { ...report, resolved: true } : report
+        )
+      );
+      
+      // Write a notification to the sample notifications collection path
+      await setDoc(
+        doc(db, "notifications", "03-01-001", "records", "Du9kLOceaHLbtRaiIpq1"),
+        {
+          message: "Report marked as resolved",
+          reportId: selectedReport.id,
+          resolved: true,
+          timestamp: new Date()
+        }
+      );
+      
+      // Close the dialog after successful update
+      setShowDetails(false);
+    } catch (error) {
+      console.error("Error marking report as resolved:", error);
+    }
   };
 
   return (
@@ -476,7 +514,8 @@ const Reports = ({}: ReportsProps) => {
               <DialogTitle>Leak Report Details</DialogTitle>
             </DialogHeader>
             {selectedReport && (
-              <div className="space-y-6">
+              // Wrapping the content in a scrollable container
+              <div className="max-h-[70vh] overflow-y-auto space-y-6">
                 <div className="flex justify-between items-center">
                   <div>
                     <h2 className="text-xl font-semibold">Leak Report</h2>
@@ -523,7 +562,7 @@ const Reports = ({}: ReportsProps) => {
                 )}
                 
                 <div className="pt-4 border-t">
-                  <Button className="mt-2" variant="outline">
+                  <Button className="mt-2" variant="outline" onClick={markAsResolved}>
                     Mark as Resolved
                   </Button>
                 </div>

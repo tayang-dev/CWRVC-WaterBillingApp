@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { collection, getDocs, query, where, collectionGroup } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import KpiCards from "./KpiCards";
 import BillingTrendsChart from "./BillingTrendsChart";
@@ -21,6 +21,16 @@ const Dashboard = () => {
   const [error, setError] = useState(null);
   const [debugInfo, setDebugInfo] = useState([]);
 
+  // ✅ Formatter & Helper
+  const currencyFormatter = new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    minimumFractionDigits: 2,
+  });
+
+  const formatCurrency = (amount: number) => currencyFormatter.format(amount);
+
+  // ✅ useEffect
   useEffect(() => {
     const fetchDashboardData = async () => {
       const debug = [];
@@ -29,12 +39,12 @@ const Dashboard = () => {
         let totalRevenue = 0;
         let pendingAmount = 0;
         let customersProcessed = [];
-        
+
         debug.push("🚀 Starting dashboard data fetch");
-        
+
         // Step 1: Fetch all customers
         const customersSnapshot = await getDocs(collection(db, "customers"));
-        
+
         if (customersSnapshot.empty) {
           debug.push("⚠️ No customers found in Firestore!");
           setError("No customer data available.");
@@ -42,78 +52,91 @@ const Dashboard = () => {
           setDebugInfo(debug);
           return;
         }
-        
+
         const totalCustomers = customersSnapshot.size;
         debug.push(`📊 Found ${totalCustomers} customers`);
-        
-        // Process each customer
+
+        // Step 2: Process each customer for total water usage and pending payments
         for (const customerDoc of customersSnapshot.docs) {
           const customerData = customerDoc.data();
-          const customerId = customerDoc.id;
           const accountNumber = customerData.accountNumber;
-          
+
           if (!accountNumber) {
-            debug.push(`⚠️ Customer ${customerId} has no account number`);
+            debug.push(`⚠️ Customer ${customerDoc.id} has no account number`);
             continue;
           }
-          
+
           customersProcessed.push(accountNumber);
           debug.push(`🔍 Processing customer: ${customerData.name} (Account: ${accountNumber})`);
-          
-          // Step 2: Fetch bills from the subcollection structure
-          // bills/{accountNumber}/records/{billId}
+
+          // Step 3: Fetch all bills for water usage and pending payments
           const billsRecordsRef = collection(db, "bills", accountNumber, "records");
           const billsSnapshot = await getDocs(billsRecordsRef);
-          
+
           if (billsSnapshot.empty) {
             debug.push(`⚠️ No bills found for account: ${accountNumber}`);
             continue;
           }
-          
-          debug.push(`✅ Found ${billsSnapshot.size} bills for account: ${accountNumber}`);
-          
-          // Process each bill
+
+          // Sum water usage from all bills
           billsSnapshot.forEach((billDoc) => {
             const billData = billDoc.data();
-            
-            // Validate and calculate totals
+
+            // Total water consumption from all bills
             if (typeof billData.waterUsage === "number") {
-              totalConsumption += billData.waterUsage;
+              totalConsumption += billData.waterUsage; // Accumulate total water usage
             }
-            
-            if (typeof billData.amount === "number") {
-              totalRevenue += billData.amount;
-              
-              if (billData.status === "pending" || billData.status === "overdue") {
-                pendingAmount += billData.amount;
-              }
+
+            // Pending amounts only
+            if (typeof billData.amount === "number" &&
+                (billData.status === "pending" || billData.status === "overdue")) {
+              pendingAmount += billData.amount; // Accumulate pending amounts
             }
           });
         }
-        
+
         debug.push(`👥 Processed accounts: ${customersProcessed.join(", ")}`);
         debug.push(`💧 Total Water Usage: ${totalConsumption} m³`);
-        debug.push(`💰 Total Revenue: ₱${totalRevenue.toFixed(2)}`);
-        debug.push(`⏳ Pending Payments: ₱${pendingAmount.toFixed(2)}`);
-        
-        // Calculate example growth percentages
+        debug.push(`⏳ Pending Payments: ${formatCurrency(pendingAmount)}`);
+
+        // Step 4: Fetch verified payments for total revenue
+        const paymentVerificationsRef = collection(db, "paymentVerifications");
+        const verifiedPaymentsSnapshot = await getDocs(paymentVerificationsRef);
+
+        if (verifiedPaymentsSnapshot.empty) {
+          debug.push("⚠️ No verified payments found!");
+        } else {
+          debug.push(`✅ Found ${verifiedPaymentsSnapshot.size} verified payments`);
+
+          verifiedPaymentsSnapshot.forEach((doc) => {
+            const data = doc.data();
+            const amount = parseFloat(data.amount); // amount is string
+            if (!isNaN(amount)) {
+              totalRevenue += amount; // Accumulate total revenue
+            }
+          });
+
+          debug.push(`💸 Total Verified Revenue: ${formatCurrency(totalRevenue)}`);
+        }
+
+        // Step 5: Example growth (optional)
         const customerGrowth = totalCustomers > 0 ? "+5%" : "0%";
         const revenueGrowth = totalRevenue > 0 ? "+8%" : "0%";
         const pendingChange = pendingAmount > 0 ? "+3%" : "0%";
         const consumptionChange = totalConsumption > 0 ? "+4%" : "0%";
-        
-        // Update dashboard state
+
+        // Step 6: Set state
         setDashboardData({
           totalCustomers: totalCustomers.toString(),
-          totalRevenue: `₱${totalRevenue.toFixed(2)}`,
-          pendingPayments: `₱${pendingAmount.toFixed(2)}`,
+          totalRevenue: formatCurrency(totalRevenue),
+          pendingPayments: formatCurrency(pendingAmount),
           waterConsumption: `${totalConsumption} m³`,
           customerGrowth,
           revenueGrowth,
           pendingChange,
           consumptionChange,
         });
-        
+
         setError(null);
       } catch (error) {
         debug.push(`❌ Error: ${error.message}`);
@@ -124,7 +147,7 @@ const Dashboard = () => {
         setDebugInfo(debug);
       }
     };
-    
+
     fetchDashboardData();
   }, []);
 
@@ -182,20 +205,6 @@ const Dashboard = () => {
             <BillingTrendsChart />
             <PaymentStatusChart />
           </div>
-          
-          {/* Debug Information (for development) */}
-          {process.env.NODE_ENV === 'development' && (
-            <div className="mt-8 p-4 bg-gray-100 rounded">
-              <details>
-                <summary className="cursor-pointer text-sm text-gray-600">Debug Information</summary>
-                <pre className="mt-2 text-xs overflow-x-auto">
-                  {debugInfo.map((line, index) => (
-                    <div key={index}>{line}</div>
-                  ))}
-                </pre>
-              </details>
-            </div>
-          )}
         </>
       )}
     </div>

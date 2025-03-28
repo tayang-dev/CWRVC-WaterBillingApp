@@ -49,11 +49,13 @@ const ChatList: React.FC<ChatListProps> = ({
         const data = chatDoc.data();
         const accountNumber = chatDoc.id.trim();
         return {
-          id: accountNumber, // Use doc.id as unique ID
-          name: `Account ${accountNumber}`, // Adjust display name as needed
-          avatar: data.avatar || "", // Optionally stored avatar URL
+          id: accountNumber,
+          name: `Account ${accountNumber}`,
+          avatar: data.avatar || "",
           lastMessage: data.lastMessage || "Conversation active",
-          lastMessageTime: data.lastMessageTime ? data.lastMessageTime.toDate() : new Date(),
+          lastMessageTime: data.lastMessageTime
+            ? data.lastMessageTime.toDate()
+            : new Date(),
           unreadCount: data.unreadCount || 0,
           accountNumber,
           hasNewMessage: data.hasNewMessage || false,
@@ -110,18 +112,24 @@ const ChatList: React.FC<ChatListProps> = ({
                   <div className="flex items-center space-x-3">
                     <div className="relative">
                       <Avatar>
-                        <AvatarImage src={customer.avatar} alt={customer.name} />
+                        <AvatarImage
+                          src={customer.avatar}
+                          alt={customer.name}
+                        />
                         <AvatarFallback>
                           <User className="h-5 w-5" />
                         </AvatarFallback>
                       </Avatar>
-                      {/* Display badge only if the last message from the user is non-empty */}
-                      {customer.lastMessageUser.trim() !== "" &&
-                        (customer.unreadCount > 0 ||
-                          customer.hasNewMessage ||
+                      {/* Show badge only if the last message sender is "User"
+                          and one of the flags is true */}
+                      {customer.lastMessageUser === "User" &&
+                        (customer.hasNewMessage ||
+                          customer.unreadCount > 0 ||
                           customer.hasNewImage) && (
                           <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 flex items-center justify-center rounded-full">
-                            {customer.unreadCount > 0 ? customer.unreadCount : "1"}
+                            {customer.unreadCount > 0
+                              ? customer.unreadCount
+                              : "1"}
                           </span>
                         )}
                     </div>
@@ -129,7 +137,9 @@ const ChatList: React.FC<ChatListProps> = ({
                       <div className="flex justify-between items-center">
                         <h4
                           className={`text-sm truncate ${
-                            customer.hasNewMessage ? "font-bold text-blue-700" : "font-medium"
+                            customer.hasNewMessage
+                              ? "font-bold text-blue-700"
+                              : "font-medium"
                           }`}
                         >
                           {customer.name}
@@ -143,7 +153,10 @@ const ChatList: React.FC<ChatListProps> = ({
                       </div>
                       <div className="flex justify-between items-center mt-1">
                         <p className="text-xs text-gray-500 truncate">
-                          {customer.lastMessage}
+                          {userRole === "admin"
+                            ? (customer.lastMessageAdmin ||
+                                "Conversation active")
+                            : customer.lastMessage}
                         </p>
                       </div>
                     </div>

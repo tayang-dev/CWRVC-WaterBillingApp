@@ -10,6 +10,7 @@ import {
   doc,
   updateDoc,
   setDoc,
+  Timestamp,
 } from "firebase/firestore";
 import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, AvatarImage, AvatarFallback } from "../ui/avatar";
@@ -42,6 +43,7 @@ interface FirestoreData {
   status?: string;
   date?: string;
   read?: boolean;
+  timestamp?: Timestamp | string;
 }
 
 const Header = ({
@@ -61,62 +63,67 @@ const Header = ({
       { name: "paymentVerifications", condition: where("status", "==", "pending"), title: "Pending Payment", link: "/payments" },
       { name: "requests", condition: where("status", "==", "in-progress"), title: "New Service Request", link: "/requests" },
       { name: "chats", condition: where("status", "==", "active"), title: "New Chat Message", link: "/customer-support" },
+      { name: "leaks", title: "New Leak Report", link: "/reports" },
     ];
-
+  
     const unsubscribeList = collections.map(({ name, condition, title, link }) => {
       const colRef = query(collection(db, name), condition);
-
+  
       return onSnapshot(colRef, async (snapshot) => {
         const updates: Notification[] = [];
-
+  
         for (const docSnap of snapshot.docs) {
           const data = docSnap.data() as FirestoreData;
           const notificationId = docSnap.id;
-          const readStatus = data.read ?? false; // Default to false if read is missing
+          const readStatus = data.read ?? false;
 
-          if (!("read" in data)) {
-            // If `read` field doesn't exist, add it to Firestore
-            await setDoc(doc(db, name, notificationId), { read: false }, { merge: true });
+          let date: string;
+          if (data.timestamp instanceof Timestamp) {
+            date = format(data.timestamp.toDate(), "MMM dd, yyyy hh:mm a");
+          } else if (typeof data.timestamp === "string") {
+            date = format(new Date(data.timestamp), "MMM dd, yyyy hh:mm a");
+          } else {
+            date = format(new Date(), "MMM dd, yyyy hh:mm a");
           }
-
+  
           updates.push({
             id: notificationId,
             title,
             message: data.customerName || data.accountNumber || "New notification",
             link,
-            date: format(new Date(), "MMM dd, yyyy hh:mm a"),
+            date,
             read: readStatus,
           });
         }
-
+  
         setNotifications((prev) => {
           const mergedNotifications = [...prev];
-
+  
           updates.forEach((update) => {
             const existingIndex = mergedNotifications.findIndex((n) => n.id === update.id);
             if (existingIndex === -1) {
               mergedNotifications.push(update);
             } else {
-              mergedNotifications[existingIndex] = update;
+              mergedNotifications[existingIndex] = { ...mergedNotifications[existingIndex], ...update };
             }
           });
-
+  
           return mergedNotifications;
         });
       });
     });
-
+  
     return () => {
       unsubscribeList.forEach((unsubscribe) => unsubscribe());
     };
   }, [db]);
-
+  
   const markAsRead = async (notification: Notification) => {
     if (!notification.read) {
       try {
         const notificationRef = doc(db, notification.link.replace("/", ""), notification.id);
         await updateDoc(notificationRef, { read: true });
-
+  
         setNotifications((prev) =>
           prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n))
         );
@@ -124,8 +131,16 @@ const Header = ({
         console.error("Error marking notification as read:", error);
       }
     }
-
+  
     navigate(notification.link);
+  };
+
+  const handleLogout = async () => {
+    const confirmLogout = window.confirm("Are you sure you want to log out?");
+    if (confirmLogout) {
+      await signOut(auth);
+      window.location.href = "/";
+    }
   };
 
   return (
@@ -160,7 +175,7 @@ const Header = ({
                     <div
                       key={notification.id}
                       onClick={() => markAsRead(notification)}
-                      className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer flex justify-between items-start ${
+                      className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
                         !notification.read ? "bg-blue-50" : ""
                       }`}
                     >
@@ -206,7 +221,7 @@ const Header = ({
               <Settings className="mr-2 h-4 w-4" />
               <span>Settings</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => signOut(auth).then(() => (window.location.href = "/"))} className="text-red-600">
+            <DropdownMenuItem onClick={handleLogout} className="text-red-600">
               <LogOut className="mr-2 h-4 w-4" />
               <span>Logout</span>
             </DropdownMenuItem>
