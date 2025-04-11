@@ -49,12 +49,9 @@ const SidebarItem = ({
 }: SidebarItemProps) => {
   const baseClasses =
     "flex items-center px-3 py-2 rounded-md transition-colors";
-  const activeClasses =
-    "bg-blue-100 text-blue-700";
-  const inactiveClasses =
-    "text-gray-700 hover:bg-blue-50 hover:text-blue-600";
+  const activeClasses = "bg-blue-100 text-blue-700";
+  const inactiveClasses = "text-gray-700 hover:bg-blue-50 hover:text-blue-600";
 
-  // Content for the main button
   const content = (
     <div className={cn(baseClasses, isActive ? activeClasses : inactiveClasses)}>
       <span className="mr-3">{icon}</span>
@@ -62,14 +59,11 @@ const SidebarItem = ({
     </div>
   );
 
-  // If the item has sub-items, only show them when not collapsed
   if (hasSubItems) {
     return (
       <div className="mb-1">
         <Collapsible open={isOpen} onOpenChange={onClick}>
-          <CollapsibleTrigger className="w-full">
-            {content}
-          </CollapsibleTrigger>
+          <CollapsibleTrigger className="w-full">{content}</CollapsibleTrigger>
           {!collapsed && (
             <CollapsibleContent>
               <div className="pl-10 mt-1 space-y-1">
@@ -138,7 +132,7 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
         className
       )}
     >
-      {/* Header with Logo and Collapse Toggle */}
+      {/* Header */}
       <div className="p-4 border-b border-gray-200 flex items-center justify-between">
         <div className="flex items-center">
           <img
@@ -218,6 +212,16 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
           isActive={location.pathname.startsWith("/requests")}
           collapsed={collapsed}
         />
+
+        {userRole === "staff" && (
+          <SidebarItem
+            icon={<ClipboardList className="h-5 w-5" />}
+            label="Meter Reading"
+            path="/meters"
+            isActive={location.pathname.startsWith("/meters")}
+            collapsed={collapsed}
+          />
+        )}
 
         <SidebarItem
           icon={<BarChart className="h-5 w-5" />}

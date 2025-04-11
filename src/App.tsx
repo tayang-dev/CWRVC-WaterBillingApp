@@ -9,6 +9,7 @@ import PaymentManagement from "./components/payment/PaymentMangement";
 import CustomerSupport from "./components/chat/CustomerSupport";
 import UserManagement from "./components/users/UserManagement";
 import SettingsPage from "./components/settings/SettingPage";
+import MeterReading from "./components/meters/MeterReading";
 
 // Lazy load components for better performance
 const Dashboard = lazy(() => import("./components/dashboard/Dashboard"));
@@ -24,6 +25,8 @@ const RequestsPage = lazy(
 const ReportsPage = lazy(
   () => import("./components/reports/Reports"),
 );
+const MeterReadingPage = lazy(() => import("./components/meters/MeterReading"));
+
 
 function App() {
   return (
@@ -126,7 +129,17 @@ function App() {
               </ProtectedRoute>
             }
           />
-
+          {/* Meter Reading route for staff */}
+        <Route
+          path="/meters"
+          element={
+            <ProtectedRoute>
+              <AdminLayout>
+                <MeterReading />
+              </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
           {/* Add more routes as needed */}
 
           {/* For Tempo routes */}
