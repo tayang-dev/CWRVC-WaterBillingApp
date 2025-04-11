@@ -24,6 +24,14 @@ import {
   SelectValue,
 } from "../ui/select";
 
+// Define the Bill interface
+interface Bill {
+  id: string;
+  amount: number;
+  originalAmount: number;
+  dueDate: string; // Assuming dueDate is a string in "DD/MM/YYYY" format
+}
+
 const PaymentStatusChart = () => {
   const [selectedSite, setSelectedSite] = useState("site1");
   const [chartData, setChartData] = useState(getDefaultChartData());
@@ -33,7 +41,6 @@ const PaymentStatusChart = () => {
       try {
         console.log(`🚀 Fetching customers for site: ${selectedSite}`);
 
-        // 🔹 Fetch customers based on the selected site
         const customersQuery = query(
           collection(db, "customers"),
           where("site", "==", selectedSite)
@@ -55,33 +62,48 @@ const PaymentStatusChart = () => {
 
         let paymentStatusCounts = { Paid: 0, Pending: 0, Overdue: 0, "Partially Paid": 0 };
 
-        // 🔹 Loop through customers to fetch their bills
-        for (const customer of customers) {
-          console.log(`📄 Fetching bills for account: ${customer.accountNumber}`);
-
+        // Fetch all bills concurrently
+        const billFetchPromises = customers.map(customer => {
           const recordsQuery = collection(db, "bills", customer.accountNumber, "records");
-          const recordsSnapshot = await getDocs(recordsQuery);
-
-          console.log(`📦 Found ${recordsSnapshot.docs.length} bills for account: ${customer.accountNumber}`);
-
-          recordsSnapshot.docs.forEach((doc) => {
-            const bill = doc.data();
-            console.log(`🔍 Bill Data (${doc.id}):`, bill);
-
-            // ✅ Normalize status (convert to lowercase)
-            const billStatus = bill.status.toLowerCase();
-
-            if (billStatus === "paid") paymentStatusCounts.Paid += 1;
-            else if (billStatus === "pending") paymentStatusCounts.Pending += 1;
-            else if (billStatus === "overdue") paymentStatusCounts.Overdue += 1;
-            else if (billStatus === "partially paid") paymentStatusCounts["Partially Paid"] += 1;
-            else console.warn(`⚠️ Unknown bill status: ${bill.status} in ${doc.id}`);
+          return getDocs(recordsQuery).then(recordsSnapshot => {
+            return recordsSnapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data() as Bill // Type assertion here
+            }));
           });
-        }
+        });
+
+        // Wait for all bill fetch promises to resolve
+        const allBills = await Promise.all(billFetchPromises);
+        
+        // Flatten the array of bills
+        const bills = allBills.flat();
+
+        console.log(`📦 Found ${bills.length} total bills for all customers`);
+
+        // Process each bill
+        bills.forEach(bill => {
+          console.log(`🔍 Bill Data (${bill.id}):`, bill);
+
+          const amount = bill.amount;
+          const originalAmount = bill.originalAmount;
+          const dueDate = new Date(bill.dueDate.split("/").reverse().join("-")); // Convert to YYYY-MM-DD format
+          const currentDate = new Date();
+
+          // Determine payment status
+          if (amount === 0) {
+            paymentStatusCounts.Paid += 1;
+          } else if (amount > 0 && amount < originalAmount) {
+            paymentStatusCounts["Partially Paid"] += 1;
+          } else if (amount > 0 && dueDate < currentDate) {
+            paymentStatusCounts.Overdue += 1;
+          } else {
+            paymentStatusCounts.Pending += 1;
+          }
+        });
 
         console.log("📊 Payment status counts:", paymentStatusCounts);
 
-        // ✅ Ensure at least one non-zero value in the dataset
         const totalBills = Object.values(paymentStatusCounts).reduce((sum, val) => sum + val, 0);
 
         if (totalBills === 0) {
@@ -113,7 +135,6 @@ const PaymentStatusChart = () => {
             </CardTitle>
             <CardDescription>View payments for each site</CardDescription>
           </div>
-          {/* 🔹 Dropdown for site selection */}
           <Select value={selectedSite} onValueChange={setSelectedSite}>
             <SelectTrigger className="w-[150px]">
               <SelectValue placeholder="Select Site" />
@@ -155,7 +176,7 @@ const PaymentStatusChart = () => {
   );
 };
 
-// 🔹 Helper function for default chart values
+// Helper function for default chart values
 const getDefaultChartData = () => [
   { name: "Paid", value: 1, color: "#4ade80" },
   { name: "Pending", value: 1, color: "#facc15" },

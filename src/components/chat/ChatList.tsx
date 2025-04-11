@@ -50,7 +50,7 @@ const ChatList: React.FC<ChatListProps> = ({
         const accountNumber = chatDoc.id.trim();
         return {
           id: accountNumber,
-          name: `Account ${accountNumber}`,
+          name:`Account ${accountNumber}`,
           avatar: data.avatar || "",
           lastMessage: data.lastMessage || "Conversation active",
           lastMessageTime: data.lastMessageTime
@@ -142,7 +142,7 @@ const ChatList: React.FC<ChatListProps> = ({
                               : "font-medium"
                           }`}
                         >
-                          {customer.name}
+                          {customer.name} 
                         </h4>
                         <span className="text-xs text-gray-500">
                           {customer.lastMessageTime.toLocaleTimeString([], {

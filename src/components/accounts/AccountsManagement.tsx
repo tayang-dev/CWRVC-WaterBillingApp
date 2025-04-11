@@ -348,7 +348,7 @@ const handleSearch = async (query: string, filters: any) => {
         </div>
 
         <div className="mt-6 text-center text-sm text-gray-500">
-          <p>Water Billing System - Admin Portal v1.0</p>
+          <p>Water Billing App - Admin Portal v1.0</p>
         </div>
       </div>
     </div>

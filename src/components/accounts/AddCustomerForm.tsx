@@ -31,17 +31,30 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Phone } from "lucide-react";
 
 const formSchema = z.object({
-  name: z.string()
+  firstName: z.string()
     .trim()
-    .min(2, { message: "Name must be at least 2 characters." })
-    .regex(/^[A-Za-z.\- ]+$/, "Only letters, dot (.), dash (-) and spaces are allowed")
-    .refine((val) => val.trim().length > 0, { message: "Name cannot be empty or spaces only." }),
+    .min(2, { message: "First name must be at least 2 characters." })
+    .regex(/^[A-Za-zÑñ.\- ]+$/, "Only letters (including Ñ, ñ), dot (.), dash (-), and spaces are allowed")
+    .refine((val) => val.trim().length > 0, { message: "First name cannot be empty or spaces only." }),
 
-  email: z.string()
-    .email("Invalid email address")
+  lastName: z.string()
+    .trim()
+    .min(2, { message: "Last name must be at least 2 characters." })
+    .regex(/^[A-Za-zÑñ.\- ]+$/, "Only letters (including Ñ, ñ), dot (.), dash (-), and spaces are allowed")
+    .refine((val) => val.trim().length > 0, { message: "Last name cannot be empty or spaces only." }),
+
+  middleInitial: z.string()
+    .max(2, { message: "Middle initial can be up to 2 characters." }) // Up to 2 characters
+    .regex(/^[A-Z]{1,2}$/, "Middle initial must be 1 or 2 uppercase letters.") // Enforce uppercase
+    .or(z.literal(""))
+    .optional(),
+
+    email: z.string()
+    .regex(/^[A-Za-z0-9Ññ._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/, "Invalid email address. Ensure it follows the format: example@domain.com") // Custom email validation allowing ñ, Ñ
+    .or(z.literal("")) // Allows empty string
     .optional(),
 
   phone: z.string()
@@ -56,7 +69,7 @@ const formSchema = z.object({
 
   meterNumber: z.string()
     .min(1, { message: "Meter number is required" })
-    .regex(/^[0-9\-]+$/, "Meter number can only contain numbers and dash (-)"),
+    .regex(/^[A-Za-z0-9\-]+$/, "Meter number can only contain letters, numbers, and dash (-)"), // Allow letters
 
   block: z.string()
     .min(2, { message: "Block must be at least 2 characters." })
@@ -67,10 +80,8 @@ const formSchema = z.object({
     .min(2, { message: "Lot must be at least 2 characters." })
     .max(3, { message: "Lot cannot exceed 3 characters." })
     .regex(/^[A-Za-z0-9]+$/, "Lot can only contain letters and numbers"),
-}).refine((data) => data.email || data.phone, {
-  message: "At least one of email or phone number is required.",
-  path: ["email"],
 });
+
 
 
 interface AddCustomerFormProps {
@@ -95,7 +106,9 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      name: "",
+      firstName: "",
+      lastName: "",  
+      middleInitial: "",
       email: "",
       phone: "",
       site: "",
@@ -126,35 +139,47 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
     const subscription = form.watch((values) => {
       if (values.block && values.lot && values.site) {
         const accountNum = generateAccountNumber(values.block, values.lot, values.site);
-        setGeneratedAccountNumber(accountNum);
-        form.setValue("accountNumber", accountNum);
+        if (accountNum !== form.getValues("accountNumber")) {
+          setGeneratedAccountNumber(accountNum);
+          form.setValue("accountNumber", accountNum);
+        }
       }
     });
     return () => subscription.unsubscribe();
   }, [form]);
+  
 
   const handleSubmit = async (data: z.infer<typeof formSchema>) => {
     setIsSubmitting(true);
     setError("");
-
+  
     try {
       const siteAddresses = {
         site1: "Site 1, Brgy. Dayap, Calauan, Laguna",
         site2: "Site 2, Brgy. Dayap, Calauan, Laguna",
         site3: "Site 3, Brgy. Dayap, Calauan, Laguna",
       };
-
+  
+      const fullName = `${data.firstName} ${data.middleInitial ? data.middleInitial + '. ' : ''}${data.lastName}`.trim();
+  
       const customerData = {
-        ...data,
+        firstName: data.firstName, // Save first name to Firestore
+        lastName: data.lastName,   // Save last name to Firestore
+        middleInitial: data.middleInitial || null, // Save middle initial to Firestore (null if not provided)
+        name: fullName, // Save the full name to Firestore
         email: data.email || null,
+        phone: data.phone || null,
+        site: data.site, // Save site to Firestore
         accountNumber: generatedAccountNumber,
+        meterNumber: data.meterNumber,
         address: siteAddresses[data.site as keyof typeof siteAddresses],
         joinDate: new Date().toISOString().split("T")[0],
         lastBillingDate: new Date().toISOString().split("T")[0],
-        amountDue: 0,
         status: "active",
+        block: data.block,
+        lot: data.lot,
       };
-
+  
       await addDoc(collection(db, "customers"), customerData);
       onSubmit({ ...data, accountNumber: generatedAccountNumber });
       form.reset();
@@ -183,10 +208,26 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-              <FormField control={form.control} name="name" render={({ field }) => (
+            <FormField control={form.control} name="firstName" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Customer Name</FormLabel>
-                  <FormControl><Input placeholder="Juan Dela Cruz" {...field} /></FormControl>
+                  <FormLabel>First Name</FormLabel>
+                  <FormControl><Input placeholder="Juan" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="lastName" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Last Name</FormLabel>
+                  <FormControl><Input placeholder="Dela Cruz" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="middleInitial" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Middle Initial (Optional)</FormLabel>
+                  <FormControl><Input placeholder="M" {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />

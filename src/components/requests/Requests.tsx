@@ -44,6 +44,7 @@ interface ServiceRequest {
   email: string;
   status: string;
   timestamp: any;
+  attachmentUri: string;
 }
 
 interface RequestsProps {}
@@ -58,16 +59,21 @@ const Requests = ({}: RequestsProps) => {
   const [dateRange, setDateRange] = useState("all");
   const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
   const [showDetails, setShowDetails] = useState(false);
-  
-  // Stats
+  // New state for confirmation of status update; holds the new status to be set.
+  const [confirmStatus, setConfirmStatus] = useState<string | null>(null);
+  const [remarks, setRemarks] = useState("");
+
+  // Updated Stats: now including Maintenance, Billing Issue, Complaint, Service Inquiry and Other
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
     inProgress: 0,
     completed: 0,
-    leakReports: 0,
+    rejected: 0,
+    maintenance: 0,
     billingIssues: 0,
-    serviceInterruptions: 0,
+    complaints: 0,
+    serviceInquiries: 0,
     other: 0
   });
 
@@ -77,12 +83,12 @@ const Requests = ({}: RequestsProps) => {
       try {
         const { collection, query, orderBy, getDocs } = await import("firebase/firestore");
         const { db } = await import("../../lib/firebase");
-
+  
         const requestsQuery = query(
           collection(db, "requests"),
           orderBy("timestamp", "desc")
         );
-
+  
         const requestsSnapshot = await getDocs(requestsQuery);
         const requestsList = requestsSnapshot.docs.map((doc) => ({
           id: doc.id,
@@ -94,21 +100,26 @@ const Requests = ({}: RequestsProps) => {
           email: doc.data().email || "",
           status: doc.data().status || "pending",
           timestamp: doc.data().timestamp?.toDate() || new Date(),
+          attachmentUri: doc.data().attachmentUri || "", // Add this line for attachment
         }));
 
         setServiceRequests(requestsList);
         setFilteredRequests(requestsList);
         
-        // Calculate stats
+        // Updated stats calculation based on the available types and statuses
         const stats = {
           total: requestsList.length,
           pending: requestsList.filter(req => req.status === "pending").length,
           inProgress: requestsList.filter(req => req.status === "in-progress").length,
           completed: requestsList.filter(req => req.status === "completed").length,
-          leakReports: requestsList.filter(req => req.type === "Leak").length,
-          billingIssues: requestsList.filter(req => req.type === "Billing").length,
-          serviceInterruptions: requestsList.filter(req => req.type === "Interruption").length,
-          other: requestsList.filter(req => !["Leak", "Billing", "Interruption"].includes(req.type)).length
+          rejected: requestsList.filter(req => req.status === "rejected").length,
+          maintenance: requestsList.filter(req => req.type === "Maintenance").length,
+          billingIssues: requestsList.filter(req => req.type === "Billing Issue").length,
+          complaints: requestsList.filter(req => req.type === "Complaint").length,
+          serviceInquiries: requestsList.filter(req => req.type === "Service Inquiry").length,
+          other: requestsList.filter(req => 
+            !["Maintenance", "Billing Issue", "Complaint", "Service Inquiry"].includes(req.type)
+          ).length
         };
         
         setStats(stats);
@@ -206,6 +217,8 @@ const Requests = ({}: RequestsProps) => {
         return <Badge className="bg-blue-500">In Progress</Badge>;
       case "completed":
         return <Badge className="bg-green-500">Completed</Badge>;
+      case "rejected":
+        return <Badge className="bg-red-500">Rejected</Badge>;
       default:
         return <Badge className="bg-gray-500">{status}</Badge>;
     }
@@ -213,50 +226,53 @@ const Requests = ({}: RequestsProps) => {
   
   // Format date
   const formatDate = (date: Date) => {
-    return new Date(date).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
+    return new Date(date).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
     });
   };
 
-  // Function to update the request status and add a notification under /notifications/{accountNumber}/records
-  const updateRequestStatus = async (newStatus: string) => {
-    if (!selectedRequest) return;
-    try {
-      const { doc, updateDoc, collection, addDoc, serverTimestamp } = await import("firebase/firestore");
-      const { db } = await import("../../lib/firebase");
+// Function to update the request status and add a notification under /notifications/{accountNumber}/records
+const updateRequestStatus = async (newStatus: string, remarks?: string) => {
+  if (!selectedRequest) return;
+  try {
+    const { doc, updateDoc, collection, addDoc, serverTimestamp } = await import("firebase/firestore");
+    const { db } = await import("../../lib/firebase");
 
-      // Update the request document
-      await updateDoc(doc(db, "requests", selectedRequest.id), {
-        status: newStatus
-      });
-      
-      // Update local state for requests and selected request
-      setServiceRequests(prev =>
-        prev.map(req =>
-          req.id === selectedRequest.id ? { ...req, status: newStatus } : req
-        )
-      );
-      setSelectedRequest({ ...selectedRequest, status: newStatus });
+    // Update the request document
+    await updateDoc(doc(db, "requests", selectedRequest.id), {
+      status: newStatus,
+      ...(remarks ? { remarks } : {}),
+    });
 
-      // Create a notification document in the nested "records" subcollection under notifications/{accountNumber}
-      const notificationsRef = collection(db, "notifications", selectedRequest.accountNumber, "records");
-      await addDoc(notificationsRef, {
-        serviceId: selectedRequest.serviceId,
-        accountNumber: selectedRequest.accountNumber,
-        type: selectedRequest.type,
-        subject: selectedRequest.subject,
-        description: `Your service request ${selectedRequest.serviceId} is now ${newStatus}.`,
-        email: selectedRequest.email,
-        read: false,
-        status: newStatus,
-        timestamp: serverTimestamp(),
-      });
-    } catch (error) {
-      console.error("Error updating status:", error);
-    }
-  };
+    // Update local state for requests and selected request
+    setServiceRequests(prev =>
+      prev.map(req =>
+        req.id === selectedRequest.id ? { ...req, status: newStatus, ...(remarks ? { remarks } : {}) } : req
+      )
+    );
+    setSelectedRequest({ ...selectedRequest, status: newStatus, ...(remarks ? { remarks } : {}) });
+
+    // Create a notification document in the nested "records" subcollection under notifications/{accountNumber}
+    const notificationsRef = collection(db, "notifications", selectedRequest.accountNumber, "records");
+    await addDoc(notificationsRef, {
+      serviceId: selectedRequest.serviceId,
+      accountNumber: selectedRequest.accountNumber,
+      type: selectedRequest.type,
+      subject: selectedRequest.subject,
+      description: `Your service request ${selectedRequest.serviceId} is now ${newStatus}.`,
+      ...(remarks ? { remarks } : {}),
+      email: selectedRequest.email,
+      read: false,
+      status: newStatus,
+      timestamp: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error("Error updating status:", error);
+  }
+};
+
 
   // Handle export to CSV
   const exportToCSV = () => {
@@ -275,14 +291,19 @@ const Requests = ({}: RequestsProps) => {
       ].join(","))
     ].join("\n");
     
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `service-requests-report-${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `service-requests-report-${new Date().toISOString().split("T")[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // Handle confirmation for status update
+  const handleConfirmStatus = (newStatus: string) => {
+    setConfirmStatus(newStatus);
   };
 
   return (
@@ -316,7 +337,7 @@ const Requests = ({}: RequestsProps) => {
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg font-medium">Total Requests</CardTitle>
@@ -356,6 +377,16 @@ const Requests = ({}: RequestsProps) => {
                   <div className="text-3xl font-bold text-green-600">{stats.completed}</div>
                 </CardContent>
               </Card>
+              
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg font-medium">Rejected</CardTitle>
+                  <CardDescription>Requests not approved</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold text-red-500">{stats.rejected}</div>
+                </CardContent>
+              </Card>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -367,15 +398,15 @@ const Requests = ({}: RequestsProps) => {
                 <CardContent>
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
-                      <span>Leak Reports</span>
+                      <span>Maintenance</span>
                       <div className="flex items-center gap-2">
                         <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
                           <div 
                             className="h-full bg-blue-600 rounded-full" 
-                            style={{ width: `${stats.total ? (stats.leakReports / stats.total) * 100 : 0}%` }}
+                            style={{ width: `${stats.total ? (stats.maintenance / stats.total) * 100 : 0}%` }}
                           ></div>
                         </div>
-                        <span className="text-sm font-medium">{stats.leakReports}</span>
+                        <span className="text-sm font-medium">{stats.maintenance}</span>
                       </div>
                     </div>
                     
@@ -393,15 +424,28 @@ const Requests = ({}: RequestsProps) => {
                     </div>
                     
                     <div className="flex justify-between items-center">
-                      <span>Service Interruptions</span>
+                      <span>Complaint</span>
                       <div className="flex items-center gap-2">
                         <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
                           <div 
-                            className="h-full bg-yellow-600 rounded-full" 
-                            style={{ width: `${stats.total ? (stats.serviceInterruptions / stats.total) * 100 : 0}%` }}
+                            className="h-full bg-red-600 rounded-full" 
+                            style={{ width: `${stats.total ? (stats.complaints / stats.total) * 100 : 0}%` }}
                           ></div>
                         </div>
-                        <span className="text-sm font-medium">{stats.serviceInterruptions}</span>
+                        <span className="text-sm font-medium">{stats.complaints}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex justify-between items-center">
+                      <span>Service Inquiry</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-purple-600 rounded-full" 
+                            style={{ width: `${stats.total ? (stats.serviceInquiries / stats.total) * 100 : 0}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-sm font-medium">{stats.serviceInquiries}</span>
                       </div>
                     </div>
                     
@@ -472,6 +516,21 @@ const Requests = ({}: RequestsProps) => {
                         </span>
                       </div>
                     </div>
+                    
+                    <div className="flex justify-between items-center">
+                      <span>Rejected</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-red-500 rounded-full" 
+                            style={{ width: `${stats.total ? (stats.rejected / stats.total) * 100 : 0}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-sm font-medium">
+                          {stats.total ? ((stats.rejected / stats.total) * 100).toFixed(1) : 0}%
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -510,6 +569,7 @@ const Requests = ({}: RequestsProps) => {
                         <SelectItem value="pending">Pending</SelectItem>
                         <SelectItem value="in-progress">In Progress</SelectItem>
                         <SelectItem value="completed">Completed</SelectItem>
+                        <SelectItem value="rejected">Rejected</SelectItem>
                       </SelectContent>
                     </Select>
                     
@@ -519,9 +579,10 @@ const Requests = ({}: RequestsProps) => {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Types</SelectItem>
-                        <SelectItem value="Leak">Leak</SelectItem>
-                        <SelectItem value="Billing">Billing</SelectItem>
-                        <SelectItem value="Interruption">Interruption</SelectItem>
+                        <SelectItem value="Maintenance">Maintenance</SelectItem>
+                        <SelectItem value="Billing Issue">Billing Issue</SelectItem>
+                        <SelectItem value="Complaint">Complaint</SelectItem>
+                        <SelectItem value="Service Inquiry">Service Inquiry</SelectItem>
                         <SelectItem value="Other">Other</SelectItem>
                       </SelectContent>
                     </Select>
@@ -606,13 +667,13 @@ const Requests = ({}: RequestsProps) => {
         
         {/* Request Details Dialog */}
         <Dialog open={showDetails} onOpenChange={setShowDetails}>
-          <DialogContent className="max-w-3xl">
-            <DialogHeader>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader className="sticky top-0 bg-white z-10 pb-4 border-b">
               <DialogTitle>Service Request Details</DialogTitle>
             </DialogHeader>
             {selectedRequest && (
-              <div className="space-y-6">
-                <div className="flex justify-between items-center">
+              <div className="space-y-6 py-2">
+                <div className="flex justify-between items-center flex-wrap gap-2">
                   <div>
                     <h2 className="text-xl font-semibold">{selectedRequest.subject}</h2>
                     <p className="text-sm text-gray-500">{selectedRequest.serviceId}</p>
@@ -621,21 +682,21 @@ const Requests = ({}: RequestsProps) => {
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
+                  <div className="bg-gray-50 p-3 rounded-md">
                     <h3 className="text-sm font-medium text-gray-500">Account Number</h3>
-                    <p>{selectedRequest.accountNumber}</p>
+                    <p className="font-medium">{selectedRequest.accountNumber}</p>
                   </div>
-                  <div>
+                  <div className="bg-gray-50 p-3 rounded-md">
                     <h3 className="text-sm font-medium text-gray-500">Request Type</h3>
-                    <p>{selectedRequest.type}</p>
+                    <p className="font-medium">{selectedRequest.type}</p>
                   </div>
-                  <div>
+                  <div className="bg-gray-50 p-3 rounded-md">
                     <h3 className="text-sm font-medium text-gray-500">Email</h3>
-                    <p>{selectedRequest.email}</p>
+                    <p className="font-medium">{selectedRequest.email}</p>
                   </div>
-                  <div>
+                  <div className="bg-gray-50 p-3 rounded-md">
                     <h3 className="text-sm font-medium text-gray-500">Date Submitted</h3>
-                    <p>{formatDate(selectedRequest.timestamp)}</p>
+                    <p className="font-medium">{formatDate(selectedRequest.timestamp)}</p>
                   </div>
                 </div>
                 
@@ -645,30 +706,61 @@ const Requests = ({}: RequestsProps) => {
                     <p className="whitespace-pre-line">{selectedRequest.description}</p>
                   </div>
                 </div>
+
+                {/* Improved Attachment Display with Constrained Size */}
+                {selectedRequest.attachmentUri && (
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-2">Attachment</h3>
+                    <div className="border rounded-md p-2 bg-gray-50">
+                      <div className="h-48 overflow-hidden rounded-md relative">
+                        <img 
+                          src={selectedRequest.attachmentUri} 
+                          alt="Service Request Attachment" 
+                          className="w-full h-full object-contain" 
+                        />
+                        <Button 
+                          size="sm" 
+                          variant="secondary" 
+                          className="absolute bottom-2 right-2"
+                          onClick={() => window.open(selectedRequest.attachmentUri, '_blank')}
+                        >
+                          View Full Size
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 
                 <div className="pt-4 border-t">
                   <h3 className="text-sm font-medium text-gray-500 mb-2">Update Status</h3>
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                     <Button 
                       variant={selectedRequest.status === "pending" ? "default" : "outline"}
-                      className="flex-1"
-                      onClick={() => updateRequestStatus("pending")}
+                      className={`${selectedRequest.status === "pending" ? "bg-blue-600 hover:bg-blue-700" : ""}`}
+                      onClick={() => handleConfirmStatus("pending")}
                     >
                       Pending
                     </Button>
                     <Button 
                       variant={selectedRequest.status === "in-progress" ? "default" : "outline"}
-                      className="flex-1"
-                      onClick={() => updateRequestStatus("in-progress")}
+                      className={`${selectedRequest.status === "in-progress" ? "bg-amber-500 hover:bg-amber-600" : ""}`}
+                      onClick={() => handleConfirmStatus("in-progress")}
                     >
                       In Progress
                     </Button>
                     <Button 
                       variant={selectedRequest.status === "completed" ? "default" : "outline"}
-                      className="flex-1"
-                      onClick={() => updateRequestStatus("completed")}
+                      className={`${selectedRequest.status === "completed" ? "bg-green-600 hover:bg-green-700" : ""}`}
+                      onClick={() => handleConfirmStatus("completed")}
                     >
                       Completed
+                    </Button>
+                    <Button 
+                      variant={selectedRequest.status === "rejected" ? "default" : "outline"}
+                      className={`${selectedRequest.status === "rejected" ? "bg-red-600 hover:bg-red-700" : ""}`}
+                      onClick={() => handleConfirmStatus("rejected")}
+                    >
+                      Rejected
                     </Button>
                   </div>
                 </div>
@@ -676,6 +768,53 @@ const Requests = ({}: RequestsProps) => {
             )}
           </DialogContent>
         </Dialog>
+
+        {confirmStatus && (
+  <Dialog open={true} onOpenChange={() => setConfirmStatus(null)}>
+    <DialogContent className="sm:max-w-[400px]">
+      <DialogHeader>
+        <DialogTitle>Confirm Status Update</DialogTitle>
+        <p className="text-sm text-gray-600">
+          Are you sure you want to update the status to <span className="font-bold">{confirmStatus}</span>?
+        </p>
+      </DialogHeader>
+
+      {/* Remarks Input Field */}
+      <div className="mt-4">
+        <label htmlFor="remarks" className="block text-sm font-medium text-gray-700 mb-1">
+          Remarks (optional)
+        </label>
+        <textarea
+          id="remarks"
+          className="w-full border border-gray-300 rounded-md p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          rows={3}
+          placeholder="Enter remarks here..."
+          value={remarks}
+          onChange={(e) => setRemarks(e.target.value)}
+        />
+      </div>
+
+      <div className="flex justify-end space-x-2 mt-4">
+        <Button variant="outline" onClick={() => setConfirmStatus(null)}>
+          Cancel
+        </Button>
+        <Button
+          variant="default"
+          onClick={async () => {
+            if (confirmStatus) {
+              await updateRequestStatus(confirmStatus, remarks); // Pass remarks
+              setConfirmStatus(null);
+              setRemarks(""); // Clear after submission
+            }
+          }}
+        >
+          Confirm
+        </Button>
+      </div>
+    </DialogContent>
+  </Dialog>
+)}
+
       </div>
     </div>
   );

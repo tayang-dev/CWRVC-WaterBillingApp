@@ -4,6 +4,15 @@ import { db } from "../../lib/firebase";
 import KpiCards from "./KpiCards";
 import BillingTrendsChart from "./BillingTrendsChart";
 import PaymentStatusChart from "./PaymentStatusChart";
+import WaterLeakagePerSite from "./WaterLeakagePerSite"; // Import the new component
+import CustomerWaterUsageRanking from "./CustomerWaterUsageRanking"; // Import the new component
+
+// Helper: Currency Formatter
+const currencyFormatter = new Intl.NumberFormat("en-PH", {
+  style: "currency",
+  currency: "PHP",
+  minimumFractionDigits: 2,
+});
 
 const Dashboard = () => {
   const [dashboardData, setDashboardData] = useState({
@@ -14,197 +23,251 @@ const Dashboard = () => {
     customerGrowth: "+0%",
     revenueGrowth: "+0%",
     pendingChange: "+0%",
-    consumptionChange: "0%",
+    consumptionChange: "+4%",
   });
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [debugInfo, setDebugInfo] = useState([]);
+  const [debugInfo, setDebugInfo] = useState<string[]>([]);
 
-  // ✅ Formatter & Helper
-  const currencyFormatter = new Intl.NumberFormat('en-PH', {
-    style: 'currency',
-    currency: 'PHP',
-    minimumFractionDigits: 2,
-  });
+  // Filters
+  const [selectedSite, setSelectedSite] = useState("All");
+  const [selectedMonth, setSelectedMonth] = useState("All"); // Change to string
+  const [selectedYear, setSelectedYear] = useState("All"); // Change to string
+
+  const handleSiteChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedSite(e.target.value);
+  };
+
+  const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedMonth(e.target.value); // Keep as string
+  };
+
+  const handleYearChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedYear(e.target.value); // Keep as string
+  };
 
   const formatCurrency = (amount: number) => currencyFormatter.format(amount);
 
-  // ✅ useEffect
   useEffect(() => {
     const fetchDashboardData = async () => {
-      const debug = [];
+      const debug: string[] = [];
+      setLoading(true);
+  
       try {
         let totalConsumption = 0;
         let totalRevenue = 0;
         let pendingAmount = 0;
-        let customersProcessed = [];
-
-        debug.push("🚀 Starting dashboard data fetch");
-
-        // Step 1: Fetch all customers
-        const customersSnapshot = await getDocs(collection(db, "customers"));
-
-        if (customersSnapshot.empty) {
+        const customersProcessed: string[] = [];
+  
+        debug.push("🚀 Starting filtered dashboard data fetch");
+  
+        const customerSnapshot = await getDocs(collection(db, "customers"));
+  
+        if (customerSnapshot.empty) {
           debug.push("⚠️ No customers found in Firestore!");
           setError("No customer data available.");
           setLoading(false);
           setDebugInfo(debug);
           return;
         }
-
-        const totalCustomers = customersSnapshot.size;
-        debug.push(`📊 Found ${totalCustomers} customers`);
-
-        // Step 2: Process each customer for total water usage and pending payments
-        for (const customerDoc of customersSnapshot.docs) {
+  
+        const filteredCustomers = customerSnapshot.docs.filter((doc) => {
+          const site = doc.data()?.site || "unknown";
+          return selectedSite === "All" || site.toLowerCase() === selectedSite;
+        });
+  
+        debug.push(`📊 Found ${filteredCustomers.length} customers for site: ${selectedSite}`);
+  
+        const billsPromises = filteredCustomers.map(async (customerDoc) => {
           const customerData = customerDoc.data();
           const accountNumber = customerData.accountNumber;
-
           if (!accountNumber) {
             debug.push(`⚠️ Customer ${customerDoc.id} has no account number`);
-            continue;
+            return null;
           }
-
           customersProcessed.push(accountNumber);
           debug.push(`🔍 Processing customer: ${customerData.name} (Account: ${accountNumber})`);
-
-          // Step 3: Fetch all bills for water usage and pending payments
-          const billsRecordsRef = collection(db, "bills", accountNumber, "records");
-          const billsSnapshot = await getDocs(billsRecordsRef);
-
-          if (billsSnapshot.empty) {
-            debug.push(`⚠️ No bills found for account: ${accountNumber}`);
-            continue;
+  
+          const billsRef = collection(db, "bills", accountNumber, "records");
+          const billsSnapshot = await getDocs(billsRef);
+          return billsSnapshot;
+        });
+  
+        const billsSnapshots = await Promise.all(billsPromises);
+  
+        billsSnapshots.forEach((billsSnapshot) => {
+          if (billsSnapshot) {
+            billsSnapshot.docs.forEach((billDoc) => {
+              const billData = billDoc.data();
+              const billDate = new Date(billData.date);
+              const billMonth = billDate.getMonth() + 1;
+              const billYear = billDate.getFullYear();
+  
+              // Handle "All" for month and year properly
+              const isMonthAll = selectedMonth === "All";
+              const isYearAll = selectedYear === "All";
+              const selectedMonthNumber = isMonthAll ? null : parseInt(selectedMonth);
+              const selectedYearNumber = isYearAll ? null : parseInt(selectedYear);
+  
+              const matchesMonth = isMonthAll || (selectedMonthNumber !== null && billMonth === selectedMonthNumber);
+              const matchesYear = isYearAll || (selectedYearNumber !== null && billYear === selectedYearNumber);
+  
+              if (!matchesMonth || !matchesYear) return;
+  
+              if (typeof billData.waterUsage === "number") {
+                totalConsumption += billData.waterUsage;
+              }
+  
+              if (
+                typeof billData.amount === "number" &&
+                (billData.status === "pending" || billData.status === "overdue")
+              ) {
+                pendingAmount += billData.amount;
+              }
+            });
           }
-
-          // Sum water usage from all bills
-          billsSnapshot.forEach((billDoc) => {
-            const billData = billDoc.data();
-
-            // Total water consumption from all bills
-            if (typeof billData.waterUsage === "number") {
-              totalConsumption += billData.waterUsage; // Accumulate total water usage
-            }
-
-            // Pending amounts only
-            if (typeof billData.amount === "number" &&
-                (billData.status === "pending" || billData.status === "overdue")) {
-              pendingAmount += billData.amount; // Accumulate pending amounts
-            }
-          });
-        }
-
+        });
+  
         debug.push(`👥 Processed accounts: ${customersProcessed.join(", ")}`);
-        debug.push(`💧 Total Water Usage: ${totalConsumption} m³`);
-        debug.push(`⏳ Pending Payments: ${formatCurrency(pendingAmount)}`);
-
-        // Step 4: Fetch verified payments for total revenue
-        const paymentVerificationsRef = collection(db, "paymentVerifications");
-        const verifiedPaymentsSnapshot = await getDocs(paymentVerificationsRef);
-
-        if (verifiedPaymentsSnapshot.empty) {
-          debug.push("⚠️ No verified payments found!");
-        } else {
-          debug.push(`✅ Found ${verifiedPaymentsSnapshot.size} verified payments`);
-
-          verifiedPaymentsSnapshot.forEach((doc) => {
-            const data = doc.data();
-            const amount = parseFloat(data.amount); // amount is string
+        debug.push(`💧 Filtered Total Water Usage: ${totalConsumption} m³`);
+        debug.push(`⏳ Filtered Pending Payments: ${formatCurrency(pendingAmount)}`);
+  
+        const paymentSnapshot = await getDocs(collection(db, "paymentVerifications"));
+        paymentSnapshot.forEach((doc) => {
+          const data = doc.data();
+          const paymentDate = new Date(data.date);
+          const month = paymentDate.getMonth() + 1;
+          const year = paymentDate.getFullYear();
+  
+          // Ensure selectedMonth and selectedYear are compared as numbers
+          const isMonthAll = selectedMonth === "All";
+          const isYearAll = selectedYear === "All";
+          const selectedMonthNumber = isMonthAll ? null : parseInt(selectedMonth);
+          const selectedYearNumber = isYearAll ? null : parseInt(selectedYear);
+  
+          const matchesMonth = isMonthAll || (selectedMonthNumber !== null && month === selectedMonthNumber);
+          const matchesYear = isYearAll || (selectedYearNumber !== null && year === selectedYearNumber);
+  
+          if (matchesMonth && matchesYear) {
+            const amount = parseFloat(data.amount);
             if (!isNaN(amount)) {
-              totalRevenue += amount; // Accumulate total revenue
+              totalRevenue += amount;
             }
-          });
-
-          debug.push(`💸 Total Verified Revenue: ${formatCurrency(totalRevenue)}`);
-        }
-
-        // Step 5: Example growth (optional)
-        const customerGrowth = totalCustomers > 0 ? "+5%" : "0%";
-        const revenueGrowth = totalRevenue > 0 ? "+8%" : "0%";
-        const pendingChange = pendingAmount > 0 ? "+3%" : "0%";
-        const consumptionChange = totalConsumption > 0 ? "+4%" : "0%";
-
-        // Step 6: Set state
+          }
+        });
+  
+        debug.push(`💸 Filtered Total Revenue: ${formatCurrency(totalRevenue)}`);
+  
         setDashboardData({
-          totalCustomers: totalCustomers.toString(),
+          totalCustomers: filteredCustomers.length.toString(),
           totalRevenue: formatCurrency(totalRevenue),
           pendingPayments: formatCurrency(pendingAmount),
           waterConsumption: `${totalConsumption} m³`,
-          customerGrowth,
-          revenueGrowth,
-          pendingChange,
-          consumptionChange,
+          customerGrowth: "+5%",
+          revenueGrowth: "+8%",
+          pendingChange: "+3%",
+          consumptionChange: "+4%",
         });
-
+  
         setError(null);
-      } catch (error) {
-        debug.push(`❌ Error: ${error.message}`);
-        console.error("❌ Error fetching dashboard data:", error);
-        setError("Failed to fetch data. Check Firestore connection and console for details.");
+      } catch (err: any) {
+        debug.push(`❌ Error: ${err.message}`);
+        setError("Failed to fetch dashboard data.");
       } finally {
         setLoading(false);
         setDebugInfo(debug);
       }
     };
-
+  
     fetchDashboardData();
-  }, []);
-
+  }, [selectedSite, selectedMonth, selectedYear]);
+  
   return (
     <div className="w-full h-full p-6 bg-gray-50">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">Water Billing Dashboard</h1>
-        <p className="text-gray-500">Overview of billing metrics and customer data</p>
+      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
+          <p className="text-gray-500">Overview of billing metrics and customer data</p>
+        </div>
+        <div className="flex flex-wrap gap-4">
+          {/* Site Filter */}
+          <select
+            value={selectedSite}
+            onChange={handleSiteChange}
+            className="px-3 py-2 border rounded bg-white shadow-sm"
+          >
+            <option value="All">All Sites</option>
+            <option value="site1">Site 1</option>
+            <option value="site2">Site 2</option>
+            <option value="site3">Site 3</option>
+          </select>
+
+          {/* Month Selector */}
+          <select
+            value={selectedMonth}
+            onChange={handleMonthChange}
+            className="px-3 py-2 border rounded bg-white shadow-sm"
+          >
+            <option value="All">All Time</option>
+            {Array.from({ length: 12 }, (_, i) => {
+              const month = (i + 1).toString().padStart(2, "0");
+              return (
+                <option key={month} value={month}>
+                  {new Date(0, i).toLocaleString("default", { month: "long" })}
+                </option>
+              );
+            })}
+          </select>
+
+          {/* Year Selector */}
+          <select
+            value={selectedYear}
+            onChange={handleYearChange}
+            className="px-3 py-2 border rounded bg-white shadow-sm"
+          >
+            <option value="All">All Time</option>
+            {Array.from({ length: 6 }, (_, i) => {
+              const year = (2024 + i).toString();
+              return (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              );
+            })}
+          </select>
+
+        </div>
       </div>
 
-      {/* Show Loading State */}
+      {/* Loader / Error / Content */}
       {loading ? (
-        <div className="flex justify-center items-center h-32">
-          <div className="animate-pulse flex space-x-4">
-            <div className="flex-1 space-y-4 py-1">
-              <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-              <div className="space-y-2">
-                <div className="h-4 bg-gray-200 rounded"></div>
-                <div className="h-4 bg-gray-200 rounded w-5/6"></div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <div className="text-center text-gray-500">Loading...</div>
       ) : error ? (
         <div className="bg-red-100 border border-red-300 text-red-700 px-4 py-3 rounded mb-4">
           <p className="font-bold">Error Loading Data</p>
           <p>{error}</p>
-          <div className="mt-4">
-            <details className="cursor-pointer">
-              <summary className="text-sm text-red-600">Debug Information</summary>
-              <pre className="mt-2 text-xs bg-gray-100 p-2 rounded overflow-x-auto">
-                {debugInfo.map((line, index) => (
-                  <div key={index}>{line}</div>
-                ))}
-              </pre>
-            </details>
-          </div>
+          <details className="mt-4 cursor-pointer">
+            <summary className="text-sm text-red-600">Debug Info</summary>
+            <pre className="mt-2 text-xs bg-gray-100 p-2 rounded overflow-x-auto">
+              {debugInfo.map((line, i) => (
+                <div key={i}>{line}</div>
+              ))}
+            </pre>
+          </details>
         </div>
       ) : (
         <>
-          {/* KPI Cards */}
-          <KpiCards
-            totalCustomers={dashboardData.totalCustomers}
-            totalRevenue={dashboardData.totalRevenue}
-            pendingPayments={dashboardData.pendingPayments}
-            waterConsumption={dashboardData.waterConsumption}
-            customerGrowth={dashboardData.customerGrowth}
-            revenueGrowth={dashboardData.revenueGrowth}
-            pendingChange={dashboardData.pendingChange}
-            consumptionChange={dashboardData.consumptionChange}
-          />
+          <KpiCards {...dashboardData} />
 
-          {/* Charts Section */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
             <BillingTrendsChart />
             <PaymentStatusChart />
+            <CustomerWaterUsageRanking />
+            <WaterLeakagePerSite />
           </div>
+
+          
         </>
       )}
     </div>

@@ -9,8 +9,8 @@ import {
   onSnapshot,
   doc,
   updateDoc,
-  setDoc,
   Timestamp,
+  writeBatch,
 } from "firebase/firestore";
 import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, AvatarImage, AvatarFallback } from "../ui/avatar";
@@ -33,6 +33,8 @@ interface Notification {
   link: string;
   date: string;
   read: boolean;
+  collectionName: string; // Track which collection the notification belongs to
+  rawTimestamp?: number;
 }
 
 // Define Firestore document structure
@@ -44,6 +46,8 @@ interface FirestoreData {
   date?: string;
   read?: boolean;
   timestamp?: Timestamp | string;
+  firstName: string;
+  lastName: string;
 }
 
 const Header = ({
@@ -63,52 +67,73 @@ const Header = ({
       { name: "paymentVerifications", condition: where("status", "==", "pending"), title: "Pending Payment", link: "/payments" },
       { name: "requests", condition: where("status", "==", "in-progress"), title: "New Service Request", link: "/requests" },
       { name: "chats", condition: where("status", "==", "active"), title: "New Chat Message", link: "/customer-support" },
-      { name: "leaks", title: "New Leak Report", link: "/reports" },
+      { name: "leaks", condition: where("read", "==", false), title: "New Leak Report", link: "/reports" },
     ];
   
-    const unsubscribeList = collections.map(({ name, condition, title, link }) => {
-      const colRef = query(collection(db, name), condition);
+    const sortByDateDesc = (notifications: Notification[]) => {
+      return [...notifications].sort((a, b) => (b.rawTimestamp ?? 0) - (a.rawTimestamp ?? 0));
+    };
   
-      return onSnapshot(colRef, async (snapshot) => {
+    const unsubscribeList = collections.map(({ name, condition, title, link }) => {
+      const colRef = condition ? query(collection(db, name), condition) : collection(db, name);
+  
+      return onSnapshot(colRef, (snapshot) => {
+        console.log(`[${name}] Fetched ${snapshot.docs.length} documents`);
+  
         const updates: Notification[] = [];
   
         for (const docSnap of snapshot.docs) {
-          const data = docSnap.data() as FirestoreData;
+          const data = docSnap.data() ?? {};
           const notificationId = docSnap.id;
           const readStatus = data.read ?? false;
-
+  
+          let rawTime: number;
           let date: string;
+  
           if (data.timestamp instanceof Timestamp) {
+            rawTime = data.timestamp.toMillis();
             date = format(data.timestamp.toDate(), "MMM dd, yyyy hh:mm a");
           } else if (typeof data.timestamp === "string") {
+            rawTime = new Date(data.timestamp).getTime();
             date = format(new Date(data.timestamp), "MMM dd, yyyy hh:mm a");
           } else {
-            date = format(new Date(), "MMM dd, yyyy hh:mm a");
+            rawTime = Date.now();
+            date = format(new Date(rawTime), "MMM dd, yyyy hh:mm a");
+          }
+  
+          let message = "New notification";
+          if (name === "leaks") {
+            message = data.accountNumber || "Leak report";
+          } else if (name === "paymentVerifications") {
+            message = data.customerName || data.accountNumber || "Payment verification";
+          } else if (name === "requests" || name === "chats") {
+            message = data.accountNumber || "Customer request";
+          } else if (name === "users") {
+            message = [data.firstName, data.lastName].filter(Boolean).join(" ") || "User verification";
           }
   
           updates.push({
             id: notificationId,
             title,
-            message: data.customerName || data.accountNumber || "New notification",
+            message,
             link,
             date,
             read: readStatus,
+            collectionName: name,
+            rawTimestamp: rawTime,
           });
         }
   
         setNotifications((prev) => {
-          const mergedNotifications = [...prev];
+          const updatedIds = new Set(updates.map(u => `${u.collectionName}-${u.id}`));
   
-          updates.forEach((update) => {
-            const existingIndex = mergedNotifications.findIndex((n) => n.id === update.id);
-            if (existingIndex === -1) {
-              mergedNotifications.push(update);
-            } else {
-              mergedNotifications[existingIndex] = { ...mergedNotifications[existingIndex], ...update };
-            }
+          const filteredPrev = prev.filter(n => {
+            const idKey = `${n.collectionName}-${n.id}`;
+            return !updatedIds.has(idKey); // remove any existing version of these
           });
   
-          return mergedNotifications;
+          const merged = [...filteredPrev, ...updates];
+          return sortByDateDesc(merged);
         });
       });
     });
@@ -118,21 +143,82 @@ const Header = ({
     };
   }, [db]);
   
+  
   const markAsRead = async (notification: Notification) => {
     if (!notification.read) {
       try {
-        const notificationRef = doc(db, notification.link.replace("/", ""), notification.id);
+        // Use the correct collection name stored in the notification
+        const notificationRef = doc(db, notification.collectionName, notification.id);
         await updateDoc(notificationRef, { read: true });
   
-        setNotifications((prev) =>
-          prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n))
-        );
+        // Update local state - maintain sorting when updating
+        setNotifications((prev) => {
+          const updated = prev.map((n) => 
+            (n.id === notification.id && n.collectionName === notification.collectionName) 
+              ? { ...n, read: true } 
+              : n
+          );
+          // No need to resort since read status doesn't affect sorting
+          return updated;
+        });
+        
+        // Navigate to the link if provided
+        if (notification.link) {
+          navigate(notification.link);
+        }
       } catch (error) {
-        console.error("Error marking notification as read:", error);
+        console.error(`Error marking notification as read (${notification.collectionName}/${notification.id}):`, error);
       }
+    } else if (notification.link) {
+      // If already read, just navigate
+      navigate(notification.link);
     }
+  };
   
-    navigate(notification.link);
+  const markAllAsRead = async () => {
+    const unreadNotifications = notifications.filter(n => !n.read);
+    if (unreadNotifications.length === 0) return;
+  
+    try {
+      const batch = writeBatch(db);
+      const updatedIds = new Set();
+      let batchCount = 0;
+      
+      for (const notification of unreadNotifications) {
+        try {
+          const notificationRef = doc(db, notification.collectionName, notification.id);
+          batch.update(notificationRef, { read: true });
+          updatedIds.add(`${notification.collectionName}-${notification.id}`);
+          batchCount++;
+          
+          // Firestore limits batches to 500 operations
+          if (batchCount >= 400) {
+            await batch.commit();
+            console.log(`Committed batch of ${batchCount} notifications`);
+            batchCount = 0;
+          }
+        } catch (error) {
+          console.error(`Error adding to batch: ${notification.collectionName}/${notification.id}`, error);
+        }
+      }
+      
+      // Commit any remaining operations
+      if (batchCount > 0) {
+        await batch.commit();
+        console.log(`Committed remaining batch of ${batchCount} notifications`);
+      }
+      
+      // Update local state - maintain sorting when updating
+      setNotifications((prev) => {
+        const updated = prev.map((n) => 
+          updatedIds.has(`${n.collectionName}-${n.id}`) ? { ...n, read: true } : n
+        );
+        // No need to resort since read status doesn't affect sorting
+        return updated;
+      });
+    } catch (error) {
+      console.error("Error marking all notifications as read:", error);
+    }
   };
 
   const handleLogout = async () => {
@@ -143,6 +229,30 @@ const Header = ({
     }
   };
 
+  // Handle clicking outside to close dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      const target = event.target as Node;
+      const notificationPanel = document.getElementById("notification-panel");
+      const notificationButton = document.getElementById("notification-button");
+      
+      if (
+        showNotifications &&
+        notificationPanel && 
+        !notificationPanel.contains(target) &&
+        notificationButton &&
+        !notificationButton.contains(target)
+      ) {
+        setShowNotifications(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showNotifications]);
+
   return (
     <header className="w-full h-20 bg-white border-b border-gray-200 px-6 flex items-center justify-between">
       <div></div>
@@ -151,6 +261,7 @@ const Header = ({
         {/* Notifications */}
         <div className="relative">
           <Button
+            id="notification-button"
             variant="ghost"
             size="icon"
             className="text-gray-500 relative"
@@ -165,41 +276,42 @@ const Header = ({
           </Button>
 
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-80 bg-white rounded-md shadow-lg overflow-hidden z-50 border border-gray-200">
+            <div 
+              id="notification-panel"
+              className="absolute right-0 mt-2 w-80 bg-white rounded-md shadow-lg overflow-hidden z-50 border border-gray-200"
+            >
               <div className="p-3 border-b border-gray-200 flex justify-between items-center">
                 <h3 className="text-sm font-semibold">Notifications</h3>
+                <Button 
+                  variant="link" 
+                  onClick={markAllAsRead} 
+                  className="text-xs"
+                  disabled={!notifications.some(n => !n.read)}
+                >
+                  Mark All as Read
+                </Button>
               </div>
               <div className="max-h-96 overflow-y-auto">
                 {notifications.length > 0 ? (
                   notifications.map((notification) => (
                     <div
-                      key={notification.id}
+                      key={`${notification.collectionName}-${notification.id}`}
                       onClick={() => markAsRead(notification)}
-                      className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
-                        !notification.read ? "bg-blue-50" : ""
-                      }`}
+                      className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${!notification.read ? "bg-blue-50" : ""}`}
                     >
-                      <div>
-                        <p className="text-sm font-medium">{notification.title}</p>
-                        <p className="text-xs text-gray-500">{notification.message}</p>
-                        <p className="text-xs text-gray-400">{notification.date}</p>
+                      <div className="flex justify-between">
+                        <div>
+                          <p className="text-sm font-medium">{notification.title}</p>
+                          <p className="text-xs text-gray-500">{notification.message}</p>
+                          <p className="text-xs text-gray-400">{notification.date}</p>
+                        </div>
+                        {!notification.read && <div className="h-2 w-2 rounded-full bg-blue-600 mt-1"></div>}
                       </div>
-                      {!notification.read && <div className="h-2 w-2 rounded-full bg-blue-600"></div>}
                     </div>
                   ))
                 ) : (
                   <p className="text-sm text-gray-500 p-3">No new notifications</p>
                 )}
-              </div>
-              <div className="p-2 border-t border-gray-200 text-center">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-xs w-full"
-                  onClick={() => navigate("/notifications")}
-                >
-                  View All Notifications
-                </Button>
               </div>
             </div>
           )}
