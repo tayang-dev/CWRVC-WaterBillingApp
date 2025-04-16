@@ -9,24 +9,21 @@ import PaymentManagement from "./components/payment/PaymentMangement";
 import CustomerSupport from "./components/chat/CustomerSupport";
 import UserManagement from "./components/users/UserManagement";
 import SettingsPage from "./components/settings/SettingPage";
-import MeterReading from "./components/meters/MeterReading";
+import MeterReading from "./components/meters/meterReading";
+import ViewBills from "./components/bills/bill"; // Moved import to top
 
 // Lazy load components for better performance
 const Dashboard = lazy(() => import("./components/dashboard/Dashboard"));
 const AccountsManagement = lazy(
-  () => import("./components/accounts/AccountsManagement"),
+  () => import("./components/accounts/AccountsManagement")
 );
 const CustomerService = lazy(
-  () => import("./components/customer-service/CustomerService"),
+  () => import("./components/customer-service/CustomerService")
 );
-const RequestsPage = lazy(
-  () => import("./components/requests/Requests"),
-);
-const ReportsPage = lazy(
-  () => import("./components/reports/Reports"),
-);
-const MeterReadingPage = lazy(() => import("./components/meters/MeterReading"));
-
+const RequestsPage = lazy(() => import("./components/requests/Requests"));
+const ReportsPage = lazy(() => import("./components/reports/Reports"));
+const MeterReadingPage = lazy(() => import("./components/meters/meterReading"));
+const Bill = lazy(() => import("./components/bills/bill"));
 
 function App() {
   return (
@@ -129,18 +126,42 @@ function App() {
               </ProtectedRoute>
             }
           />
+
           {/* Meter Reading route for staff */}
-        <Route
-          path="/meters"
-          element={
-            <ProtectedRoute>
-              <AdminLayout>
-                <MeterReading />
-              </AdminLayout>
-            </ProtectedRoute>
-          }
-        />
-          {/* Add more routes as needed */}
+          <Route
+            path="/meters"
+            element={
+              <ProtectedRoute>
+                <AdminLayout>
+                  <MeterReading />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Bills routes */}
+          <Route
+            path="/bills"
+            element={
+              <ProtectedRoute>
+                <AdminLayout>
+                  <Bill />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* View Individual Bill route */}
+          <Route
+            path="/view-bills/:accountNumber/:billId"
+            element={
+              <ProtectedRoute>
+                <AdminLayout>
+                  <ViewBills />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          />
 
           {/* For Tempo routes */}
           {import.meta.env.VITE_TEMPO === "true" && (

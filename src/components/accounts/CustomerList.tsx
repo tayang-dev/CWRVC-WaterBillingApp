@@ -122,6 +122,10 @@ const formSchema = z.object({
     .min(2, { message: "Lot must be at least 2 characters." })
     .max(3, { message: "Lot cannot exceed 3 characters." })
     .regex(/^[A-Za-z0-9]+$/, "Lot can only contain letters and numbers"),
+
+  status: z.enum(["active", "inactive", "delinquent"], {
+    required_error: "Status is required.",
+  }),
 });
 
 
@@ -137,7 +141,7 @@ interface Customer {
   meterNumber: string;
   block: string;
   lot: string;
-  status: "active" | "inactive" | "pending";
+  status: "active" | "inactive" | "pending" | "delinquent";
   lastBillingDate: string;
   amountDue: number;
   site?: string;
@@ -354,176 +358,199 @@ const handleDeleteCustomer = async () => {
   const EditCustomerDialog = () => {
     const form = useForm<z.infer<typeof formSchema>>({
       resolver: zodResolver(formSchema),
-      defaultValues: editingCustomer ? {
-        firstName: editingCustomer.firstName||"",
-        lastName: editingCustomer.lastName || "",  
-        middleInitial: editingCustomer.middleInitial ||"",
-        email: editingCustomer.email || "",
-        phone: editingCustomer.phone || "",
-        site: editingCustomer.site || "site1",
-        isSenior: editingCustomer.isSenior || false,
-        accountNumber: editingCustomer.accountNumber,
-        meterNumber: editingCustomer.meterNumber || "",
-        block: editingCustomer.block || "",
-        lot: editingCustomer.lot || "",
-      } : undefined,
+      defaultValues: editingCustomer
+        ? {
+            firstName: editingCustomer.firstName || "",
+            lastName: editingCustomer.lastName || "",
+            middleInitial: editingCustomer.middleInitial || "",
+            email: editingCustomer.email || "",
+            phone: editingCustomer.phone || "",
+            site: editingCustomer.site || "site1",
+            isSenior: editingCustomer.isSenior || false,
+            accountNumber: editingCustomer.accountNumber,
+            meterNumber: editingCustomer.meterNumber || "",
+            block: editingCustomer.block || "",
+            lot: editingCustomer.lot || "",
+            // Map "pending" to a valid status value
+            status: editingCustomer.status === "pending" ? "inactive" : editingCustomer.status,
+          }
+        : undefined,
     });
 
     return (
       <Dialog open={!!editingCustomer} onOpenChange={() => setEditingCustomer(null)}>
-  <DialogContent className="sm:max-w-[600px]">
-    <DialogHeader>
-      <DialogTitle>Edit Customer</DialogTitle>
-      <DialogDescription>
-        Update customer information for {editingCustomer?.name}
-      </DialogDescription>
-    </DialogHeader>
-    
-    {error && (
-      <div className="flex items-center gap-2 p-3 mb-4 text-sm rounded-md bg-red-50 text-red-600">
-        <AlertCircle className="h-4 w-4" />
-        <span>{error}</span>
-      </div>
-    )}
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Edit Customer</DialogTitle>
+            <DialogDescription>
+              Update customer information for {editingCustomer?.name}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {error && (
+            <div className="flex items-center gap-2 p-3 mb-4 text-sm rounded-md bg-red-50 text-red-600">
+              <AlertCircle className="h-4 w-4" />
+              <span>{error}</span>
+            </div>
+          )}
 
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(handleEditCustomer)} className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <FormField control={form.control} name="firstName" render={({ field }) => (
-            <FormItem>
-              <FormLabel>First Name</FormLabel>
-              <FormControl><Input {...field} /></FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleEditCustomer)} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <FormField control={form.control} name="firstName" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>First Name</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
 
-          <FormField control={form.control} name="lastName" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Last Name</FormLabel>
-              <FormControl><Input {...field} /></FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
+                <FormField control={form.control} name="lastName" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Last Name</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
 
-          <FormField control={form.control} name="middleInitial" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Middle Initial</FormLabel>
-              <FormControl><Input {...field} /></FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
+                <FormField control={form.control} name="middleInitial" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Middle Initial</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
 
-          <FormField control={form.control} name="email" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Email Address</FormLabel>
-              <FormControl><Input {...field} /></FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
+                <FormField control={form.control} name="email" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email Address</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
 
-          <FormField control={form.control} name="phone" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Phone Number</FormLabel>
-              <FormControl><Input {...field} /></FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
+                <FormField control={form.control} name="phone" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Phone Number</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
 
-          <FormField control={form.control} name="accountNumber" render={() => (
-            <FormItem>
-              <FormLabel>Account Number</FormLabel>
-              <FormControl>
-                <Input 
-                  value={editingCustomer?.accountNumber} 
-                  disabled 
-                />
-              </FormControl>
-            </FormItem>
-          )} />
+                <FormField control={form.control} name="accountNumber" render={() => (
+                  <FormItem>
+                    <FormLabel>Account Number</FormLabel>
+                    <FormControl>
+                      <Input 
+                        value={editingCustomer?.accountNumber} 
+                        disabled 
+                      />
+                    </FormControl>
+                  </FormItem>
+                )} />
 
-          <FormField control={form.control} name="site" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Site Location</FormLabel>
-              <Select 
-                onValueChange={field.onChange} 
-                defaultValue={field.value}
-              >
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select site location" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  <SelectItem value="site1">Site 1</SelectItem>
-                  <SelectItem value="site2">Site 2</SelectItem>
-                  <SelectItem value="site3">Site 3</SelectItem>
-                </SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )} />
+                <FormField control={form.control} name="site" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Site Location</FormLabel>
+                    <Select 
+                      onValueChange={field.onChange} 
+                      defaultValue={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select site location" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="site1">Site 1</SelectItem>
+                        <SelectItem value="site2">Site 2</SelectItem>
+                        <SelectItem value="site3">Site 3</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
 
-          <FormField control={form.control} name="meterNumber" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Meter Number</FormLabel>
-              <FormControl><Input {...field} /></FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
+                <FormField control={form.control} name="meterNumber" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Meter Number</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
 
-          <FormField control={form.control} name="block" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Block</FormLabel>
-              <FormControl><Input {...field} /></FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
+                <FormField control={form.control} name="block" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Block</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
 
-          <FormField control={form.control} name="lot" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Lot</FormLabel>
-              <FormControl><Input {...field} /></FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
+                <FormField control={form.control} name="lot" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Lot</FormLabel>
+                    <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
 
-          <FormField control={form.control} name="isSenior" render={({ field }) => (
-            <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
-              <FormControl>
-                <Checkbox
-                  checked={field.value}
-                  onCheckedChange={field.onChange}
-                />
-              </FormControl>
-              <div className="space-y-1 leading-none">
-                <FormLabel>Senior Citizen</FormLabel>
-                <FormMessage />
+                <FormField control={form.control} name="isSenior" render={({ field }) => (
+                  <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                    <div className="space-y-1 leading-none">
+                      <FormLabel>Senior Citizen</FormLabel>
+                      <FormMessage />
+                    </div>
+                  </FormItem>
+                )} />
+
+                <FormField control={form.control} name="status" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Status</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="inactive">Inactive</SelectItem>
+                        <SelectItem value="delinquent">Delinquent</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
               </div>
-            </FormItem>
-          )} />
-        </div>
 
-        <div className="flex justify-end space-x-2">
-          <Button 
-            type="button"
-            variant="outline" 
-            onClick={() => setEditingCustomer(null)}
-            disabled={isSubmitting}
-          >
-            Cancel
-          </Button>
-          <Button 
-            type="submit" 
-            disabled={isSubmitting}
-            className="bg-blue-600 hover:bg-blue-700"
-          >
-            {isSubmitting ? "Updating..." : "Update Customer"}
-          </Button>
-        </div>
-      </form>
-    </Form>
-  </DialogContent>
-</Dialog>
+              <div className="flex justify-end space-x-2">
+                <Button 
+                  type="button"
+                  variant="outline" 
+                  onClick={() => setEditingCustomer(null)}
+                  disabled={isSubmitting}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  type="submit" 
+                  disabled={isSubmitting}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {isSubmitting ? "Updating..." : "Update Customer"}
+                </Button>
+              </div>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     );
   };
 
@@ -583,13 +610,13 @@ const handleDeleteCustomer = async () => {
   const getStatusBadgeColor = (status: Customer["status"]) => {
     switch (status) {
       case "active":
-        return "bg-green-100 text-green-800";
+        return "bg-green-100 text-green-800"; // Green for active
       case "inactive":
-        return "bg-gray-100 text-gray-800";
-      case "pending":
-        return "bg-yellow-100 text-yellow-800";
+        return "bg-gray-100 text-gray-800"; // Gray for inactive
+      case "delinquent":
+        return "bg-red-100 text-red-800"; // Red for delinquent
       default:
-        return "bg-gray-100 text-gray-800";
+        return "bg-gray-100 text-gray-800"; // Default gray
     }
   };
 

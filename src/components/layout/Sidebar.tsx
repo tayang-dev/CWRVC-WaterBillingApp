@@ -8,8 +8,6 @@ import {
   MessageSquare,
   Settings,
   LogOut,
-  ChevronDown,
-  ChevronRight,
   CreditCard,
   BarChart,
   ClipboardList,
@@ -47,8 +45,7 @@ const SidebarItem = ({
   subItems = [],
   collapsed,
 }: SidebarItemProps) => {
-  const baseClasses =
-    "flex items-center px-3 py-2 rounded-md transition-colors";
+  const baseClasses = "flex items-center px-3 py-2 rounded-md transition-colors";
   const activeClasses = "bg-blue-100 text-blue-700";
   const inactiveClasses = "text-gray-700 hover:bg-blue-50 hover:text-blue-600";
 
@@ -236,6 +233,15 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
           label="Settings"
           path="/settings"
           isActive={location.pathname === "/settings"}
+          collapsed={collapsed}
+        />
+
+        {/* New Sidebar Item for Bills */}
+        <SidebarItem
+          icon={<CreditCard className="h-5 w-5" />}
+          label="Bills"
+          path="/bills"
+          isActive={location.pathname.startsWith("/bills")}
           collapsed={collapsed}
         />
       </div>
