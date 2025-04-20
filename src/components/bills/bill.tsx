@@ -7,7 +7,8 @@ import {
   collectionGroup,
   doc,
   where,
-  Timestamp
+  Timestamp,
+  getDoc
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { AlertCircle, FileText, RefreshCw, Filter } from "lucide-react";
@@ -35,12 +36,20 @@ import { ChevronLeft, ChevronRight, Search, Filter as FilterIcon } from "lucide-
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Checkbox } from "../ui/checkbox";
 import { Badge } from "../ui/badge";
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"; 
+import BillDisplay from "./BillDisplay"; 
 
 // Utility function to format currency
 const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency: "PHP",
   }).format(amount);
 };
 
@@ -49,6 +58,8 @@ interface Customer {
   name: string;
   accountNumber: string;
   address?: string;
+  block?: string;
+  lot?: string;
   site?: string;
   status?: string;
   isSenior?: boolean;
@@ -86,7 +97,9 @@ const Bill: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [bills, setBills] = useState<any[]>([]); // Replace `any` with the appropriate type for bills
   const itemsPerPage = 10;
-
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedBills, setSelectedBills] = useState<any[]>([]);
+  const [selectedAccount, setSelectedAccount] = useState("");
   // Use the current date and set due date 15 days ahead.
   const currentDate = new Date();
   const defaultDueDate = new Date(currentDate);
@@ -222,40 +235,48 @@ const Bill: React.FC = () => {
     let total = 0;
   
     if (usage > 0) {
-      const baseRate = billingData.waterRate;
-      const firstBlock = Math.min(usage, 10);
-      total += firstBlock * baseRate;
-      usage -= firstBlock;
-
+      // First tier: 1-10 cubic meters
+      const tier1 = Math.min(usage, 10);
+      total += tier1 * 19.1;
+      usage -= tier1;
+  
       if (usage > 0) {
-        const block2 = Math.min(usage, 10);
-        total += block2 * (baseRate + 2);
-        usage -= block2;
+        // Second tier: 11-20 cubic meters
+        const tier2 = Math.min(usage, 10);
+        total += tier2 * 21.1;
+        usage -= tier2;
       }
-
+  
       if (usage > 0) {
-        const block3 = Math.min(usage, 10);
-        total += block3 * (baseRate + 4);
-        usage -= block3;
+        // Third tier: 21-30 cubic meters
+        const tier3 = Math.min(usage, 10);
+        total += tier3 * 23.1;
+        usage -= tier3;
       }
-
+  
       if (usage > 0) {
-        const block4 = Math.min(usage, 10);
-        total += block4 * (baseRate + 6);
-        usage -= block4;
+        // Fourth tier: 31-40 cubic meters
+        const tier4 = Math.min(usage, 10);
+        total += tier4 * 25.1;
+        usage -= tier4;
       }
-
+  
       if (usage > 0) {
-        const block5 = Math.min(usage, 10);
-        total += block5 * (baseRate + 8);
-        usage -= block5;
+        // Fifth tier: 41-50 cubic meters
+        const tier5 = Math.min(usage, 10);
+        total += tier5 * 27.1;
+        usage -= tier5;
       }
-
+  
       if (usage > 0) {
-        total += usage * (baseRate + 10);
+        // Sixth tier: 51+ cubic meters
+        total += usage * 29.1;
       }
-
-      if (total < 191) total = 191;
+  
+      // Apply minimum charge
+      if (total < 191) {
+        total = 191;
+      }
     }
   
     const tax = total * billingData.taxRate;
@@ -279,8 +300,18 @@ const Bill: React.FC = () => {
     usage: number, 
     billCalc: ReturnType<typeof calculateBillAmount>
 ) => {
+    // Create the complete address string using customer data
+    const customerAddress = customer.address || ""; // Use empty string if address is undefined
+    
+    // Format the full address properly
+    const formattedAddress = customer.block && customer.lot 
+        ? `BLK ${customer.block}, LOT ${customer.lot}, ${customerAddress}`
+        : customerAddress;
+    
     return {
         customerId: customer.id,
+        customerName: customer.name, // Add customer name
+        customerAddress: formattedAddress, // Add formatted address
         date: new Date().toLocaleDateString("en-GB"),
         amount: billCalc.waterCharge,
         originalAmount: billCalc.waterCharge,
@@ -441,13 +472,16 @@ const Bill: React.FC = () => {
           }
   
           const isSenior = customer.isSenior || false;
-          const waterChargeBeforeTax = usage * billingData.waterRate;
-          const tax = waterChargeBeforeTax * billingData.taxRate;
-          const rawTotal = waterChargeBeforeTax + tax;
-          const discount = isSenior ? rawTotal * billingData.seniorDiscountRate : 0;
-          const discountedTotal = rawTotal - discount;
-          const penalty = discountedTotal * billingData.penaltyRate;
-          const totalAmountDue = discountedTotal + penalty;
+          
+          // Use the tiered billing calculation function instead of flat rate
+          const billCalc = calculateBillAmount(usage, isSenior);
+          
+          // Extract the calculated values from the billCalc object
+          const waterChargeBeforeTax = billCalc.waterCharge;
+          const tax = billCalc.tax;
+          const discount = billCalc.discount;
+          const penalty = billCalc.penalty;
+          const totalAmountDue = billCalc.totalAmountDue;
   
           let overpayment = 0;
           const latestBillQuery = query(
@@ -464,23 +498,24 @@ const Bill: React.FC = () => {
             }
           }
   
-          let finalDiscountedTotal = discountedTotal;
+          // Calculate final amounts after any overpayment is applied
+          let finalDiscountedTotal = totalAmountDue - penalty; // Amount without penalty
           let finalTotalAmountDue = totalAmountDue;
-          let finalOriginalAmount = discountedTotal;
+          let finalOriginalAmount = finalDiscountedTotal;
           let appliedOverpayment = 0;
   
           if (overpayment > 0) {
-            if (overpayment >= discountedTotal) {
-              appliedOverpayment = discountedTotal;
+            if (overpayment >= finalDiscountedTotal) {
+              appliedOverpayment = finalDiscountedTotal;
               finalDiscountedTotal = 0;
               finalTotalAmountDue = 0;
               finalOriginalAmount = 0;
               overpayment -= appliedOverpayment;
             } else {
               appliedOverpayment = overpayment;
-              finalDiscountedTotal = discountedTotal - overpayment;
-              finalTotalAmountDue = totalAmountDue - overpayment;
-              finalOriginalAmount = discountedTotal - overpayment;
+              finalDiscountedTotal = finalDiscountedTotal - overpayment;
+              finalTotalAmountDue = finalTotalAmountDue - overpayment;
+              finalOriginalAmount = finalOriginalAmount - overpayment;
               overpayment = 0;
             }
           }
@@ -494,8 +529,15 @@ const Bill: React.FC = () => {
   
           const billNumber = (allBillsSnapshot.size + 1).toString().padStart(10, "0");
   
+          const formattedAddress = customer.block && customer.lot 
+            ? `BLK ${customer.block}, LOT ${customer.lot}, ${customer.address || ""}`
+            : customer.address || "";
+          
+          // Create bill data with correct calculations
           const billData = {
             customerId: customer.id,
+            customerName: customer.name,
+            customerAddress: formattedAddress,
             date: Timestamp.now(),
             amount: finalDiscountedTotal,
             originalAmount: finalOriginalAmount,
@@ -511,8 +553,8 @@ const Bill: React.FC = () => {
             },
             accountNumber: reading.accountNumber,
             meterNumber: customer.meterNumber || "Meter-Default",
-            waterCharge: rawTotal,
-            waterChargeBeforeTax: waterChargeBeforeTax,
+            waterCharge: waterChargeBeforeTax, // Use the tiered calculation result
+            waterChargeBeforeTax: waterChargeBeforeTax, // Use the tiered calculation result
             tax: tax,
             seniorDiscount: discount,
             penalty: penalty,
@@ -522,7 +564,7 @@ const Bill: React.FC = () => {
             billNumber: billNumber,
             overPayment: overpayment,
             appliedOverpayment: appliedOverpayment,
-            rawCalculatedAmount: discountedTotal,
+            rawCalculatedAmount: finalDiscountedTotal + appliedOverpayment, // Original calculated amount before overpayment
             createdAt: Timestamp.now(),
           };
   
@@ -576,12 +618,80 @@ const Bill: React.FC = () => {
     }
   };
 
+  const handleViewBills = async (accountNumber: string) => {
+    setSelectedAccount(accountNumber);
+    setDialogOpen(true);
+  
+    try {
+      const billsRef = collection(db, "bills", accountNumber, "records");
+      const billsSnapshot = await getDocs(billsRef);
+  
+      const billsList = billsSnapshot.docs.map(doc => {
+        const billData = doc.data();
+        return {
+          id: doc.id,
+          ...billData,
+          customerName: billData.customerName || "Unknown Customer",
+          customerAddress: billData.customerAddress || "Unknown Address",
+        };
+      });
+  
+      console.log("Fetched Bills:", billsList); // Debug fetched data
+      setSelectedBills(billsList);
+    } catch (error) {
+      console.error("Error fetching bills for account:", error);
+      showNotification("Failed to load bills for this account.", "error");
+    }
+  };
+  
+
+  // View Bills Tab Functionality
+  const fetchBillsData = async () => {
+    setLoadingState("loading");
+    try {
+      const paymentsSnapshot = await getDocs(collection(db, "updatedPayments"));
+  
+      const paymentsData = await Promise.allSettled(
+        paymentsSnapshot.docs.map(async (paymentDoc) => {
+          const accountNumber = paymentDoc.id;
+          const paymentData = paymentDoc.data();
+  
+          const customerId = paymentData.customerId;
+  
+          const customerRef = doc(db, "customers", customerId);
+          const customerSnap = await getDoc(customerRef);
+          const customerData = customerSnap.exists() ? customerSnap.data() : null;
+  
+          return {
+            accountNumber,
+            name: customerData ? `${customerData.firstName} ${customerData.lastName}` : "Unknown",
+            email: customerData?.email || customerData?.phone || "N/A",
+            totalAmountDue: paymentData.amount || 0,
+            status: paymentData.status || "unknown",
+          };
+        })
+      );
+  
+      const finalData = paymentsData
+        .filter((res) => res.status === "fulfilled" && res.value !== null)
+        .map((res) => (res as PromiseFulfilledResult<any>).value);
+  
+      setBills(finalData);
+      setLoadingState("success");
+    } catch (err) {
+      console.error("Error fetching bills data:", err);
+      setLoadingState("error");
+      showNotification("Failed to load bills data.", "error");
+    }
+  };
+  
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="mb-6">
           <TabsTrigger value="customer-billing">Customer Billing</TabsTrigger>
-          <TabsTrigger value="view-bills">View Bills</TabsTrigger> {/* New Tab */}
+          <TabsTrigger value="view-bills" onClick={fetchBillsData}>View Bills</TabsTrigger> {/* New Tab */}
         </TabsList>
 
         {/* Customer Billing Tab */}
@@ -751,165 +861,122 @@ const Bill: React.FC = () => {
           </div>
         </TabsContent>
 
-{/* View Bills Tab */}
-<TabsContent value="view-bills" className="space-y-6">
-  <Card>
-    <CardHeader className="flex flex-col md:flex-row md:items-center md:justify-between">
-      <div>
-        <CardTitle>View Bills</CardTitle>
-        <CardDescription>View all generated bills for customers</CardDescription>
-      </div>
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2 mt-4 md:mt-0">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-          <Input
-            placeholder="Search bills..."
-            value={billingSearchTerm}
-            onChange={(e) => {
-              setBillingSearchTerm(e.target.value);
-              setCurrentPage(1); // Reset to first page on search change
-            }}
-            className="pl-10 w-64"
-          />
-        </div>
-        <Button variant="outline" size="icon" onClick={() => setBillingShowFilters((prev) => !prev)}>
-          <FilterIcon className="h-4 w-4" />
-        </Button>
-      </div>
-    </CardHeader>
-    {billingShowFilters && (
-      <div className="px-6 pb-4 flex space-x-2">
-        <Select
-          value={billingFilterSite}
-          onValueChange={(value) => {
-            setBillingFilterSite(value);
-            setCurrentPage(1); // Reset page on filter change
-          }}
-        >
-          <SelectTrigger className="w-[150px]">
-            <SelectValue placeholder="Filter by Site" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Sites</SelectItem>
-            <SelectItem value="site1">Site 1</SelectItem>
-            <SelectItem value="site2">Site 2</SelectItem>
-            <SelectItem value="site3">Site 3</SelectItem>
-          </SelectContent>
-        </Select>
-        <label className="flex items-center space-x-2">
-          <Checkbox
-            checked={billingFilterSenior}
-            onCheckedChange={(val) => {
-              setBillingFilterSenior(val as boolean);
-              setCurrentPage(1); // Reset page on filter change
-            }}
-          />
-          <span className="text-sm">Senior Only</span>
-        </label>
-      </div>
-    )}
-    <CardContent>
-      {(() => {
-        // Compute filtered bills (logic based on CustomerList)
-        const searchLower = billingSearchTerm.toLowerCase();
-        const filteredBills = bills.filter((bill) => {
-          const matchesSearch =
-            bill.customerName.toLowerCase().includes(searchLower) ||
-            bill.accountNumber.toLowerCase().includes(searchLower) ||
-            bill.billingPeriod?.toLowerCase().includes(searchLower);
-          const matchesSite = billingFilterSite === "all" || bill.site === billingFilterSite;
-          const matchesSenior = !billingFilterSenior || bill.isSenior === true;
-          return matchesSearch && matchesSite && matchesSenior;
-        }).sort((a, b) => a.customerName.localeCompare(b.customerName)); // Sort bills alphabetically by customer name
-
-        const itemsPerPage = 10;
-        const indexOfLastBill = currentPage * itemsPerPage;
-        const indexOfFirstBill = indexOfLastBill - itemsPerPage;
-        const currentBills = filteredBills.slice(indexOfFirstBill, indexOfLastBill);
-        const totalPages = Math.ceil(filteredBills.length / itemsPerPage);
-
-        return (
-          <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Account #</TableHead>
-                  <TableHead>Customer Name</TableHead>
-                  <TableHead>Billing Period</TableHead>
-                  <TableHead>Amount Due</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {currentBills.length > 0 ? (
-                  currentBills.map((bill) => (
-                    <TableRow key={bill.id}>
-                      <TableCell className="font-medium">{bill.accountNumber}</TableCell>
-                      <TableCell>{bill.customerName}</TableCell>
-                      <TableCell>{bill.billingPeriod}</TableCell>
-                      <TableCell>{formatCurrency(bill.amount)}</TableCell>
-                      <TableCell>
-                        {bill.status === "paid" ? (
-                          <Badge className="bg-green-500">Paid</Badge>
-                        ) : bill.status === "overdue" ? (
-                          <Badge className="bg-red-500">Overdue</Badge>
-                        ) : (
-                          <Badge className="bg-yellow-500">Pending</Badge>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8">
-                      No bills found.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-
-            {/* Pagination Controls */}
-            {filteredBills.length > itemsPerPage && (
-              <div className="flex items-center justify-between mt-4">
-                <div className="text-sm text-gray-500">
-                  Showing {indexOfFirstBill + 1} to{" "}
-                  {Math.min(indexOfLastBill, filteredBills.length)} of{" "}
-                  {filteredBills.length} bills
+        {/* View Bills Tab */}
+        <TabsContent value="view-bills" className="space-y-6">
+          <Card>
+            <CardHeader className="flex flex-col md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle>View Bills</CardTitle>
+                <CardDescription>View all generated bills for customers</CardDescription>
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 mt-4 md:mt-0">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <Input
+                    placeholder="Search bills..."
+                    value={billingSearchTerm}
+                    onChange={(e) => {
+                      setBillingSearchTerm(e.target.value);
+                      setCurrentPage(1); // Reset to first page on search change
+                    }}
+                    className="pl-10 w-64"
+                  />
                 </div>
-                <div className="flex space-x-1">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    disabled={currentPage === 1}
-                    onClick={() => setCurrentPage(currentPage - 1)}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <span className="text-sm">
-                    {currentPage} / {totalPages}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    disabled={currentPage === totalPages}
-                    onClick={() => setCurrentPage(currentPage + 1)}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
+                <Button variant="outline" size="icon" onClick={() => setBillingShowFilters((prev) => !prev)}>
+                  <FilterIcon className="h-4 w-4" />
+                </Button>
+              </div>
+            </CardHeader>
+            {billingShowFilters && (
+              <div className="px-6 pb-4 flex space-x-2">
+                <Select
+                  value={billingFilterSite}
+                  onValueChange={(value) => {
+                    setBillingFilterSite(value);
+                    setCurrentPage(1); // Reset page on filter change
+                  }}
+                >
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder="Filter by Site" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Sites</SelectItem>
+                    <SelectItem value="site1">Site 1</SelectItem>
+                    <SelectItem value="site2">Site 2</SelectItem>
+                    <SelectItem value="site3">Site 3</SelectItem>
+                  </SelectContent>
+                </Select>
+                <label className="flex items-center space-x-2">
+                  <Checkbox
+                    checked={billingFilterSenior}
+                    onCheckedChange={(val) => {
+                      setBillingFilterSenior(val as boolean);
+                      setCurrentPage(1); // Reset page on filter change
+                    }}
+                  />
+                  <span className="text-sm">Senior Only</span>
+                </label>
               </div>
             )}
-          </>
-        );
-      })()}
-    </CardContent>
-  </Card>
-</TabsContent>
+            <CardContent>
+              {loadingState === "loading" ? (
+                <div>Loading...</div>
+              ) : loadingState === "error" ? (
+                <div>{notification?.message}</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Account #</TableHead>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Email/Phone</TableHead>
+                      <TableHead>Total Amount Due</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {bills.length > 0 ? (
+                      bills.map((bill, index) => (
+                        <TableRow key={index}>
+                          <TableCell>{bill.accountNumber}</TableCell>
+                          <TableCell>{bill.name}</TableCell>
+                          <TableCell>{bill.email}</TableCell>
+                          <TableCell>{formatCurrency(bill.totalAmountDue)}</TableCell>
+                          <TableCell>{bill.status}</TableCell>
+                          <TableCell>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleViewBills(bill.accountNumber)}
+                            >
+                              View Bills
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center">
+                          No bills found.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>            
+          </Card>
+        </TabsContent>
       </Tabs>
+      <BillDisplay 
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        selectedAccount={selectedAccount}
+        selectedBills={selectedBills}
+      />
     </div>
-            
-    );
+  );
 };
-      
+
 export default Bill;
