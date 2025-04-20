@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import logoImage from "@/assets/logo.png"; // Adjust the path if necessary
 import {
   collection,
   query,
@@ -44,6 +45,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"; 
 import BillDisplay from "./BillDisplay"; 
+import jsPDF from "jspdf"; // Import jsPDF for PDF generation
+import "jspdf-autotable"; // Optional for table formatting
+import html2canvas from "html2canvas"; // Import html2canvas for rendering HTML to canvas
 
 // Utility function to format currency
 const formatCurrency = (amount: number) => {
@@ -685,6 +689,665 @@ const Bill: React.FC = () => {
     }
   };
   
+  const handlePrintAllReceipts = async () => {
+    try {
+      // Show processing notification
+      showNotification("Preparing bills for printing...", "info");
+      
+      const allBillsSnapshot = await getDocs(collectionGroup(db, "records"));
+      if (allBillsSnapshot.empty) {
+        showNotification("No bills found to print.", "info");
+        return;
+      }
+  
+      // Filter only documents that are actual bills
+      const allBills = allBillsSnapshot.docs
+        .filter(doc => doc.data().billNumber && doc.data().customerName)
+        .map((doc) => ({
+          id: doc.id,
+          billNumber: doc.data().billNumber || "0000000000",
+          customerName: doc.data().customerName || "Unknown Customer",
+          customerAddress: doc.data().customerAddress || "Unknown Address",
+          meterReading: doc.data().meterReading || { current: 0, previous: 0 },
+          waterUsage: doc.data().waterUsage || 0,
+          billingPeriod: doc.data().billingPeriod || "N/A",
+          waterChargeBeforeTax: doc.data().waterChargeBeforeTax || 0,
+          tax: doc.data().tax || 0,
+          seniorDiscount: doc.data().seniorDiscount || 0,
+          arrears: doc.data().arrears || 0,
+          appliedOverpayment: doc.data().appliedOverpayment || 0,
+          amount: doc.data().amount || 0,
+          accountNumber: doc.data().accountNumber || "00-00-0000",
+          meterNumber: doc.data().meterNumber || "00000000",
+          dueDate: doc.data().dueDate || "00/00/0000",
+          penalty: doc.data().penalty || 0,
+          amountAfterDue: doc.data().amountAfterDue || 0
+        }));
+  
+      if (allBills.length === 0) {
+        showNotification("No valid bills found to print.", "info");
+        return;
+      }
+  
+      // Create PDF document - using A4 size in portrait
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4"
+      });
+      
+      // Convert logo to base64 for jsPDF
+      let logoBase64 = "";
+      try {
+        const img = new Image();
+        img.src = logoImage; // Use the imported logo path
+  
+        await new Promise((resolve, reject) => {
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            const ctx = canvas.getContext("2d");
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx?.drawImage(img, 0, 0);
+            logoBase64 = canvas.toDataURL("image/png");
+            resolve(null);
+          };
+          img.onerror = reject;
+        });
+      } catch (error) {
+        console.error("Error converting logo to base64:", error);
+        // Continue without logo if there's an error
+      }
+      
+      // Helper function to calculate text width in the PDF
+      const getTextWidth = (text, fontSize, fontStyle = "normal") => {
+        pdf.setFont("helvetica", fontStyle);
+        pdf.setFontSize(fontSize);
+        return pdf.getStringUnitWidth(text) * fontSize / pdf.internal.scaleFactor;
+      };
+      
+      // Helper function to fit text in a cell with auto font size adjustment
+      const fitTextInCell = (text, cellWidth, maxFontSize, minFontSize, fontStyle = "normal") => {
+        let fontSize = maxFontSize;
+        let textWidth = getTextWidth(text, fontSize, fontStyle);
+        
+        // Reduce font size until text fits or reaches minimum size
+        while (textWidth > cellWidth * 0.9 && fontSize > minFontSize) {
+          fontSize -= 0.5;
+          textWidth = getTextWidth(text, fontSize, fontStyle);
+        }
+        
+        return fontSize;
+      };
+      
+      // For each bill
+      for (let i = 0; i < allBills.length; i++) {
+        const bill = allBills[i];
+        
+        // Add new page if not the first bill
+        if (i > 0) {
+          pdf.addPage();
+        }
+        
+        // Get page dimensions
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        
+        // Dynamic margins based on page size
+        const marginX = pageWidth * 0.05; // 5% of page width
+        const marginY = pageHeight * 0.03; // 3% of page height
+        const contentWidth = pageWidth - (marginX * 2);
+        
+        // Calculate height distribution based on content sections
+        const totalHeight = pageHeight - (marginY * 2);
+        const headerHeight = totalHeight * 0.1; // 10% for header
+        const customerHeight = totalHeight * 0.08; // 8% for customer info
+        const meterHeight = totalHeight * 0.12; // 12% for meter reading
+        const billingHeight = totalHeight * 0.22; // 22% for billing details
+        const accountHeight = totalHeight * 0.1; // 10% for account details
+        const footerHeight = totalHeight * 0.38; // 38% for footer notes
+        
+        // Start position
+        let currentY = marginY;
+        
+        // Draw outer border for the entire receipt
+        pdf.setLineWidth(0.1);
+        pdf.rect(marginX, marginY, contentWidth, totalHeight);
+        
+        // --- HEADER SECTION ---
+        // Company logo and name block
+        pdf.rect(marginX, currentY, contentWidth, headerHeight);
+        
+        // Add logo if available
+        if (logoBase64) {
+          const logoSize = headerHeight * 0.8; // 80% of header height
+          pdf.addImage(logoBase64, 'PNG', marginX + 5, currentY + (headerHeight - logoSize) / 2, logoSize, logoSize);
+        }
+        
+        // Company name - dynamically sized
+        const companyName = "CENTENNIAL WATER RESOURCE VENTURE CORPORATION";
+        const availableWidth = contentWidth - (logoBase64 ? headerHeight : 0) - contentWidth * 0.3; // Leave space for logo and bill number
+        const companyFontSize = fitTextInCell(companyName, availableWidth, 14, 8, "bold");
+        
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(companyFontSize);
+        pdf.text(companyName, marginX + (logoBase64 ? headerHeight + 5 : 5), currentY + headerHeight * 0.4);
+        
+        // Company address
+        const companyAddress = "Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna";
+        const addressFontSize = fitTextInCell(companyAddress, availableWidth, 9, 7);
+        
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(addressFontSize);
+        pdf.text(companyAddress, marginX + (logoBase64 ? headerHeight + 5 : 5), currentY + headerHeight * 0.65);
+        
+        // Bill number on the right side
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(10);
+        pdf.text("BILLING STATEMENT NO.", pageWidth - marginX - 5, currentY + headerHeight * 0.4, { align: "right" });
+        
+        // Make bill number font size responsive to number length
+        const billNumberFontSize = fitTextInCell(bill.billNumber, contentWidth * 0.25, 16, 10, "bold");
+        pdf.setFontSize(billNumberFontSize);
+        pdf.text(bill.billNumber, pageWidth - marginX - 5, currentY + headerHeight * 0.7, { align: "right" });
+        
+        // Update Y position
+        currentY += headerHeight;
+        
+        // --- CUSTOMER DETAILS SECTION ---
+        pdf.rect(marginX, currentY, contentWidth, customerHeight);
+        
+        // Customer name with responsive font size
+        const customerNameFontSize = fitTextInCell(bill.customerName, contentWidth * 0.7, 16, 12, "bold");
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(customerNameFontSize);
+        pdf.text(bill.customerName, marginX + 5, currentY + customerHeight * 0.4);
+        
+        // Customer address with responsive font size
+        const addressWidth = getTextWidth(bill.customerAddress, 10);
+        const customerAddressFontSize = fitTextInCell(bill.customerAddress, contentWidth * 0.9, 10, 8);
+        
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(customerAddressFontSize);
+        pdf.text(bill.customerAddress, marginX + 5, currentY + customerHeight * 0.75);
+        
+        // Update Y position
+        currentY += customerHeight;
+        
+        // --- METER READING SECTION ---
+        // Meter reading table with responsive columns
+        pdf.rect(marginX, currentY, contentWidth, meterHeight);
+        
+        // Column widths - equal distribution
+        const meterColWidth = contentWidth / 4;
+        
+        // Draw column separators
+        for (let col = 1; col < 4; col++) {
+          pdf.line(marginX + (col * meterColWidth), currentY, 
+                  marginX + (col * meterColWidth), currentY + meterHeight);
+        }
+        
+        // Header background
+        pdf.setFillColor(220, 220, 220);
+        pdf.rect(marginX, currentY, contentWidth, meterHeight * 0.45, 'F');
+        
+        // Column headers - responsive font size
+        const meterHeaders = ["Current Reading", "Previous Reading", "Consumption", "Billing Month"];
+        pdf.setFont("helvetica", "bold");
+        
+        meterHeaders.forEach((header, idx) => {
+          const headerFontSize = fitTextInCell(header, meterColWidth * 0.9, 10, 8, "bold");
+          pdf.setFontSize(headerFontSize);
+          pdf.text(header, marginX + (idx * meterColWidth) + (meterColWidth / 2), 
+                  currentY + meterHeight * 0.25, { align: "center" });
+        });
+        
+        // Values with larger, responsive font
+        const meterValues = [
+          bill.meterReading?.current?.toString() || '0',
+          bill.meterReading?.previous?.toString() || '0',
+          bill.waterUsage?.toString() || '0',
+          formatBillingMonth(bill.billingPeriod) // Convert to month name
+        ];
+        
+        pdf.setFont("helvetica", "normal");
+        
+        meterValues.forEach((value, idx) => {
+          const valueFontSize = fitTextInCell(value, meterColWidth * 0.9, 14, 10);
+          pdf.setFontSize(valueFontSize);
+          pdf.text(value, marginX + (idx * meterColWidth) + (meterColWidth / 2), 
+                  currentY + meterHeight * 0.75, { align: "center" });
+        });
+        
+        // Update Y position
+        currentY += meterHeight;
+        
+        // --- BILLING DETAILS SECTION ---
+        // Calculate table heights and positions
+        const billingTableHeight = billingHeight;
+        
+        // Left table - billing details (45% of width)
+        const leftTableWidth = contentWidth * 0.45;
+        
+        // Calculate column widths based on content needs
+        const leftColWidths = [
+          leftTableWidth * 0.25, // Billing Period
+          leftTableWidth * 0.15, // Water
+          leftTableWidth * 0.12, // Tax
+          leftTableWidth * 0.12, // SCF
+          leftTableWidth * 0.12, // Senior Discount
+          leftTableWidth * 0.12, // Arrears
+          leftTableWidth * 0.12, // Over Payment
+        ];
+        
+        // Header row height - 25% of billing table height
+        const leftHeaderHeight = billingTableHeight * 0.25;
+        
+        // Table with borders
+        pdf.rect(marginX, currentY, leftTableWidth, billingTableHeight);
+        
+        // Header background
+        pdf.setFillColor(220, 220, 220);
+        pdf.rect(marginX, currentY, leftTableWidth, leftHeaderHeight, 'F');
+        
+        // Column separators and headers
+        let leftColX = marginX;
+        const leftHeaders = ["Billing Period", "Water", "Tax", "SCF", "Senior\nDiscount", "Arrears", "Over\nPayment", "Amount\nDue"];
+        
+        // Calculate available header space and fit text
+        pdf.setFont("helvetica", "bold");
+        
+        for (let j = 0; j < leftHeaders.length; j++) {
+          const colWidth = j < leftColWidths.length ? leftColWidths[j] : leftTableWidth - (leftColX - marginX);
+          
+          // Draw column if not last
+          if (j < leftHeaders.length - 1) {
+            pdf.line(leftColX + colWidth, currentY, leftColX + colWidth, currentY + billingTableHeight);
+          }
+          
+          // Fit text to column width
+          const headerFontSize = fitTextInCell(leftHeaders[j].replace('\n', ' '), colWidth * 0.9, 9, 6, "bold");
+          pdf.setFontSize(headerFontSize);
+          
+          // Handle multi-line headers
+          if (leftHeaders[j].includes('\n')) {
+            const lines = leftHeaders[j].split('\n');
+            lines.forEach((line, lineIdx) => {
+              pdf.text(line, leftColX + colWidth / 2, 
+                     currentY + leftHeaderHeight * (0.3 + lineIdx * 0.3), { align: "center" });
+            });
+          } else {
+            pdf.text(leftHeaders[j], leftColX + colWidth / 2, currentY + leftHeaderHeight / 2, { align: "center" });
+          }
+          
+          leftColX += colWidth;
+        }
+        
+        // Horizontal line under headers
+        pdf.line(marginX, currentY + leftHeaderHeight, marginX + leftTableWidth, currentY + leftHeaderHeight);
+        
+        // Data row
+        pdf.setFont("helvetica", "normal");
+        
+        // Format values
+        const leftValues = [
+          bill.billingPeriod || 'N/A',
+          formatCurrency(bill.waterChargeBeforeTax),
+          formatCurrency(bill.tax),
+          formatCurrency(0), // SCF
+          formatCurrency(bill.seniorDiscount),
+          formatCurrency(bill.arrears),
+          formatCurrency(bill.appliedOverpayment),
+          formatCurrency(bill.amount)
+        ];
+        
+        // Reset column position for values
+        leftColX = marginX;
+        
+        for (let j = 0; j < leftValues.length; j++) {
+          const colWidth = j < leftColWidths.length ? leftColWidths[j] : leftTableWidth - (leftColX - marginX);
+          
+          // Make amount due bold
+          if (j === leftValues.length - 1) {
+            pdf.setFont("helvetica", "bold");
+          } else {
+            pdf.setFont("helvetica", "normal");
+          }
+          
+          // Fit value to column
+          const valueFontSize = fitTextInCell(leftValues[j], colWidth * 0.9, 9, 7);
+          pdf.setFontSize(valueFontSize);
+          
+          // Center text in column
+          pdf.text(leftValues[j], leftColX + colWidth / 2, 
+                 currentY + leftHeaderHeight + (billingTableHeight - leftHeaderHeight) / 2, { align: "center" });
+          
+          leftColX += colWidth;
+        }
+        
+        // --- RIGHT TABLE - RATES BREAKDOWN ---
+        const rightTableX = marginX + leftTableWidth;
+        const rightTableWidth = contentWidth - leftTableWidth;
+        
+        // Table with borders
+        pdf.rect(rightTableX, currentY, rightTableWidth, billingTableHeight);
+        
+        // Header background
+        pdf.setFillColor(220, 220, 220);
+        pdf.rect(rightTableX, currentY, rightTableWidth, leftHeaderHeight, 'F');
+        
+        // Header text
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(10);
+        pdf.text("Rates Breakdown", rightTableX + rightTableWidth / 2, currentY + leftHeaderHeight / 2, { align: "center" });
+        
+        // Horizontal line under header
+        pdf.line(rightTableX, currentY + leftHeaderHeight, rightTableX + rightTableWidth, currentY + leftHeaderHeight);
+        
+        // Calculate tiers
+        const activeTiers = calculateTiers(bill.waterUsage);
+        
+        // Column headers
+        const rateColWidth = rightTableWidth / 5;
+        const rateHeaders = ["Min", "Max", "Rate", "Value", "Amount"];
+        
+        // Subheader row
+        const subHeaderHeight = billingTableHeight * 0.15;
+        pdf.setFillColor(240, 240, 240);
+        pdf.rect(rightTableX, currentY + leftHeaderHeight, rightTableWidth, subHeaderHeight, 'F');
+        
+        // Draw column separators
+        for (let col = 1; col < 5; col++) {
+          pdf.line(rightTableX + (col * rateColWidth), currentY + leftHeaderHeight, 
+                  rightTableX + (col * rateColWidth), currentY + billingTableHeight);
+        }
+        
+        // Draw subheader texts
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(8);
+        
+        rateHeaders.forEach((header, idx) => {
+          pdf.text(header, rightTableX + (idx * rateColWidth) + (rateColWidth / 2), 
+                  currentY + leftHeaderHeight + subHeaderHeight / 2, { align: "center" });
+        });
+        
+        // Horizontal line under subheader
+        pdf.line(rightTableX, currentY + leftHeaderHeight + subHeaderHeight, 
+                rightTableX + rightTableWidth, currentY + leftHeaderHeight + subHeaderHeight);
+        
+        // Data rows for tiers
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+        
+        // Calculate space for tier rows
+        const tiersDataHeight = billingTableHeight - leftHeaderHeight - subHeaderHeight - (billingTableHeight * 0.15); // Reserve 15% for total row
+        const tierRowHeight = Math.min(tiersDataHeight / Math.max(1, activeTiers.length), 10); // Cap at 10mm height per row
+        
+        // Draw tier rows
+        let tierY = currentY + leftHeaderHeight + subHeaderHeight;
+        
+        if (activeTiers.length === 0) {
+          // No water usage
+          pdf.text("No water usage", rightTableX + rightTableWidth / 2, tierY + tiersDataHeight / 2, { align: "center" });
+        } else {
+          // Process each tier
+          activeTiers.forEach((tier, idx) => {
+            // Add row separator if not first row
+            if (idx > 0) {
+              pdf.line(rightTableX, tierY, rightTableX + rightTableWidth, tierY);
+            }
+            
+            // Format tier data
+            const tierData = [
+              tier.min.toString(),
+              tier.max?.toString() || "above",
+              tier.rate.toFixed(2),
+              tier.usage.toString(),
+              formatCurrency(tier.amount)
+            ];
+            
+            // Display tier data
+            tierData.forEach((value, colIdx) => {
+              pdf.text(value, rightTableX + (colIdx * rateColWidth) + (rateColWidth / 2), 
+                      tierY + tierRowHeight / 2, { align: "center" });
+            });
+            
+            tierY += tierRowHeight;
+          });
+        }
+        
+        // Total row
+        const totalRowY = currentY + billingTableHeight - (billingTableHeight * 0.15);
+        pdf.line(rightTableX, totalRowY, rightTableX + rightTableWidth, totalRowY);
+        
+        // Total text
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(9);
+        pdf.text("Total:", rightTableX + (rateColWidth * 3.5), totalRowY + (billingTableHeight * 0.075), { align: "center" });
+        
+        // Calculate total amount
+        const totalAmount = activeTiers.reduce((sum, tier) => sum + tier.amount, 0);
+        pdf.text(formatCurrency(totalAmount), rightTableX + (rateColWidth * 4.5), 
+               totalRowY + (billingTableHeight * 0.075), { align: "center" });
+        
+        // Update Y position
+        currentY += billingTableHeight + 5; // Add some spacing
+        
+        // --- ACCOUNT DETAILS SECTION ---
+        pdf.rect(marginX, currentY, contentWidth, accountHeight);
+        
+        // Header background
+        pdf.setFillColor(220, 220, 220);
+        pdf.rect(marginX, currentY, contentWidth, accountHeight * 0.4, 'F');
+        
+        // Column widths
+        const accountColWidth = contentWidth / 5;
+        
+        // Column separators
+        for (let col = 1; col < 5; col++) {
+          pdf.line(marginX + (col * accountColWidth), currentY, 
+                  marginX + (col * accountColWidth), currentY + accountHeight);
+        }
+        
+        // Account headers
+        const accountHeaders = ["Account#", "Meter#", "Due Date", "Penalty", "Amount After Due Date"];
+        
+        pdf.setFont("helvetica", "bold");
+        accountHeaders.forEach((header, idx) => {
+          const headerFontSize = fitTextInCell(header, accountColWidth * 0.9, 9, 7, "bold");
+          pdf.setFontSize(headerFontSize);
+          pdf.text(header, marginX + (idx * accountColWidth) + (accountColWidth / 2), 
+                  currentY + accountHeight * 0.2, { align: "center" });
+        });
+        
+        // Horizontal line under headers
+        pdf.line(marginX, currentY + accountHeight * 0.4, 
+                marginX + contentWidth, currentY + accountHeight * 0.4);
+        
+        // Account values
+        const accountValues = [
+          bill.accountNumber || "00-00-0000",
+          bill.meterNumber || "00000000",
+          bill.dueDate || "00/00/0000",
+          formatCurrency(bill.penalty),
+          formatCurrency(bill.amountAfterDue)
+        ];
+        
+        pdf.setFont("helvetica", "normal");
+        accountValues.forEach((value, idx) => {
+          // Make amount after due bold
+          if (idx === 4) pdf.setFont("helvetica", "bold");
+          
+          const valueFontSize = fitTextInCell(value, accountColWidth * 0.9, 10, 8);
+          pdf.setFontSize(valueFontSize);
+          pdf.text(value, marginX + (idx * accountColWidth) + (accountColWidth / 2), 
+                  currentY + accountHeight * 0.7, { align: "center" });
+          
+          pdf.setFont("helvetica", "normal");
+        });
+        
+        // Update Y position
+        currentY += accountHeight + 5;
+        
+        // --- FOOTER NOTES SECTION ---
+        // Calculate remaining space
+        const remainingHeight = totalHeight - (currentY - marginY);
+        
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(9);
+        pdf.text("MAHALAGANG PAALALA TUNGKOL SA INYONG WATER BILL:", marginX + 5, currentY + 5);
+        
+        // Notes
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+        
+        const notes = [
+          "HUWAG PONG KALILIMUTAN DALHIN ANG INYONG BILLING STATEMENT KAPAG KAYO AY MAGBABAYAD",
+          "PARA MAIWASAN ANG PAGBABAYAD NG MULTA, MAGBAYAD PO NG INYONG BILLING STATEMENT NG MAS MAAGA O DI LALAGPAS SA INYONG DUE DATE.",
+          "ANG SERBISYO PO NG INYONG TUBIG AY PUPUTULIN NG WALANG PAALALA KUNG DI KAYO MAKAPAGBAYAD SA LOOB NG LIMANG(5) ARAW PAGKATAPOS NG DUE DATE."
+        ];
+        
+        // Calculate line height based on available space
+        const availableNotesHeight = remainingHeight - 25; // Reserve space for final note
+        const noteLineHeight = Math.min(availableNotesHeight / notes.length, 8);
+        
+        notes.forEach((note, idx) => {
+          // Responsive font sizing for notes
+          const noteFontSize = Math.min(8, fitTextInCell(`${idx + 1}. ${note}`, contentWidth - 15, 8, 6));
+          pdf.setFontSize(noteFontSize);
+          pdf.text(`${idx + 1}. ${note}`, marginX + 8, currentY + 15 + (idx * noteLineHeight));
+        });
+        
+        // Final note with line above
+        const finalNoteY = marginY + totalHeight - 15;
+        pdf.line(marginX, finalNoteY, marginX + contentWidth, finalNoteY);
+        
+        const validationText = "\"THIS WILL SERVE AS YOUR OFFICIAL RECEIPT WHEN MACHINE VALIDATED\"";
+        const validationFontSize = fitTextInCell(validationText, contentWidth * 0.9, 10, 8, "bold");
+        
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(validationFontSize);
+        pdf.text(validationText, marginX + contentWidth / 2, finalNoteY + 8, { align: "center" });
+        
+        // Underline the text
+        const textWidth = pdf.getStringUnitWidth(validationText) * validationFontSize / pdf.internal.scaleFactor;
+        pdf.line(
+          (marginX + contentWidth / 2) - (textWidth / 2), 
+          finalNoteY + 10, 
+          (marginX + contentWidth / 2) + (textWidth / 2), 
+          finalNoteY + 10
+        );
+      }
+      
+      // Save the PDF
+      pdf.save("All_Water_Bills.pdf");
+      showNotification("All bills have been printed successfully.", "success");
+      
+    } catch (error) {
+      console.error("Error printing all receipts:", error);
+      showNotification("Failed to print all receipts. Please try again.", "error");
+    }
+  };
+  
+  // Helper functions
+  
+  // Format currency values
+  function formatCurrency(value) {
+    const num = parseFloat(value) || 0;
+    return num.toFixed(2);
+  }
+  
+  // Format billing period to month name
+  function formatBillingMonth(billingPeriod) {
+    if (!billingPeriod) return "N/A";
+    
+    const monthNames = ["January", "February", "March", "April", "May", "June", 
+                        "July", "August", "September", "October", "November", "December"];
+    
+    // Handle different formats
+    if (billingPeriod.includes("-")) {
+      // Format like "4-2025"
+      const parts = billingPeriod.split("-");
+      if (parts.length === 2) {
+        const monthNum = parseInt(parts[0]);
+        if (monthNum >= 1 && monthNum <= 12) {
+          return monthNames[monthNum - 1];
+        }
+      }
+      
+      // Format like "01/03/25 - 02/01/25"
+      const endDatePart = billingPeriod.split("-")[1]?.trim();
+      if (endDatePart) {
+        const dateParts = endDatePart.split("/");
+        if (dateParts.length === 3) {
+          const monthNum = parseInt(dateParts[1]);
+          if (monthNum >= 1 && monthNum <= 12) {
+            return monthNames[monthNum - 1];
+          }
+        }
+      }
+    }
+    
+    return billingPeriod;
+  }
+  
+  // Calculate water rate tiers
+  function calculateTiers(waterUsage) {
+    if (!waterUsage || waterUsage <= 0) return [];
+    
+    // Define the tiers
+    const tiers = [
+      { min: 1, max: 10, rate: 19.1 },
+      { min: 11, max: 20, rate: 21.1 },
+      { min: 21, max: 30, rate: 23.1 },
+      { min: 31, max: 40, rate: 25.1 },
+      { min: 41, max: 50, rate: 27.1 },
+      { min: 51, max: null, rate: 29.1 }
+    ];
+    
+    let activeTiers = [];
+    let remainingUsage = waterUsage;
+    
+    // Special case for minimum consumption (1-10 cubic meters)
+    if (waterUsage <= 10) {
+      return [{
+        min: 0,
+        max: 10,
+        rate: 19.1,
+        usage: waterUsage,
+        amount: 191.00 // Minimum charge
+      }];
+    }
+    
+    // Calculate tiered usage
+    for (const tier of tiers) {
+      if (remainingUsage <= 0) break;
+      
+      if (waterUsage >= tier.min) {
+        const tierMax = tier.max || Infinity;
+        const usageInTier = Math.min(
+          remainingUsage,
+          tierMax - tier.min + 1
+        );
+        
+        if (usageInTier > 0) {
+          const tierAmount = usageInTier * tier.rate;
+          
+          activeTiers.push({
+            min: tier.min,
+            max: tier.max,
+            rate: tier.rate,
+            usage: usageInTier,
+            amount: tierAmount
+          });
+          
+          remainingUsage -= usageInTier;
+        }
+      }
+    }
+    
+    return activeTiers;
+  }
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -884,6 +1547,13 @@ const Bill: React.FC = () => {
                 </div>
                 <Button variant="outline" size="icon" onClick={() => setBillingShowFilters((prev) => !prev)}>
                   <FilterIcon className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="default" // Replace "primary" with a valid variant
+                  size="sm"
+                  onClick={handlePrintAllReceipts}
+                >
+                  Print All Receipts
                 </Button>
               </div>
             </CardHeader>
