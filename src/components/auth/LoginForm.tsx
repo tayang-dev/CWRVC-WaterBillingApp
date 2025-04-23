@@ -63,6 +63,7 @@ const LoginForm = ({
     const allowedEmails = {
       admin: "centennialwaterventureresource@gmail.com",
       staff: "sarahfabella11@gmail.com",
+      meter_reader: "haroldbatula34@gmail.com", // Add Meter Reader email
     };
 
     // Check if the email is allowed and redirect accordingly
@@ -72,7 +73,9 @@ const LoginForm = ({
     } else if (values.email === allowedEmails.staff) {
       // Redirect to staff dashboard
       onSubmit({ ...values, role: "staff" }); // Include role in the submission
-    } else {
+    } else if (values.email === allowedEmails.meter_reader) {
+      onSubmit({ ...values, role: "meter_reader" }); // Include role in the submission
+    }else {
       // Set an error message if the email is not allowed
       form.setError("email", {
         type: "manual",

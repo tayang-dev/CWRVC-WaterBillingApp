@@ -13,6 +13,7 @@ import {
   ClipboardList,
   Menu,
   ArrowLeft,
+  MessageCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -158,6 +159,7 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
 
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto p-3">
+        {/* Dashboard should be visible for all roles */}
         <SidebarItem
           icon={<LayoutDashboard className="h-5 w-5" />}
           label="Dashboard"
@@ -167,83 +169,92 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
         />
 
         {userRole === "admin" && (
-          <SidebarItem
-            icon={<Users className="h-5 w-5" />}
-            label="Customers"
-            path="#"
-            hasSubItems
-            isOpen={openSection === "accounts"}
-            onClick={() => toggleSection("accounts")}
-            isActive={
-              location.pathname.startsWith("/accounts") ||
-              location.pathname.startsWith("/users")
-            }
-            subItems={[
-              { label: "Customer Management", path: "/accounts" },
-              { label: "Accounts", path: "/users" },
-            ]}
-            collapsed={collapsed}
-          />
+          <>
+            <SidebarItem
+              icon={<Users className="h-5 w-5" />}
+              label="Customers"
+              path="#"
+              hasSubItems
+              isOpen={openSection === "accounts"}
+              onClick={() => toggleSection("accounts")}
+              isActive={
+                location.pathname.startsWith("/accounts") ||
+                location.pathname.startsWith("/users")
+              }
+              subItems={[
+                { label: "Customer Management", path: "/accounts" },
+                { label: "Accounts", path: "/users" },
+              ]}
+              collapsed={collapsed}
+            />
+            <SidebarItem
+              icon={<MessageCircle className="h-5 w-5" />}
+              label="Feedback"
+              path="/feedback"
+              isActive={location.pathname.startsWith("/feedback")}
+              collapsed={collapsed}
+            />
+          </>
         )}
 
-        <SidebarItem
-          icon={<CreditCard className="h-5 w-5" />}
-          label="Payment Management"
-          path="/payments"
-          isActive={location.pathname.startsWith("/payments")}
-          collapsed={collapsed}
-        />
-
-        <SidebarItem
-          icon={<MessageSquare className="h-5 w-5" />}
-          label="Customer Service"
-          path="/customer-support"
-          isActive={location.pathname.startsWith("/customer-support")}
-          collapsed={collapsed}
-        />
-
-        <SidebarItem
-          icon={<ClipboardList className="h-5 w-5" />}
-          label="Service Requests"
-          path="/requests"
-          isActive={location.pathname.startsWith("/requests")}
-          collapsed={collapsed}
-        />
-
-        {userRole === "staff" && (
-          <SidebarItem
-            icon={<ClipboardList className="h-5 w-5" />}
-            label="Meter Reading"
-            path="/meters"
-            isActive={location.pathname.startsWith("/meters")}
-            collapsed={collapsed}
-          />
+        {userRole === "meter_reader" && (
+          <>
+            <SidebarItem
+              icon={<ClipboardList className="h-5 w-5" />}
+              label="Meter Reading"
+              path="/meters"
+              isActive={location.pathname.startsWith("/meters")}
+              collapsed={collapsed}
+            />
+          </>
         )}
 
-        <SidebarItem
-          icon={<BarChart className="h-5 w-5" />}
-          label="Reports"
-          path="/reports"
-          isActive={location.pathname.startsWith("/reports")}
-          collapsed={collapsed}
-        />
-
-        <SidebarItem
-          icon={<Settings className="h-5 w-5" />}
-          label="Settings"
-          path="/settings"
-          isActive={location.pathname === "/settings"}
-          collapsed={collapsed}
-        />
-
-        {/* New Sidebar Item for Bills */}
-        <SidebarItem
-          icon={<CreditCard className="h-5 w-5" />}
-          label="Bills"
-          path="/bills"
-          isActive={location.pathname.startsWith("/bills")}
-          collapsed={collapsed}
-        />
+        {userRole !== "meter_reader" && (
+          <>
+            <SidebarItem
+              icon={<CreditCard className="h-5 w-5" />}
+              label="Payment Management"
+              path="/payments"
+              isActive={location.pathname.startsWith("/payments")}
+              collapsed={collapsed}
+            />
+            <SidebarItem
+              icon={<MessageSquare className="h-5 w-5" />}
+              label="Customer Service"
+              path="/customer-support"
+              isActive={location.pathname.startsWith("/customer-support")}
+              collapsed={collapsed}
+            />
+            <SidebarItem
+              icon={<ClipboardList className="h-5 w-5" />}
+              label="Service Requests"
+              path="/requests"
+              isActive={location.pathname.startsWith("/requests")}
+              collapsed={collapsed}
+            />
+            <SidebarItem
+              icon={<BarChart className="h-5 w-5" />}
+              label="Reports"
+              path="/reports"
+              isActive={location.pathname.startsWith("/reports")}
+              collapsed={collapsed}
+            />
+            <SidebarItem
+              icon={<Settings className="h-5 w-5" />}
+              label="Settings"
+              path="/settings"
+              isActive={location.pathname === "/settings"}
+              collapsed={collapsed}
+            />
+            <SidebarItem
+              icon={<CreditCard className="h-5 w-5" />}
+              label="Bills"
+              path="/bills"
+              isActive={location.pathname.startsWith("/bills")}
+              collapsed={collapsed}
+            />
+          </>
+        )}
       </div>
 
       {/* Footer */}

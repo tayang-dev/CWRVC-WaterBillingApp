@@ -12,18 +12,18 @@ interface AuthContextType {
   currentUser: User | null;
   loading: boolean;
   error: string | null;
-  userRole: "admin" | "staff" | null;
+  userRole: "admin" | "staff"| "meter_reader" | null;
   login: (
     email: string,
     password: string,
-    role: "admin" | "staff",
+    role: "admin" | "staff" | "meter_reader",
   ) => Promise<User>;
   logout: () => Promise<void>;
   register: (
     email: string,
     password: string,
     displayName: string,
-    role: "admin" | "staff",
+    role: "admin" | "staff" | "meter_reader",
   ) => Promise<User>;
   forgotPassword: (email: string) => Promise<void>;
   clearError: () => void;
@@ -45,7 +45,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<"admin" | "staff" | null>(null);
+  const [userRole, setUserRole] = useState<"admin" | "staff" | "meter_reader"| null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -55,7 +55,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         try {
           // Get user role from localStorage
           const savedRole = localStorage.getItem("userRole");
-          if (savedRole === "admin" || savedRole === "staff") {
+          if (savedRole === "admin" || savedRole === "staff" || savedRole === "meter_reader") {
             setUserRole(savedRole);
           } else {
             // Default to admin if no role is found
@@ -78,7 +78,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const login = async (
     email: string,
     password: string,
-    role: "admin" | "staff",
+    role: "admin" | "staff" | "meter_reader",
   ) => {
     setLoading(true);
     try {
@@ -114,7 +114,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     email: string,
     password: string,
     displayName: string,
-    role: "admin" | "staff",
+    role: "admin" | "staff" | "meter_reader",
   ) => {
     setLoading(true);
     try {

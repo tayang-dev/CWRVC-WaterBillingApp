@@ -321,7 +321,7 @@ const Bill: React.FC = () => {
         originalAmount: billCalc.waterCharge,
         status: "pending",
         dueDate: formatToDDMMYYYY(billingData.dueDate),
-        billingPeriod: `${formatToDDMMYYYY(reading.dueDate)}`,
+        billingPeriod: calculateBillingPeriod(billingData.dueDate),
         description: billingData.billDescription,
         waterUsage: usage,
         meterReading: { 
@@ -409,218 +409,221 @@ const Bill: React.FC = () => {
     }
   };
 
-  const handleCreateAllBills = async () => {
-    if (filteredReadings.length === 0) {
-      showNotification("No meter readings available to create bills", "info");
-      return;
-    }
-  
-    setIsProcessing(true);
-  
-    try {
-      let successCount = 0;
-      let errorCount = 0;
-      
-      const { collection, addDoc, doc, updateDoc, getDoc, setDoc, getDocs, Timestamp, query, where, orderBy, limit } = await import("firebase/firestore");
-      const { db } = await import("../../lib/firebase");
-  
-      for (const reading of filteredReadings) {
-        try {
-          const customer = customers.find(c => c.accountNumber === reading.accountNumber);
-          if (!customer) {
-            errorCount++;
-            console.error(`Customer not found for account ${reading.accountNumber}`);
-            continue;
-          }
-  
-          const usage = reading.currentReading - reading.previousReading;
-          if (usage <= 0) {
-            errorCount++;
-            console.error(`Invalid usage for account ${reading.accountNumber}`);
-            continue;
-          }
-  
-          const billingPeriod = `${reading.month}-${reading.year}`;
-          const billsCollectionRef = collection(db, "bills", reading.accountNumber, "records");
-          const existingBillsSnapshot = await getDocs(
-            query(billsCollectionRef, where("billingPeriod", "==", billingPeriod))
-          );
-          if (!existingBillsSnapshot.empty) {
-            errorCount++;
-            console.error(`Duplicate billing period for account ${reading.accountNumber}`);
-            continue;
-          }
-  
-          const unpaidBillsSnapshot = await getDocs(
-            query(billsCollectionRef, where("amount", ">", 0))
-          );
-          if (unpaidBillsSnapshot.size >= 3) {
-            const noticeData = {
-              accountNumber: reading.accountNumber,
-              name: customer.name,
-              description: "Your account is at risk of disconnection due to unpaid bills.",
-              timestamp: Timestamp.now(),
-            };
-            const noticeCollectionRef = collection(db, "notice");
-            await addDoc(noticeCollectionRef, noticeData);
-  
-            const notificationData = {
-              accountNumber: reading.accountNumber,
+    const handleCreateAllBills = async () => {
+      if (filteredReadings.length === 0) {
+        showNotification("No meter readings available to create bills", "info");
+        return;
+      }
+    
+      setIsProcessing(true);
+    
+      try {
+        let successCount = 0;
+        let errorCount = 0;
+        
+        const { collection, addDoc, doc, updateDoc, getDoc, setDoc, getDocs, Timestamp, query, where, orderBy, limit } = await import("firebase/firestore");
+        const { db } = await import("../../lib/firebase");
+    
+        let currentGlobalBillNumber = await getLatestGlobalBillNumber();
+
+        for (const reading of filteredReadings) {
+          try {
+            const customer = customers.find(c => c.accountNumber === reading.accountNumber);
+            if (!customer) {
+              errorCount++;
+              console.error(`Customer not found for account ${reading.accountNumber}`);
+              continue;
+            }
+    
+            const usage = reading.currentReading - reading.previousReading;
+            if (usage <= 0) {
+              errorCount++;
+              console.error(`Invalid usage for account ${reading.accountNumber}`);
+              continue;
+            }
+    
+            const billingPeriod = calculateBillingPeriod(billingData.dueDate);
+            const billsCollectionRef = collection(db, "bills", reading.accountNumber, "records");
+            const existingBillsSnapshot = await getDocs(
+              query(billsCollectionRef, where("billingPeriod", "==", billingPeriod))
+            );
+            if (!existingBillsSnapshot.empty) {
+              errorCount++;
+              console.error(`Duplicate billing period for account ${reading.accountNumber}`);
+              continue;
+            }
+    
+            const unpaidBillsSnapshot = await getDocs(
+              query(billsCollectionRef, where("amount", ">", 0))
+            );
+            if (unpaidBillsSnapshot.size >= 3) {
+              const noticeData = {
+                accountNumber: reading.accountNumber,
+                name: customer.name,
+                description: "Your account is at risk of disconnection due to unpaid bills.",
+                timestamp: Timestamp.now(),
+              };
+              const noticeCollectionRef = collection(db, "notice");
+              await addDoc(noticeCollectionRef, noticeData);
+    
+              const notificationData = {
+                accountNumber: reading.accountNumber,
+                customerId: customer.id,
+                description: "Your account is at risk of disconnection due to unpaid bills.",
+                type: "disconnection_warning",
+                createdAt: Timestamp.now(),
+              };
+              const notificationRef = collection(db, "notifications", reading.accountNumber, "records");
+              await addDoc(notificationRef, notificationData);
+            }
+    
+            const isSenior = customer.isSenior || false;
+            
+            // Use the tiered billing calculation function instead of flat rate
+            const billCalc = calculateBillAmount(usage, isSenior);
+            
+            // Extract the calculated values from the billCalc object
+            const waterChargeBeforeTax = billCalc.waterCharge;
+            const tax = billCalc.tax;
+            const discount = billCalc.discount;
+            const penalty = billCalc.penalty;
+            const totalAmountDue = billCalc.totalAmountDue;
+    
+            let overpayment = 0;
+            const latestBillQuery = query(
+              billsCollectionRef,
+              orderBy("dueDate", "desc"),
+              limit(1)
+            );
+            const latestBillSnap = await getDocs(latestBillQuery);
+            if (!latestBillSnap.empty) {
+              const latestBillData = latestBillSnap.docs[0].data();
+              overpayment = parseFloat(latestBillData.overPayment || 0);
+              if (overpayment > 0) {
+                await updateDoc(latestBillSnap.docs[0].ref, { overPayment: 0 });
+              }
+            }
+    
+            // Calculate final amounts after any overpayment is applied
+            let finalDiscountedTotal = totalAmountDue - penalty; // Amount without penalty
+            let finalTotalAmountDue = totalAmountDue;
+            let finalOriginalAmount = finalDiscountedTotal;
+            let appliedOverpayment = 0;
+    
+            if (overpayment > 0) {
+              if (overpayment >= finalDiscountedTotal) {
+                appliedOverpayment = finalDiscountedTotal;
+                finalDiscountedTotal = 0;
+                finalTotalAmountDue = 0;
+                finalOriginalAmount = 0;
+                overpayment -= appliedOverpayment;
+              } else {
+                appliedOverpayment = overpayment;
+                finalDiscountedTotal = finalDiscountedTotal - overpayment;
+                finalTotalAmountDue = finalTotalAmountDue - overpayment;
+                finalOriginalAmount = finalOriginalAmount - overpayment;
+                overpayment = 0;
+              }
+            }
+    
+            let arrears = 0;
+            const allBillsSnapshot = await getDocs(billsCollectionRef);
+            allBillsSnapshot.forEach((billDoc) => {
+              const bill = billDoc.data();
+              arrears += bill.amount || 0;
+            });
+    
+            currentGlobalBillNumber++;
+            const billNumber = String(currentGlobalBillNumber).padStart(10, "0");
+
+            const formattedAddress = customer.block && customer.lot 
+              ? `BLK ${customer.block}, LOT ${customer.lot}, ${customer.address || ""}`
+              : customer.address || "";
+            
+            // Create bill data with correct calculations
+            const billData = {
               customerId: customer.id,
-              description: "Your account is at risk of disconnection due to unpaid bills.",
-              type: "disconnection_warning",
+              customerName: customer.name,
+              customerAddress: formattedAddress,
+              date: Timestamp.now(),
+              amount: finalDiscountedTotal,
+              originalAmount: finalOriginalAmount,
+              status: "pending",
+              dueDate: formatToDDMMYYYY(billingData.dueDate),
+              billingPeriod: billingPeriod,
+              description: billingData.billDescription,
+              waterUsage: usage,
+              meterReading: {
+                current: reading.currentReading,
+                previous: reading.previousReading,
+                consumption: usage,
+              },
+              accountNumber: reading.accountNumber,
+              meterNumber: customer.meterNumber || "Meter-Default",
+              waterCharge: waterChargeBeforeTax, // Use the tiered calculation result
+              waterChargeBeforeTax: waterChargeBeforeTax, // Use the tiered calculation result
+              tax: tax,
+              seniorDiscount: discount,
+              penalty: penalty,
+              amountAfterDue: finalTotalAmountDue,
+              currentAmountDue: finalTotalAmountDue,
+              arrears: arrears,
+              billNumber: billNumber,
+              overPayment: overpayment,
+              appliedOverpayment: appliedOverpayment,
+              rawCalculatedAmount: finalDiscountedTotal + appliedOverpayment, // Original calculated amount before overpayment
               createdAt: Timestamp.now(),
             };
-            const notificationRef = collection(db, "notifications", reading.accountNumber, "records");
-            await addDoc(notificationRef, notificationData);
-          }
-  
-          const isSenior = customer.isSenior || false;
-          
-          // Use the tiered billing calculation function instead of flat rate
-          const billCalc = calculateBillAmount(usage, isSenior);
-          
-          // Extract the calculated values from the billCalc object
-          const waterChargeBeforeTax = billCalc.waterCharge;
-          const tax = billCalc.tax;
-          const discount = billCalc.discount;
-          const penalty = billCalc.penalty;
-          const totalAmountDue = billCalc.totalAmountDue;
-  
-          let overpayment = 0;
-          const latestBillQuery = query(
-            billsCollectionRef,
-            orderBy("dueDate", "desc"),
-            limit(1)
-          );
-          const latestBillSnap = await getDocs(latestBillQuery);
-          if (!latestBillSnap.empty) {
-            const latestBillData = latestBillSnap.docs[0].data();
-            overpayment = parseFloat(latestBillData.overPayment || 0);
-            if (overpayment > 0) {
-              await updateDoc(latestBillSnap.docs[0].ref, { overPayment: 0 });
+    
+            await addDoc(billsCollectionRef, billData);
+    
+            const customerRef = doc(db, "customers", customer.id);
+            await updateDoc(customerRef, { lastReading: reading.currentReading });
+    
+            const updatedPaymentsRef = doc(db, "updatedPayments", reading.accountNumber);
+            const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
+            const previousAmount = updatedPaymentsSnap.exists() ? updatedPaymentsSnap.data().amount || 0 : 0;
+            await setDoc(
+              updatedPaymentsRef,
+              {
+                accountNumber: reading.accountNumber,
+                customerId: customer.id,
+                amount: previousAmount + finalDiscountedTotal,
+              },
+              { merge: true }
+            );
+    
+            let notificationDescription = `A new bill for the billing period ${billingPeriod} with due date ${formatToDDMMYYYY(billingData.dueDate)} has been created for your account.`;
+            if (appliedOverpayment > 0) {
+              notificationDescription += ` An overpayment of ₱${appliedOverpayment.toFixed(2)} was applied to this bill.`;
             }
-          }
-  
-          // Calculate final amounts after any overpayment is applied
-          let finalDiscountedTotal = totalAmountDue - penalty; // Amount without penalty
-          let finalTotalAmountDue = totalAmountDue;
-          let finalOriginalAmount = finalDiscountedTotal;
-          let appliedOverpayment = 0;
-  
-          if (overpayment > 0) {
-            if (overpayment >= finalDiscountedTotal) {
-              appliedOverpayment = finalDiscountedTotal;
-              finalDiscountedTotal = 0;
-              finalTotalAmountDue = 0;
-              finalOriginalAmount = 0;
-              overpayment -= appliedOverpayment;
-            } else {
-              appliedOverpayment = overpayment;
-              finalDiscountedTotal = finalDiscountedTotal - overpayment;
-              finalTotalAmountDue = finalTotalAmountDue - overpayment;
-              finalOriginalAmount = finalOriginalAmount - overpayment;
-              overpayment = 0;
-            }
-          }
-  
-          let arrears = 0;
-          const allBillsSnapshot = await getDocs(billsCollectionRef);
-          allBillsSnapshot.forEach((billDoc) => {
-            const bill = billDoc.data();
-            arrears += bill.amount || 0;
-          });
-  
-          const billNumber = (allBillsSnapshot.size + 1).toString().padStart(10, "0");
-  
-          const formattedAddress = customer.block && customer.lot 
-            ? `BLK ${customer.block}, LOT ${customer.lot}, ${customer.address || ""}`
-            : customer.address || "";
-          
-          // Create bill data with correct calculations
-          const billData = {
-            customerId: customer.id,
-            customerName: customer.name,
-            customerAddress: formattedAddress,
-            date: Timestamp.now(),
-            amount: finalDiscountedTotal,
-            originalAmount: finalOriginalAmount,
-            status: "pending",
-            dueDate: formatToDDMMYYYY(billingData.dueDate),
-            billingPeriod: billingPeriod,
-            description: billingData.billDescription,
-            waterUsage: usage,
-            meterReading: {
-              current: reading.currentReading,
-              previous: reading.previousReading,
-              consumption: usage,
-            },
-            accountNumber: reading.accountNumber,
-            meterNumber: customer.meterNumber || "Meter-Default",
-            waterCharge: waterChargeBeforeTax, // Use the tiered calculation result
-            waterChargeBeforeTax: waterChargeBeforeTax, // Use the tiered calculation result
-            tax: tax,
-            seniorDiscount: discount,
-            penalty: penalty,
-            amountAfterDue: finalTotalAmountDue,
-            currentAmountDue: finalTotalAmountDue,
-            arrears: arrears,
-            billNumber: billNumber,
-            overPayment: overpayment,
-            appliedOverpayment: appliedOverpayment,
-            rawCalculatedAmount: finalDiscountedTotal + appliedOverpayment, // Original calculated amount before overpayment
-            createdAt: Timestamp.now(),
-          };
-  
-          await addDoc(billsCollectionRef, billData);
-  
-          const customerRef = doc(db, "customers", customer.id);
-          await updateDoc(customerRef, { lastReading: reading.currentReading });
-  
-          const updatedPaymentsRef = doc(db, "updatedPayments", reading.accountNumber);
-          const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
-          const previousAmount = updatedPaymentsSnap.exists() ? updatedPaymentsSnap.data().amount || 0 : 0;
-          await setDoc(
-            updatedPaymentsRef,
-            {
-              accountNumber: reading.accountNumber,
+            await addDoc(collection(db, "notifications", reading.accountNumber, "records"), {
+              type: "bill_created",
               customerId: customer.id,
-              amount: previousAmount + finalDiscountedTotal,
-            },
-            { merge: true }
-          );
-  
-          let notificationDescription = `A new bill for the billing period ${billingPeriod} with due date ${formatToDDMMYYYY(billingData.dueDate)} has been created for your account.`;
-          if (appliedOverpayment > 0) {
-            notificationDescription += ` An overpayment of ₱${appliedOverpayment.toFixed(2)} was applied to this bill.`;
+              accountNumber: reading.accountNumber,
+              description: notificationDescription,
+              createdAt: Timestamp.now(),
+            });
+    
+            successCount++;
+          } catch (error) {
+            errorCount++;
+            console.error(`Error creating bill for account ${reading.accountNumber}:`, error);
           }
-          await addDoc(collection(db, "notifications", reading.accountNumber, "records"), {
-            type: "bill_created",
-            customerId: customer.id,
-            accountNumber: reading.accountNumber,
-            description: notificationDescription,
-            createdAt: Timestamp.now(),
-          });
-  
-          successCount++;
-        } catch (error) {
-          errorCount++;
-          console.error(`Error creating bill for account ${reading.accountNumber}:`, error);
         }
+    
+        if (successCount > 0) {
+          showNotification(`Successfully created ${successCount} bills. ${errorCount} errors occurred.`, "success");
+        } else {
+          showNotification("No bills were created. Please check the meter readings.", "error");
+        }
+      } catch (error) {
+        console.error("Error in bill creation process:", error);
+        showNotification("Failed to create bills. Please try again.", "error");
+      } finally {
+        setIsProcessing(false);
       }
-  
-      if (successCount > 0) {
-        showNotification(`Successfully created ${successCount} bills. ${errorCount} errors occurred.`, "success");
-      } else {
-        showNotification("No bills were created. Please check the meter readings.", "error");
-      }
-    } catch (error) {
-      console.error("Error in bill creation process:", error);
-      showNotification("Failed to create bills. Please try again.", "error");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+    };
 
   const handleViewBills = async (accountNumber: string) => {
     setSelectedAccount(accountNumber);
@@ -646,6 +649,36 @@ const Bill: React.FC = () => {
       console.error("Error fetching bills for account:", error);
       showNotification("Failed to load bills for this account.", "error");
     }
+  };
+  
+
+  const getLatestGlobalBillNumber = async (): Promise<number> => {
+    const billsSnapshot = await getDocs(collectionGroup(db, "records"));
+    
+    let maxNumber = 0;
+    billsSnapshot.forEach((doc) => {
+      const data = doc.data();
+      if (data.billNumber) {
+        const num = parseInt(data.billNumber, 10);
+        if (!isNaN(num)) {
+          maxNumber = Math.max(maxNumber, num);
+        }
+      }
+    });
+  
+    return maxNumber;
+  };
+  
+
+  const calculateBillingPeriod = (dueDateStr: string): string => {
+    const dueDate = new Date(dueDateStr);
+    const from = new Date(dueDate.getFullYear(), dueDate.getMonth() - 1, 1);
+    const to = new Date(dueDate.getFullYear(), dueDate.getMonth(), 1);
+  
+    const format = (date: Date) =>
+      `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
+  
+    return `${format(from)} - ${format(to)}`;
   };
   
 
@@ -721,7 +754,9 @@ const Bill: React.FC = () => {
           meterNumber: doc.data().meterNumber || "00000000",
           dueDate: doc.data().dueDate || "00/00/0000",
           penalty: doc.data().penalty || 0,
-          amountAfterDue: doc.data().amountAfterDue || 0
+          amountAfterDue: doc.data().amountAfterDue || 0,
+          // Add rates breakdown data
+          ratesBreakdown: doc.data().ratesBreakdown || calculateDefaultRates(doc.data().waterUsage || 0)
         }));
   
       if (allBills.length === 0) {
@@ -729,9 +764,44 @@ const Bill: React.FC = () => {
         return;
       }
   
-      // Create PDF document - using A4 size in portrait
+      // Helper function to calculate default rates if not available
+      function calculateDefaultRates(usage) {
+        const rates = [];
+        let remainingUsage = usage;
+      
+        const tiers = [
+          { min: 1, max: 10, rate: 19.10 },
+          { min: 11, max: 20, rate: 21.10 },
+          { min: 21, max: 30, rate: 23.10 },
+          { min: 31, max: 40, rate: 25.10 },
+          { min: 41, max: 50, rate: 27.10 },
+          { min: 51, max: "above", rate: 29.10 },
+        ];
+      
+        for (let i = 0; i < tiers.length; i++) {
+          const tier = tiers[i];
+          const tierUsage = typeof tier.max === "number" ? Math.min(remainingUsage, tier.max - tier.min + 1) : remainingUsage;
+      
+          if (tierUsage <= 0) break;
+      
+          rates.push({
+            min: tier.min,
+            max: tier.max,
+            rate: tier.rate,
+            usage: tierUsage,
+            amount: parseFloat((tierUsage * tier.rate).toFixed(2)),
+          });
+      
+          remainingUsage -= tierUsage;
+        }
+      
+        return rates;
+      }
+      
+  
+      // Create PDF document - landscape for better layout
       const pdf = new jsPDF({
-        orientation: "portrait",
+        orientation: "landscape",
         unit: "mm",
         format: "a4"
       });
@@ -759,25 +829,16 @@ const Bill: React.FC = () => {
         // Continue without logo if there's an error
       }
       
-      // Helper function to calculate text width in the PDF
+      // Format currency helper
+      const formatCurrency = (value) => {
+        return (parseFloat(value) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      };
+      
+      // Helper to calculate text width
       const getTextWidth = (text, fontSize, fontStyle = "normal") => {
         pdf.setFont("helvetica", fontStyle);
         pdf.setFontSize(fontSize);
         return pdf.getStringUnitWidth(text) * fontSize / pdf.internal.scaleFactor;
-      };
-      
-      // Helper function to fit text in a cell with auto font size adjustment
-      const fitTextInCell = (text, cellWidth, maxFontSize, minFontSize, fontStyle = "normal") => {
-        let fontSize = maxFontSize;
-        let textWidth = getTextWidth(text, fontSize, fontStyle);
-        
-        // Reduce font size until text fits or reaches minimum size
-        while (textWidth > cellWidth * 0.9 && fontSize > minFontSize) {
-          fontSize -= 0.5;
-          textWidth = getTextWidth(text, fontSize, fontStyle);
-        }
-        
-        return fontSize;
       };
       
       // For each bill
@@ -793,413 +854,446 @@ const Bill: React.FC = () => {
         const pageWidth = pdf.internal.pageSize.getWidth();
         const pageHeight = pdf.internal.pageSize.getHeight();
         
-        // Dynamic margins based on page size
-        const marginX = pageWidth * 0.05; // 5% of page width
-        const marginY = pageHeight * 0.03; // 3% of page height
+        // Dynamic margins
+        const marginX = 15;
+        const marginY = 15;
         const contentWidth = pageWidth - (marginX * 2);
-        
-        // Calculate height distribution based on content sections
-        const totalHeight = pageHeight - (marginY * 2);
-        const headerHeight = totalHeight * 0.1; // 10% for header
-        const customerHeight = totalHeight * 0.08; // 8% for customer info
-        const meterHeight = totalHeight * 0.12; // 12% for meter reading
-        const billingHeight = totalHeight * 0.22; // 22% for billing details
-        const accountHeight = totalHeight * 0.1; // 10% for account details
-        const footerHeight = totalHeight * 0.38; // 38% for footer notes
-        
-        // Start position
-        let currentY = marginY;
+        const contentHeight = pageHeight - (marginY * 2);
         
         // Draw outer border for the entire receipt
-        pdf.setLineWidth(0.1);
-        pdf.rect(marginX, marginY, contentWidth, totalHeight);
+        pdf.setLineWidth(0.3);
+        pdf.rect(marginX, marginY, contentWidth, contentHeight);
         
         // --- HEADER SECTION ---
-        // Company logo and name block
-        pdf.rect(marginX, currentY, contentWidth, headerHeight);
+        // Calculate header height based on content
+        const companyName1 = "CENTENNIAL WATER RESOURCE VENTURE";
+        const companyName2 = "CORPORATION";
+        const companyAddress = "Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna";
+        
+        const headerHeight = 30; // Reduced from 35
         
         // Add logo if available
         if (logoBase64) {
-          const logoSize = headerHeight * 0.8; // 80% of header height
-          pdf.addImage(logoBase64, 'PNG', marginX + 5, currentY + (headerHeight - logoSize) / 2, logoSize, logoSize);
+          const logoSize = 22; // Reduced from 25
+          pdf.addImage(logoBase64, 'PNG', marginX + 20, marginY + 4, logoSize, logoSize);
         }
         
-        // Company name - dynamically sized
-        const companyName = "CENTENNIAL WATER RESOURCE VENTURE CORPORATION";
-        const availableWidth = contentWidth - (logoBase64 ? headerHeight : 0) - contentWidth * 0.3; // Leave space for logo and bill number
-        const companyFontSize = fitTextInCell(companyName, availableWidth, 14, 8, "bold");
-        
+        // Company name - center aligned
         pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(companyFontSize);
-        pdf.text(companyName, marginX + (logoBase64 ? headerHeight + 5 : 5), currentY + headerHeight * 0.4);
+        pdf.setFontSize(16);
+        pdf.text(companyName1, marginX + contentWidth / 2, marginY + 10, { align: "center" });
+        pdf.text(companyName2, marginX + contentWidth / 2, marginY + 20, { align: "center" });
         
         // Company address
-        const companyAddress = "Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna";
-        const addressFontSize = fitTextInCell(companyAddress, availableWidth, 9, 7);
-        
         pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(addressFontSize);
-        pdf.text(companyAddress, marginX + (logoBase64 ? headerHeight + 5 : 5), currentY + headerHeight * 0.65);
-        
-        // Bill number on the right side
-        pdf.setFont("helvetica", "bold");
         pdf.setFontSize(10);
-        pdf.text("BILLING STATEMENT NO.", pageWidth - marginX - 5, currentY + headerHeight * 0.4, { align: "right" });
+        pdf.text(companyAddress, marginX + contentWidth / 2, marginY + 28, { align: "center" });
         
-        // Make bill number font size responsive to number length
-        const billNumberFontSize = fitTextInCell(bill.billNumber, contentWidth * 0.25, 16, 10, "bold");
-        pdf.setFontSize(billNumberFontSize);
-        pdf.text(bill.billNumber, pageWidth - marginX - 5, currentY + headerHeight * 0.7, { align: "right" });
-        
-        // Update Y position
-        currentY += headerHeight;
-        
-        // --- CUSTOMER DETAILS SECTION ---
-        pdf.rect(marginX, currentY, contentWidth, customerHeight);
-        
-        // Customer name with responsive font size
-        const customerNameFontSize = fitTextInCell(bill.customerName, contentWidth * 0.7, 16, 12, "bold");
+        // Right side - "BILLING STATEMENT NO."
         pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(customerNameFontSize);
-        pdf.text(bill.customerName, marginX + 5, currentY + customerHeight * 0.4);
+        pdf.setFontSize(12);
+        pdf.text("BILLING STATEMENT", marginX + contentWidth - 15, marginY + 10, { align: "right" });
+        pdf.text("NO.", marginX + contentWidth - 15, marginY + 20, { align: "right" });
         
-        // Customer address with responsive font size
-        const addressWidth = getTextWidth(bill.customerAddress, 10);
-        const customerAddressFontSize = fitTextInCell(bill.customerAddress, contentWidth * 0.9, 10, 8);
+        // Bill Number in large font
+        pdf.setFontSize(16);
+        pdf.text(bill.billNumber, marginX + contentWidth - 15, marginY + 28, { align: "right" });
         
+        // Draw horizontal line under header
+        pdf.setLineWidth(0.3);
+        pdf.line(marginX, marginY + headerHeight, marginX + contentWidth, marginY + headerHeight);
+        
+        // --- CUSTOMER INFO SECTION ---
+        const customerInfoY = marginY + headerHeight + 5;
+        // Adjust customer info height based on address length
+        const addressLines = pdf.splitTextToSize(bill.customerAddress, contentWidth * 0.4);
+        const customerInfoHeight = Math.max(30, 15 + (addressLines.length * 6)); 
+        
+        // Customer name
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(14);
+        pdf.text(bill.customerName, marginX + 10, customerInfoY + 10);
+        
+        // Customer address - handle text wrapping if needed
         pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(customerAddressFontSize);
-        pdf.text(bill.customerAddress, marginX + 5, currentY + customerHeight * 0.75);
+        pdf.setFontSize(10); // Reduced from 11
+        pdf.text(addressLines, marginX + 10, customerInfoY + 18);
         
-        // Update Y position
-        currentY += customerHeight;
+        // --- METER READING TABLE ---
+        const meterTableWidth = contentWidth * 0.6;
+        const meterTableX = marginX + contentWidth - meterTableWidth;
+        const meterTableHeight = 22; // Reduced from 25
+        const meterTableY = customerInfoY + 5;
         
-        // --- METER READING SECTION ---
-        // Meter reading table with responsive columns
-        pdf.rect(marginX, currentY, contentWidth, meterHeight);
+        // Draw meter table border
+        pdf.rect(meterTableX, meterTableY, meterTableWidth, meterTableHeight);
         
-        // Column widths - equal distribution
-        const meterColWidth = contentWidth / 4;
+        // Draw meter table columns
+        const meterColumnCount = 4;
+        const meterColumnWidth = meterTableWidth / meterColumnCount;
         
-        // Draw column separators
-        for (let col = 1; col < 4; col++) {
-          pdf.line(marginX + (col * meterColWidth), currentY, 
-                  marginX + (col * meterColWidth), currentY + meterHeight);
+        for (let col = 1; col < meterColumnCount; col++) {
+          pdf.line(
+            meterTableX + col * meterColumnWidth,
+            meterTableY,
+            meterTableX + col * meterColumnWidth,
+            meterTableY + meterTableHeight
+          );
         }
         
-        // Header background
-        pdf.setFillColor(220, 220, 220);
-        pdf.rect(marginX, currentY, contentWidth, meterHeight * 0.45, 'F');
+        // Draw horizontal divider
+        pdf.line(
+          meterTableX,
+          meterTableY + meterTableHeight / 2,
+          meterTableX + meterTableWidth,
+          meterTableY + meterTableHeight / 2
+        );
         
-        // Column headers - responsive font size
+        // Meter table headers
         const meterHeaders = ["Current Reading", "Previous Reading", "Consumption", "Billing Month"];
+        
         pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(10);
         
         meterHeaders.forEach((header, idx) => {
-          const headerFontSize = fitTextInCell(header, meterColWidth * 0.9, 10, 8, "bold");
-          pdf.setFontSize(headerFontSize);
-          pdf.text(header, marginX + (idx * meterColWidth) + (meterColWidth / 2), 
-                  currentY + meterHeight * 0.25, { align: "center" });
+          pdf.text(
+            header,
+            meterTableX + idx * meterColumnWidth + meterColumnWidth / 2,
+            meterTableY + meterTableHeight / 4 + 2,
+            { align: "center" }
+          );
         });
         
-        // Values with larger, responsive font
-        const meterValues = [
-          bill.meterReading?.current?.toString() || '0',
-          bill.meterReading?.previous?.toString() || '0',
-          bill.waterUsage?.toString() || '0',
-          formatBillingMonth(bill.billingPeriod) // Convert to month name
-        ];
-        
+        // Meter table values
         pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(11); // Reduced from 12
+        
+        const meterValues = [
+          bill.meterReading?.current || 0,
+          bill.meterReading?.previous || 0,
+          bill.waterUsage || 0,
+          bill.billingPeriod || "4-2025"
+        ];
         
         meterValues.forEach((value, idx) => {
-          const valueFontSize = fitTextInCell(value, meterColWidth * 0.9, 14, 10);
-          pdf.setFontSize(valueFontSize);
-          pdf.text(value, marginX + (idx * meterColWidth) + (meterColWidth / 2), 
-                  currentY + meterHeight * 0.75, { align: "center" });
+          pdf.text(
+            value.toString(),
+            meterTableX + idx * meterColumnWidth + meterColumnWidth / 2,
+            meterTableY + meterTableHeight * 3/4 + 2,
+            { align: "center" }
+          );
         });
         
-        // Update Y position
-        currentY += meterHeight;
+        // --- BILLING TABLES SECTION ---
+        const billingTablesY = customerInfoY + customerInfoHeight;
         
-        // --- BILLING DETAILS SECTION ---
-        // Calculate table heights and positions
-        const billingTableHeight = billingHeight;
+        // Determine billing tables height based on number of rate tiers
+        const rateTiers = bill.ratesBreakdown || [];
+        const minTablesHeight = 50; // Minimum height
+        const tierRowHeight = 8; // Height per tier row
+        const extraHeight = Math.max(0, (rateTiers.length - 4) * tierRowHeight);
+        const billingTablesHeight = minTablesHeight + extraHeight;
         
-        // Left table - billing details (45% of width)
-        const leftTableWidth = contentWidth * 0.45;
+        // Define amountDueHeight before using it
+        const amountDueHeight = 12; // Reduced from 15
         
-        // Calculate column widths based on content needs
-        const leftColWidths = [
-          leftTableWidth * 0.25, // Billing Period
-          leftTableWidth * 0.15, // Water
-          leftTableWidth * 0.12, // Tax
-          leftTableWidth * 0.12, // SCF
-          leftTableWidth * 0.12, // Senior Discount
-          leftTableWidth * 0.12, // Arrears
-          leftTableWidth * 0.12, // Over Payment
-        ];
+        // Left table - billing info
+        const leftTableWidth = contentWidth * 0.48;
+        pdf.rect(marginX, billingTablesY, leftTableWidth, billingTablesHeight);
         
-        // Header row height - 25% of billing table height
-        const leftHeaderHeight = billingTableHeight * 0.25;
-        
-        // Table with borders
-        pdf.rect(marginX, currentY, leftTableWidth, billingTableHeight);
-        
-        // Header background
-        pdf.setFillColor(220, 220, 220);
-        pdf.rect(marginX, currentY, leftTableWidth, leftHeaderHeight, 'F');
-        
-        // Column separators and headers
-        let leftColX = marginX;
-        const leftHeaders = ["Billing Period", "Water", "Tax", "SCF", "Senior\nDiscount", "Arrears", "Over\nPayment", "Amount\nDue"];
-        
-        // Calculate available header space and fit text
-        pdf.setFont("helvetica", "bold");
-        
-        for (let j = 0; j < leftHeaders.length; j++) {
-          const colWidth = j < leftColWidths.length ? leftColWidths[j] : leftTableWidth - (leftColX - marginX);
-          
-          // Draw column if not last
-          if (j < leftHeaders.length - 1) {
-            pdf.line(leftColX + colWidth, currentY, leftColX + colWidth, currentY + billingTableHeight);
-          }
-          
-          // Fit text to column width
-          const headerFontSize = fitTextInCell(leftHeaders[j].replace('\n', ' '), colWidth * 0.9, 9, 6, "bold");
-          pdf.setFontSize(headerFontSize);
-          
-          // Handle multi-line headers
-          if (leftHeaders[j].includes('\n')) {
-            const lines = leftHeaders[j].split('\n');
-            lines.forEach((line, lineIdx) => {
-              pdf.text(line, leftColX + colWidth / 2, 
-                     currentY + leftHeaderHeight * (0.3 + lineIdx * 0.3), { align: "center" });
-            });
-          } else {
-            pdf.text(leftHeaders[j], leftColX + colWidth / 2, currentY + leftHeaderHeight / 2, { align: "center" });
-          }
-          
-          leftColX += colWidth;
-        }
-        
-        // Horizontal line under headers
-        pdf.line(marginX, currentY + leftHeaderHeight, marginX + leftTableWidth, currentY + leftHeaderHeight);
-        
-        // Data row
-        pdf.setFont("helvetica", "normal");
-        
-        // Format values
-        const leftValues = [
-          bill.billingPeriod || 'N/A',
-          formatCurrency(bill.waterChargeBeforeTax),
-          formatCurrency(bill.tax),
-          formatCurrency(0), // SCF
-          formatCurrency(bill.seniorDiscount),
-          formatCurrency(bill.arrears),
-          formatCurrency(bill.appliedOverpayment),
-          formatCurrency(bill.amount)
-        ];
-        
-        // Reset column position for values
-        leftColX = marginX;
-        
-        for (let j = 0; j < leftValues.length; j++) {
-          const colWidth = j < leftColWidths.length ? leftColWidths[j] : leftTableWidth - (leftColX - marginX);
-          
-          // Make amount due bold
-          if (j === leftValues.length - 1) {
-            pdf.setFont("helvetica", "bold");
-          } else {
-            pdf.setFont("helvetica", "normal");
-          }
-          
-          // Fit value to column
-          const valueFontSize = fitTextInCell(leftValues[j], colWidth * 0.9, 9, 7);
-          pdf.setFontSize(valueFontSize);
-          
-          // Center text in column
-          pdf.text(leftValues[j], leftColX + colWidth / 2, 
-                 currentY + leftHeaderHeight + (billingTableHeight - leftHeaderHeight) / 2, { align: "center" });
-          
-          leftColX += colWidth;
-        }
-        
-        // --- RIGHT TABLE - RATES BREAKDOWN ---
-        const rightTableX = marginX + leftTableWidth;
-        const rightTableWidth = contentWidth - leftTableWidth;
-        
-        // Table with borders
-        pdf.rect(rightTableX, currentY, rightTableWidth, billingTableHeight);
-        
-        // Header background
-        pdf.setFillColor(220, 220, 220);
-        pdf.rect(rightTableX, currentY, rightTableWidth, leftHeaderHeight, 'F');
-        
-        // Header text
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(10);
-        pdf.text("Rates Breakdown", rightTableX + rightTableWidth / 2, currentY + leftHeaderHeight / 2, { align: "center" });
-        
-        // Horizontal line under header
-        pdf.line(rightTableX, currentY + leftHeaderHeight, rightTableX + rightTableWidth, currentY + leftHeaderHeight);
-        
-        // Calculate tiers
-        const activeTiers = calculateTiers(bill.waterUsage);
-        
-        // Column headers
-        const rateColWidth = rightTableWidth / 5;
-        const rateHeaders = ["Min", "Max", "Rate", "Value", "Amount"];
-        
-        // Subheader row
-        const subHeaderHeight = billingTableHeight * 0.15;
-        pdf.setFillColor(240, 240, 240);
-        pdf.rect(rightTableX, currentY + leftHeaderHeight, rightTableWidth, subHeaderHeight, 'F');
+        // Columns for left table
+        const leftColumnTitles = ["Billing Period", "Water", "Tax", "SCF", "Senior Discount", "Arrears", "Over Payment"];
+        const leftColumnCount = leftColumnTitles.length;
+        const leftColumnWidth = leftTableWidth / leftColumnCount;
         
         // Draw column separators
-        for (let col = 1; col < 5; col++) {
-          pdf.line(rightTableX + (col * rateColWidth), currentY + leftHeaderHeight, 
-                  rightTableX + (col * rateColWidth), currentY + billingTableHeight);
+        for (let col = 1; col < leftColumnCount; col++) {
+          pdf.line(
+            marginX + col * leftColumnWidth,
+            billingTablesY,
+            marginX + col * leftColumnWidth,
+            billingTablesY + billingTablesHeight
+          );
         }
         
-        // Draw subheader texts
+        // Header row
+        const headerRowHeight = 12; // Reduced from 15
+        pdf.setFillColor(240, 240, 240);
+        pdf.rect(marginX, billingTablesY, leftTableWidth, headerRowHeight, 'F');
+        
+        // Left table column headers
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(8);
         
-        rateHeaders.forEach((header, idx) => {
-          pdf.text(header, rightTableX + (idx * rateColWidth) + (rateColWidth / 2), 
-                  currentY + leftHeaderHeight + subHeaderHeight / 2, { align: "center" });
+        leftColumnTitles.forEach((title, idx) => {
+          pdf.text(
+            title,
+            marginX + idx * leftColumnWidth + leftColumnWidth / 2,
+            billingTablesY + headerRowHeight / 2 + 2,
+            { align: "center" }
+          );
         });
         
-        // Horizontal line under subheader
-        pdf.line(rightTableX, currentY + leftHeaderHeight + subHeaderHeight, 
-                rightTableX + rightTableWidth, currentY + leftHeaderHeight + subHeaderHeight);
-        
-        // Data rows for tiers
+        // Left table values
         pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(8);
+        pdf.setFontSize(9); // Reduced from 10
         
-        // Calculate space for tier rows
-        const tiersDataHeight = billingTableHeight - leftHeaderHeight - subHeaderHeight - (billingTableHeight * 0.15); // Reserve 15% for total row
-        const tierRowHeight = Math.min(tiersDataHeight / Math.max(1, activeTiers.length), 10); // Cap at 10mm height per row
+        const leftColumnValues = [
+          bill.billingPeriod || "4-2025",
+          formatCurrency(bill.waterChargeBeforeTax || 517.50),
+          formatCurrency(bill.tax || 10.35),
+          formatCurrency(0.00), // SCF
+          formatCurrency(bill.seniorDiscount || 0.00),
+          formatCurrency(bill.arrears || 0.00),
+          formatCurrency(bill.appliedOverpayment || 0.00)
+        ];
         
-        // Draw tier rows
-        let tierY = currentY + leftHeaderHeight + subHeaderHeight;
+        leftColumnValues.forEach((value, idx) => {
+          pdf.text(
+            value,
+            marginX + idx * leftColumnWidth + leftColumnWidth / 2,
+            billingTablesY + headerRowHeight + (billingTablesHeight - headerRowHeight - amountDueHeight) / 2,
+            { align: "center" }
+          );
+        });
         
-        if (activeTiers.length === 0) {
-          // No water usage
-          pdf.text("No water usage", rightTableX + rightTableWidth / 2, tierY + tiersDataHeight / 2, { align: "center" });
-        } else {
-          // Process each tier
-          activeTiers.forEach((tier, idx) => {
-            // Add row separator if not first row
+        // Draw amount due row at bottom
+        const amountDueY = billingTablesY + billingTablesHeight - amountDueHeight;
+        
+        pdf.setFillColor(240, 240, 240);
+        pdf.rect(marginX, amountDueY, leftTableWidth, amountDueHeight, 'F');
+        
+        // Amount Due label and value
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(11); // Reduced from 12
+        
+        // Position Amount Due label at right side of cell that spans first 6 columns
+        const amountDueLabelX = marginX + (leftColumnWidth * 6) - 5;
+        pdf.text("Amount Due", amountDueLabelX, amountDueY + amountDueHeight / 2 + 2, { align: "right" });
+        
+        // Amount value in last column
+        pdf.setFontSize(12); // Reduced from 14
+        pdf.text(
+          formatCurrency(bill.amount || 527.85),
+          marginX + leftTableWidth - leftColumnWidth / 2,
+          amountDueY + amountDueHeight / 2 + 2,
+          { align: "center" }
+        );
+        
+        // Right table - rates breakdown
+        const rightTableX = marginX + leftTableWidth + 5;
+        const rightTableWidth = contentWidth - leftTableWidth - 5;
+        
+        pdf.rect(rightTableX, billingTablesY, rightTableWidth, billingTablesHeight);
+        
+        // Header for rates breakdown
+        pdf.setFillColor(240, 240, 240);
+        pdf.rect(rightTableX, billingTablesY, rightTableWidth, headerRowHeight, 'F');
+        
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(10); // Reduced from 11
+        pdf.text(
+          "Rates Breakdown",
+          rightTableX + rightTableWidth / 2,
+          billingTablesY + headerRowHeight / 2 + 2,
+          { align: "center" }
+        );
+        
+        // Rates breakdown columns
+        const ratesColumnTitles = ["Min", "Max", "Rate", "Value", "Amount"];
+        const ratesColumnCount = ratesColumnTitles.length;
+        const ratesColumnWidth = rightTableWidth / ratesColumnCount;
+        
+        // Sub-header row
+        const subHeaderY = billingTablesY + headerRowHeight;
+        const subHeaderHeight = 8; // Reduced from 10
+        
+        pdf.setFillColor(230, 230, 230);
+        pdf.rect(rightTableX, subHeaderY, rightTableWidth, subHeaderHeight, 'F');
+        
+        // Draw column separators
+        for (let col = 1; col < ratesColumnCount; col++) {
+          pdf.line(
+            rightTableX + col * ratesColumnWidth,
+            subHeaderY,
+            rightTableX + col * ratesColumnWidth,
+            billingTablesY + billingTablesHeight
+          );
+        }
+        
+        // Column headers
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(9); // Reduced from 10
+        
+        ratesColumnTitles.forEach((title, idx) => {
+          pdf.text(
+            title,
+            rightTableX + idx * ratesColumnWidth + ratesColumnWidth / 2,
+            subHeaderY + subHeaderHeight / 2 + 2,
+            { align: "center" }
+          );
+        });
+        
+        // Rates breakdown data rows
+        const ratesDataY = subHeaderY + subHeaderHeight;
+        const ratesDataHeight = billingTablesHeight - headerRowHeight - subHeaderHeight - 12; // Reduced total row height
+        
+        if (rateTiers.length > 0) {
+          const tierRowHeight = Math.min(10, ratesDataHeight / rateTiers.length);
+          
+          rateTiers.forEach((tier, idx) => {
+            const tierY = ratesDataY + idx * tierRowHeight;
+            
+            // Draw horizontal line between tiers (except before first tier)
             if (idx > 0) {
               pdf.line(rightTableX, tierY, rightTableX + rightTableWidth, tierY);
             }
             
-            // Format tier data
+            // Tier data
+            pdf.setFont("helvetica", "normal");
+            pdf.setFontSize(9); // Reduced from 10
+            
             const tierData = [
               tier.min.toString(),
-              tier.max?.toString() || "above",
+              tier.max === "above" ? tier.max : tier.max.toString(),
               tier.rate.toFixed(2),
               tier.usage.toString(),
               formatCurrency(tier.amount)
             ];
             
-            // Display tier data
             tierData.forEach((value, colIdx) => {
-              pdf.text(value, rightTableX + (colIdx * rateColWidth) + (rateColWidth / 2), 
-                      tierY + tierRowHeight / 2, { align: "center" });
+              pdf.text(
+                value,
+                rightTableX + colIdx * ratesColumnWidth + ratesColumnWidth / 2,
+                tierY + tierRowHeight / 2 + 2,
+                { align: "center" }
+              );
             });
-            
-            tierY += tierRowHeight;
           });
+        } else {
+          // No tiers available
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(10);
+          pdf.text(
+            "No rate tiers available",
+            rightTableX + rightTableWidth / 2,
+            ratesDataY + ratesDataHeight / 2,
+            { align: "center" }
+          );
         }
         
         // Total row
-        const totalRowY = currentY + billingTableHeight - (billingTableHeight * 0.15);
+        const totalRowY = billingTablesY + billingTablesHeight - 12; // Reduced from 15
         pdf.line(rightTableX, totalRowY, rightTableX + rightTableWidth, totalRowY);
         
-        // Total text
+        // Calculate total amount from rates
+        const totalRatesAmount = rateTiers.reduce((sum, tier) => sum + tier.amount, 0);
+        
+        // Total label
         pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(9);
-        pdf.text("Total:", rightTableX + (rateColWidth * 3.5), totalRowY + (billingTableHeight * 0.075), { align: "center" });
+        pdf.setFontSize(9); // Reduced from 10
+        pdf.text(
+          "Total:",
+          rightTableX + ratesColumnWidth * 4 - 5,
+          totalRowY + 12 / 2 + 2, // Adjusted for new height
+          { align: "right" }
+        );
         
-        // Calculate total amount
-        const totalAmount = activeTiers.reduce((sum, tier) => sum + tier.amount, 0);
-        pdf.text(formatCurrency(totalAmount), rightTableX + (rateColWidth * 4.5), 
-               totalRowY + (billingTableHeight * 0.075), { align: "center" });
+        // Total amount
+        pdf.setFontSize(11); // Reduced from 12
+        pdf.text(
+          formatCurrency(totalRatesAmount || bill.waterChargeBeforeTax || 517.50),
+          rightTableX + ratesColumnWidth * 4 + ratesColumnWidth / 2,
+          totalRowY + 12 / 2 + 2, // Adjusted for new height
+          { align: "center" }
+        );
         
-        // Update Y position
-        currentY += billingTableHeight + 5; // Add some spacing
+        // --- ACCOUNT DETAILS ROW ---
+        const accountRowY = billingTablesY + billingTablesHeight + 5;
+        const accountRowHeight = 20; // Reduced from 25
         
-        // --- ACCOUNT DETAILS SECTION ---
-        pdf.rect(marginX, currentY, contentWidth, accountHeight);
+        pdf.rect(marginX, accountRowY, contentWidth, accountRowHeight);
         
-        // Header background
-        pdf.setFillColor(220, 220, 220);
-        pdf.rect(marginX, currentY, contentWidth, accountHeight * 0.4, 'F');
+        // Account details columns
+        const accountColumnTitles = ["Account#", "Meter#", "Due Date", "Penalty", "Amount After Due Date"];
+        const accountColumnCount = accountColumnTitles.length;
+        const accountColumnWidth = contentWidth / accountColumnCount;
         
-        // Column widths
-        const accountColWidth = contentWidth / 5;
-        
-        // Column separators
-        for (let col = 1; col < 5; col++) {
-          pdf.line(marginX + (col * accountColWidth), currentY, 
-                  marginX + (col * accountColWidth), currentY + accountHeight);
+        // Draw column separators
+        for (let col = 1; col < accountColumnCount; col++) {
+          pdf.line(
+            marginX + col * accountColumnWidth, 
+            accountRowY,
+            marginX + col * accountColumnWidth,
+            accountRowY + accountRowHeight
+          );
         }
         
-        // Account headers
-        const accountHeaders = ["Account#", "Meter#", "Due Date", "Penalty", "Amount After Due Date"];
+        // Header part
+        const accountHeaderHeight = accountRowHeight * 0.4; // Reduced from 0.5
+        pdf.setFillColor(240, 240, 240);
+        pdf.rect(marginX, accountRowY, contentWidth, accountHeaderHeight, 'F');
         
+        // Draw line between header and values
+        pdf.line(marginX, accountRowY + accountHeaderHeight, marginX + contentWidth, accountRowY + accountHeaderHeight);
+        
+        // Column headers
         pdf.setFont("helvetica", "bold");
-        accountHeaders.forEach((header, idx) => {
-          const headerFontSize = fitTextInCell(header, accountColWidth * 0.9, 9, 7, "bold");
-          pdf.setFontSize(headerFontSize);
-          pdf.text(header, marginX + (idx * accountColWidth) + (accountColWidth / 2), 
-                  currentY + accountHeight * 0.2, { align: "center" });
+        pdf.setFontSize(9); // Reduced from 10
+        
+        accountColumnTitles.forEach((title, idx) => {
+          pdf.text(
+            title,
+            marginX + idx * accountColumnWidth + accountColumnWidth / 2,
+            accountRowY + accountHeaderHeight / 2 + 2,
+            { align: "center" }
+          );
         });
         
-        // Horizontal line under headers
-        pdf.line(marginX, currentY + accountHeight * 0.4, 
-                marginX + contentWidth, currentY + accountHeight * 0.4);
-        
-        // Account values
+        // Column values
         const accountValues = [
-          bill.accountNumber || "00-00-0000",
-          bill.meterNumber || "00000000",
-          bill.dueDate || "00/00/0000",
-          formatCurrency(bill.penalty),
-          formatCurrency(bill.amountAfterDue)
+          bill.accountNumber || "13-15-1326a",
+          bill.meterNumber || "17101481", 
+          bill.dueDate || "20/05/2025",
+          formatCurrency(bill.penalty || 52.79),
+          formatCurrency(bill.amountAfterDue || 580.63)
         ];
         
-        pdf.setFont("helvetica", "normal");
         accountValues.forEach((value, idx) => {
-          // Make amount after due bold
-          if (idx === 4) pdf.setFont("helvetica", "bold");
+          // Make the last column bold
+          if (idx === accountColumnCount - 1) {
+            pdf.setFont("helvetica", "bold");
+            pdf.setFontSize(11); // Reduced from 12
+          } else {
+            pdf.setFont("helvetica", "normal");
+            pdf.setFontSize(9); // Reduced from 10
+          }
           
-          const valueFontSize = fitTextInCell(value, accountColWidth * 0.9, 10, 8);
-          pdf.setFontSize(valueFontSize);
-          pdf.text(value, marginX + (idx * accountColWidth) + (accountColWidth / 2), 
-                  currentY + accountHeight * 0.7, { align: "center" });
-          
-          pdf.setFont("helvetica", "normal");
+          pdf.text(
+            value,
+            marginX + idx * accountColumnWidth + accountColumnWidth / 2,
+            accountRowY + accountHeaderHeight + (accountRowHeight - accountHeaderHeight) / 2 + 2,
+            { align: "center" }
+          );
         });
         
-        // Update Y position
-        currentY += accountHeight + 5;
+        // --- FOOTER NOTES ---
+        // Calculate available space for footer
+        const availableFooterSpace = contentHeight - (accountRowY + accountRowHeight - marginY);
         
-        // --- FOOTER NOTES SECTION ---
-        // Calculate remaining space
-        const remainingHeight = totalHeight - (currentY - marginY);
+        // Adjust footer position to ensure it fits
+        const footerY = accountRowY + accountRowHeight + 5; // Reduced from 10
+        
+        // Notes with adaptive font size based on available space
+        const footerFontSize = availableFooterSpace < 40 ? 7 : 8; // Smaller font if space is limited
         
         pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(9);
-        pdf.text("MAHALAGANG PAALALA TUNGKOL SA INYONG WATER BILL:", marginX + 5, currentY + 5);
+        pdf.setFontSize(footerFontSize + 1);
+        pdf.text("MAHALAGANG PAALALA TUNGKOL SA INYONG WATER BILL:", marginX + 5, footerY);
         
-        // Notes
+        // Notes with optimized spacing
         pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(8);
+        pdf.setFontSize(footerFontSize);
         
         const notes = [
           "HUWAG PONG KALILIMUTAN DALHIN ANG INYONG BILLING STATEMENT KAPAG KAYO AY MAGBABAYAD",
@@ -1207,35 +1301,26 @@ const Bill: React.FC = () => {
           "ANG SERBISYO PO NG INYONG TUBIG AY PUPUTULIN NG WALANG PAALALA KUNG DI KAYO MAKAPAGBAYAD SA LOOB NG LIMANG(5) ARAW PAGKATAPOS NG DUE DATE."
         ];
         
-        // Calculate line height based on available space
-        const availableNotesHeight = remainingHeight - 25; // Reserve space for final note
-        const noteLineHeight = Math.min(availableNotesHeight / notes.length, 8);
+        // Calculate line spacing based on available space
+        const lineSpacing = Math.min(5, (availableFooterSpace - 15) / notes.length);
         
         notes.forEach((note, idx) => {
-          // Responsive font sizing for notes
-          const noteFontSize = Math.min(8, fitTextInCell(`${idx + 1}. ${note}`, contentWidth - 15, 8, 6));
-          pdf.setFontSize(noteFontSize);
-          pdf.text(`${idx + 1}. ${note}`, marginX + 8, currentY + 15 + (idx * noteLineHeight));
+          // Split long notes into multiple lines if necessary
+          const wrappedNotes = pdf.splitTextToSize(`${idx + 1}. ${note}`, contentWidth - 20);
+          pdf.text(wrappedNotes, marginX + 10, footerY + 8 + (idx * (lineSpacing + wrappedNotes.length * 4)));
         });
         
-        // Final note with line above
-        const finalNoteY = marginY + totalHeight - 15;
-        pdf.line(marginX, finalNoteY, marginX + contentWidth, finalNoteY);
-        
-        const validationText = "\"THIS WILL SERVE AS YOUR OFFICIAL RECEIPT WHEN MACHINE VALIDATED\"";
-        const validationFontSize = fitTextInCell(validationText, contentWidth * 0.9, 10, 8, "bold");
+        // Machine validation note at bottom - ensure it's always visible
+        const validationY = marginY + contentHeight - 8;
+        pdf.line(marginX, validationY, marginX + contentWidth, validationY);
         
         pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(validationFontSize);
-        pdf.text(validationText, marginX + contentWidth / 2, finalNoteY + 8, { align: "center" });
-        
-        // Underline the text
-        const textWidth = pdf.getStringUnitWidth(validationText) * validationFontSize / pdf.internal.scaleFactor;
-        pdf.line(
-          (marginX + contentWidth / 2) - (textWidth / 2), 
-          finalNoteY + 10, 
-          (marginX + contentWidth / 2) + (textWidth / 2), 
-          finalNoteY + 10
+        pdf.setFontSize(9); // Reduced from 10
+        pdf.text(
+          "\"THIS WILL SERVE AS YOUR OFFICIAL RECEIPT WHEN MACHINE VALIDATED\"",
+          marginX + contentWidth / 2,
+          validationY + 5,
+          { align: "center" }
         );
       }
       

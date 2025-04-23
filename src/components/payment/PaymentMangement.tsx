@@ -1516,7 +1516,6 @@ const handlePrintReceipt = async (bill: Bill) => {
           <TabsList className="mb-6">
             <TabsTrigger value="payment-methods">Payment Methods</TabsTrigger>
             <TabsTrigger value="payment-verification">Payment Verification</TabsTrigger>
-            <TabsTrigger value="customer-billing">Customer Billing</TabsTrigger>
           </TabsList>
 
           {/* Payment Methods Tab */}

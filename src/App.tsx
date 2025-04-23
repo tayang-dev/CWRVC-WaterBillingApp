@@ -11,6 +11,7 @@ import UserManagement from "./components/users/UserManagement";
 import SettingsPage from "./components/settings/SettingPage";
 import MeterReading from "./components/meters/meterReading";
 import ViewBills from "./components/bills/bill"; // Moved import to top
+import Feedback from "./components/feedbacks/Feedbacks"; // Import Feedback component
 
 // Lazy load components for better performance
 const Dashboard = lazy(() => import("./components/dashboard/Dashboard"));
@@ -129,15 +130,15 @@ function App() {
 
           {/* Meter Reading route for staff */}
           <Route
-            path="/meters"
-            element={
-              <ProtectedRoute>
-                <AdminLayout>
-                  <MeterReading />
-                </AdminLayout>
-              </ProtectedRoute>
-            }
-          />
+          path="/meters"
+          element={
+            <RoleBasedRoute allowedRoles={["meter_reader"]}> {/* Restrict to Meter Reader */}
+              <AdminLayout>
+                <MeterReading />
+              </AdminLayout>
+            </RoleBasedRoute>
+          }
+        />
 
           {/* Bills routes */}
           <Route
@@ -150,6 +151,18 @@ function App() {
               </ProtectedRoute>
             }
           />
+          
+          <Route
+            path="/feedback"
+            element={
+              <ProtectedRoute>
+                <AdminLayout>
+                  <Feedback />
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+           />
+      
 
           {/* View Individual Bill route */}
           <Route

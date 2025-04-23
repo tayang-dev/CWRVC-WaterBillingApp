@@ -4,7 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 
 interface RoleBasedRouteProps {
   children: React.ReactNode;
-  allowedRoles: ("admin" | "staff")[];
+  allowedRoles: ("admin" | "staff" | "meter_reader")[];
 }
 
 const RoleBasedRoute: React.FC<RoleBasedRouteProps> = ({

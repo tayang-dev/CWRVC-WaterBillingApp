@@ -13,6 +13,7 @@ const Home = () => {
   const allowedEmails = {
     admin: "centennialwaterventureresource@gmail.com",
     staff: "sarahfabella11@gmail.com",
+    meter_reader: "haroldbatula34@gmail.com",
   };
 
   const handleLogin = async (values) => {
@@ -22,7 +23,8 @@ const Home = () => {
       // Check if the email is allowed
       if (
         values.email === allowedEmails.admin ||
-        values.email === allowedEmails.staff
+        values.email === allowedEmails.staff ||
+        values.email === allowedEmails.meter_reader // Include meter_reader
       ) {
         await login(values.email, values.password, values.role);
         navigate("/dashboard");
