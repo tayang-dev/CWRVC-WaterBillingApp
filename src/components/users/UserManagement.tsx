@@ -163,104 +163,114 @@ const UserManagement = () => {
 
 
   const handleSubmitVerification = async () => {
-  if (!selectedUser) return;
-  try {
-    const { doc, updateDoc, collection, setDoc } = await import("firebase/firestore");
-    const { db } = await import("../../lib/firebase");
-
-    // Update the user's verification status
-    await updateDoc(doc(db, "users", selectedUser.id), {
-      verificationStatus: verificationStatus,
-      verified: verificationStatus === "verified",
-      verification: verificationStatus === "verified",
-      verificationNote: verificationNote,
-      verifiedAt: new Date().toISOString(),
-    });
-
-    // If verified, update any linked consumer accounts
-    if (verificationStatus === "verified" && selectedUser.consumerAccounts?.length > 0) {
-      const { query, where, getDocs, updateDoc } = await import("firebase/firestore");
-      for (const accountNumber of selectedUser.consumerAccounts) {
-        try {
-          const accountsQuery = query(
-            collection(db, "customers"),
-            where("accountNumber", "==", accountNumber)
-          );
-          const accountsSnapshot = await getDocs(accountsQuery);
-          if (!accountsSnapshot.empty) {
-            const accountDoc = accountsSnapshot.docs[0];
-            await updateDoc(doc(db, "customers", accountDoc.id), {
-              userId: selectedUser.id,
-              userVerified: true,
-              verifiedAt: new Date().toISOString(),
-            });
+    if (!selectedUser) return;
+    try {
+      const { doc, updateDoc, collection, setDoc, addDoc } = await import("firebase/firestore");
+      const { db } = await import("../../lib/firebase");
+  
+      // Update the user's verification status
+      await updateDoc(doc(db, "users", selectedUser.id), {
+        verificationStatus: verificationStatus,
+        verified: verificationStatus === "verified",
+        verification: verificationStatus === "verified",
+        verificationNote: verificationNote,
+        verifiedAt: new Date().toISOString(),
+      });
+  
+      // If verified, update any linked consumer accounts
+      if (verificationStatus === "verified" && selectedUser.consumerAccounts?.length > 0) {
+        const { query, where, getDocs, updateDoc } = await import("firebase/firestore");
+        for (const accountNumber of selectedUser.consumerAccounts) {
+          try {
+            const accountsQuery = query(
+              collection(db, "customers"),
+              where("accountNumber", "==", accountNumber)
+            );
+            const accountsSnapshot = await getDocs(accountsQuery);
+            if (!accountsSnapshot.empty) {
+              const accountDoc = accountsSnapshot.docs[0];
+              await updateDoc(doc(db, "customers", accountDoc.id), {
+                userId: selectedUser.id,
+                userVerified: true,
+                verifiedAt: new Date().toISOString(),
+              });
+            }
+          } catch (accountError) {
+            console.error(`Error updating account ${accountNumber}:`, accountError);
           }
-        } catch (accountError) {
-          console.error(`Error updating account ${accountNumber}:`, accountError);
         }
       }
-    }
-
-    // Update the local state
-    setUsers(
-      users.map((user) =>
-        user.id === selectedUser.id
-          ? {
-              ...user,
-              verificationStatus: verificationStatus,
-              verified: verificationStatus === "verified",
-              verification: verificationStatus === "verified",
-            }
-          : user
-      )
-    );
-
-    // Determine contact info: use phone if valid; otherwise, use email.
-    const validPhone = selectedUser.phone && selectedUser.phone !== "No Phone";
-    const validEmail = selectedUser.email && selectedUser.email !== "No Email";
-    const contactInfo = validPhone ? selectedUser.phone : validEmail ? selectedUser.email : "";
-
-    // Prepare notification data
-    const notificationData = {
-      type: "user_verification",
-      userId: selectedUser.id,
-      status: verificationStatus,
-      contactInfo, // This will now be a valid phone or email.
-      message:
-        verificationStatus === "verified"
-          ? "Your account has been approved."
-          : "Your account has been rejected. Please re-upload your documents.",
-      createdAt: new Date().toISOString(),
-    };
-
-    // Use the contactInfo (phone/email) as the document ID.
-    if (selectedUser.consumerAccounts && selectedUser.consumerAccounts.length > 0) {
-      const accountNumber = selectedUser.consumerAccounts[0];
-      await setDoc(
-        doc(db, "notifications", accountNumber, "records", contactInfo),
-        { ...notificationData, accountNumber }
+  
+      // Update the local state
+      setUsers(
+        users.map((user) =>
+          user.id === selectedUser.id
+            ? {
+                ...user,
+                verificationStatus: verificationStatus,
+                verified: verificationStatus === "verified",
+                verification: verificationStatus === "verified",
+              }
+            : user
+        )
       );
-    } else {
-      await setDoc(doc(db, "notifications", contactInfo), {
-        ...notificationData,
-        accountNumber: null,
-      });
+  
+      // Determine contact info: use phone if valid; otherwise, use email.
+      const validPhone = selectedUser.phone && selectedUser.phone !== "No Phone";
+      const validEmail = selectedUser.email && selectedUser.email !== "No Email";
+      const contactInfo = validPhone ? selectedUser.phone : validEmail ? selectedUser.email : "";
+  
+      // Prepare notification data
+      const notificationData = {
+        type: "user_verification",
+        userId: selectedUser.id,
+        status: verificationStatus,
+        contactInfo, // This will now be a valid phone or email.
+        message:
+          verificationStatus === "verified"
+            ? "Your account has been approved."
+            : "Your account has been rejected. Please re-upload your documents.",
+        createdAt: new Date().toISOString(),
+      };
+  
+      // Add notification records for each consumer account
+      if (selectedUser.consumerAccounts && selectedUser.consumerAccounts.length > 0) {
+        for (const accountNumber of selectedUser.consumerAccounts) {
+          // Add a record in the notifications collection for this account
+          await addDoc(collection(db, "notifications", accountNumber, "records"), {
+            ...notificationData,
+            accountNumber,
+            read: false,
+            processed: false
+          });
+        }
+      } else if (contactInfo) {
+        // If no consumer accounts but we have contactInfo, use that instead of "users"
+        await addDoc(collection(db, "notifications", contactInfo, "records"), {
+          ...notificationData,
+          accountNumber: null,
+          userId: selectedUser.id,
+          read: false,
+          processed: false
+        });
+      } else {
+        // Fallback in case there's no contactInfo either
+        console.warn("No contact info available for user notifications");
+      }
+  
+      setIsVerificationDialogOpen(false);
+      setSelectedUser(null);
+      setVerificationStatus("verified");
+      setVerificationNote("");
+    } catch (error) {
+      console.error("Error updating user verification:", error);
+      alert(
+        `Failed to update verification status: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
     }
-
-    setIsVerificationDialogOpen(false);
-    setSelectedUser(null);
-    setVerificationStatus("verified");
-    setVerificationNote("");
-  } catch (error) {
-    console.error("Error updating user verification:", error);
-    alert(
-      `Failed to update verification status: ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
-  }
-};
-
+  };
   
   
 
