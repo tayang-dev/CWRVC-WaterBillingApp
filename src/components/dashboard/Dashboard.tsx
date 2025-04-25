@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import KpiCards from "./KpiCards";
 import BillingTrendsChart from "./BillingTrendsChart";
@@ -58,11 +58,14 @@ const Dashboard = () => {
         let totalConsumption = 0;
         let totalRevenue = 0;
         let pendingAmount = 0;
-        const customersProcessed: string[] = [];
   
-        debug.push("🚀 Starting filtered dashboard data fetch");
+        debug.push("🚀 Starting optimized dashboard data fetch");
   
-        const customerSnapshot = await getDocs(collection(db, "customers"));
+        // Fetch customers filtered by site in one query
+        const customerQuery = selectedSite === "All"
+          ? collection(db, "customers")
+          : query(collection(db, "customers"), where("site", "==", selectedSite));
+        const customerSnapshot = await getDocs(customerQuery);
   
         if (customerSnapshot.empty) {
           debug.push("⚠️ No customers found in Firestore!");
@@ -72,82 +75,61 @@ const Dashboard = () => {
           return;
         }
   
-        const filteredCustomers = customerSnapshot.docs.filter((doc) => {
-          const site = doc.data()?.site || "unknown";
-          return selectedSite === "All" || site.toLowerCase() === selectedSite;
-        });
+        const customers = customerSnapshot.docs.map(doc => ({
+          id: doc.id,
+          accountNumber: doc.data().accountNumber, // Explicitly include accountNumber
+          ...doc.data(),
+        }));
   
-        debug.push(`📊 Found ${filteredCustomers.length} customers for site: ${selectedSite}`);
+        debug.push(`📊 Found ${customers.length} customers for site: ${selectedSite}`);
   
-        const billsPromises = filteredCustomers.map(async (customerDoc) => {
-          const customerData = customerDoc.data();
-          const accountNumber = customerData.accountNumber;
-          if (!accountNumber) {
-            debug.push(`⚠️ Customer ${customerDoc.id} has no account number`);
-            return null;
-          }
-          customersProcessed.push(accountNumber);
-          debug.push(`🔍 Processing customer: ${customerData.name} (Account: ${accountNumber})`);
+        // Fetch all bills and payments in parallel
+        const [billsSnapshots, paymentSnapshot] = await Promise.all([
+          Promise.all(
+            customers.map(customer =>
+              getDocs(collection(db, "bills", customer.accountNumber, "records"))
+            )
+          ),
+          getDocs(collection(db, "paymentVerifications")),
+        ]);
   
-          const billsRef = collection(db, "bills", accountNumber, "records");
-          const billsSnapshot = await getDocs(billsRef);
-          return billsSnapshot;
-        });
+        // Process bills
+        billsSnapshots.forEach(billsSnapshot => {
+          billsSnapshot.forEach(billDoc => {
+            const billData = billDoc.data();
+            const billDate = new Date(billData.date);
+            const billMonth = billDate.getMonth() + 1;
+            const billYear = billDate.getFullYear();
   
-        const billsSnapshots = await Promise.all(billsPromises);
+            const matchesMonth = selectedMonth === "All" || parseInt(selectedMonth) === billMonth;
+            const matchesYear = selectedYear === "All" || parseInt(selectedYear) === billYear;
   
-        billsSnapshots.forEach((billsSnapshot) => {
-          if (billsSnapshot) {
-            billsSnapshot.docs.forEach((billDoc) => {
-              const billData = billDoc.data();
-              const billDate = new Date(billData.date);
-              const billMonth = billDate.getMonth() + 1;
-              const billYear = billDate.getFullYear();
-  
-              // Handle "All" for month and year properly
-              const isMonthAll = selectedMonth === "All";
-              const isYearAll = selectedYear === "All";
-              const selectedMonthNumber = isMonthAll ? null : parseInt(selectedMonth);
-              const selectedYearNumber = isYearAll ? null : parseInt(selectedYear);
-  
-              const matchesMonth = isMonthAll || (selectedMonthNumber !== null && billMonth === selectedMonthNumber);
-              const matchesYear = isYearAll || (selectedYearNumber !== null && billYear === selectedYearNumber);
-  
-              if (!matchesMonth || !matchesYear) return;
-  
+            if (matchesMonth && matchesYear) {
               if (typeof billData.waterUsage === "number") {
                 totalConsumption += billData.waterUsage;
               }
-  
               if (
                 typeof billData.amount === "number" &&
                 (billData.status === "pending" || billData.status === "overdue")
               ) {
                 pendingAmount += billData.amount;
               }
-            });
-          }
+            }
+          });
         });
   
-        debug.push(`👥 Processed accounts: ${customersProcessed.join(", ")}`);
         debug.push(`💧 Filtered Total Water Usage: ${totalConsumption} m³`);
         debug.push(`⏳ Filtered Pending Payments: ${formatCurrency(pendingAmount)}`);
   
-        const paymentSnapshot = await getDocs(collection(db, "paymentVerifications"));
-        paymentSnapshot.forEach((doc) => {
+        // Process payments
+        paymentSnapshot.forEach(doc => {
           const data = doc.data();
           const paymentDate = new Date(data.date);
           const month = paymentDate.getMonth() + 1;
           const year = paymentDate.getFullYear();
   
-          // Ensure selectedMonth and selectedYear are compared as numbers
-          const isMonthAll = selectedMonth === "All";
-          const isYearAll = selectedYear === "All";
-          const selectedMonthNumber = isMonthAll ? null : parseInt(selectedMonth);
-          const selectedYearNumber = isYearAll ? null : parseInt(selectedYear);
-  
-          const matchesMonth = isMonthAll || (selectedMonthNumber !== null && month === selectedMonthNumber);
-          const matchesYear = isYearAll || (selectedYearNumber !== null && year === selectedYearNumber);
+          const matchesMonth = selectedMonth === "All" || parseInt(selectedMonth) === month;
+          const matchesYear = selectedYear === "All" || parseInt(selectedYear) === year;
   
           if (matchesMonth && matchesYear) {
             const amount = parseFloat(data.amount);
@@ -160,7 +142,7 @@ const Dashboard = () => {
         debug.push(`💸 Filtered Total Revenue: ${formatCurrency(totalRevenue)}`);
   
         setDashboardData({
-          totalCustomers: filteredCustomers.length.toString(),
+          totalCustomers: customers.length.toString(),
           totalRevenue: formatCurrency(totalRevenue),
           pendingPayments: formatCurrency(pendingAmount),
           waterConsumption: `${totalConsumption} m³`,

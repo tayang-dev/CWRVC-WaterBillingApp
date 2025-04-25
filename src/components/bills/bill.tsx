@@ -6,6 +6,8 @@ import {
   getDocs,
   writeBatch,
   collectionGroup,
+  onSnapshot, 
+  addDoc,
   doc,
   where,
   Timestamp,
@@ -104,6 +106,7 @@ const Bill: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedBills, setSelectedBills] = useState<any[]>([]);
   const [selectedAccount, setSelectedAccount] = useState("");
+  const [noBillNotifications, setNoBillNotifications] = useState<any[]>([]);
   // Use the current date and set due date 15 days ahead.
   const currentDate = new Date();
   const defaultDueDate = new Date(currentDate);
@@ -138,6 +141,24 @@ const Bill: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const unsub = onSnapshot(
+      collectionGroup(db, "records"),
+      (snapshot) => {
+        const newNotifs = snapshot.docs
+          .filter(doc => doc.data().type === "no_bill_notice")
+          .map(doc => ({ id: doc.id, ...doc.data() }));
+  
+        setNoBillNotifications(newNotifs);
+      },
+      (error) => {
+        console.error("Error listening for notifications:", error);
+      }
+    );
+  
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
     if (billingData.dueDate) {
       const formattedDueDate = formatToDDMMYYYY(billingData.dueDate);
       fetchMeterReadingsByDueDate(formattedDueDate);
@@ -165,43 +186,62 @@ const Bill: React.FC = () => {
     }
   };
 
-  const fetchMeterReadingsByDueDate = async (formattedDueDate: string) => {
-    setLoadingState("loading");
-    try {
-      const recordsQuery = query(
-        collectionGroup(db, "records"),
-        where("dueDate", "==", formattedDueDate)
-      );
+const fetchMeterReadingsByDueDate = async (formattedDueDate: string) => {
+  setLoadingState("loading");
+  try {
+    const billingPeriod = calculateBillingPeriod(billingData.dueDate);
 
-      const recordsSnapshot = await getDocs(recordsQuery);
-      if (recordsSnapshot.empty) {
-        setMeterReadings([]);
-        setFilteredReadings([]);
-        showNotification(`No meter readings found for due date: ${formattedDueDate}`, "info");
-        setLoadingState("success");
-        return;
-      }
+    const recordsQuery = query(
+      collectionGroup(db, "records"),
+      where("dueDate", "==", formattedDueDate)
+    );
 
-      const readingsData = recordsSnapshot.docs.map(doc => {
+    const recordsSnapshot = await getDocs(recordsQuery);
+    if (recordsSnapshot.empty) {
+      setMeterReadings([]);
+      setFilteredReadings([]);
+      showNotification(`No meter readings found for due date: ${formattedDueDate}`, "info");
+      setLoadingState("success");
+      return;
+    }
+
+    const readingsData = await Promise.all(
+      recordsSnapshot.docs.map(async (doc) => {
         const data = doc.data() as MeterReading;
-        const pathSegments = doc.ref.path.split('/');
-        const accountNumberFromPath = pathSegments[1];
+        const pathSegments = doc.ref.path.split("/");
+        const accountNumber = data.accountNumber || pathSegments[1];
+
+        const billSnapshot = await getDocs(
+          query(
+            collection(db, "bills", accountNumber, "records"),
+            where("billingPeriod", "==", billingPeriod)
+          )
+        );
+
+        if (!billSnapshot.empty) return null;
+
+        
+
         return {
           id: doc.id,
           ...data,
-          accountNumber: data.accountNumber || accountNumberFromPath,
+          accountNumber,
         };
-      });
+      })
+    );
 
-      setMeterReadings(readingsData);
-      setFilteredReadings(readingsData);
-      setLoadingState("success");
-    } catch (error) {
-      console.error("Error fetching meter readings:", error);
-      setLoadingState("error");
-      showNotification("Failed to load meter readings. Please try again.", "error");
-    }
-  };
+    const filtered = readingsData.filter((r): r is Required<MeterReading> => r !== null && r?.id !== undefined);
+    setMeterReadings(filtered);
+    setFilteredReadings(filtered);
+    setLoadingState("success");
+  } catch (error) {
+    console.error("Error fetching meter readings:", error);
+    setLoadingState("error");
+    showNotification("Failed to load meter readings. Please try again.", "error");
+  }
+};
+  
+  
 
   const showNotification = (message: string, type: "success" | "error" | "info") => {
     setNotification({ message, type });
@@ -456,7 +496,7 @@ const Bill: React.FC = () => {
             const unpaidBillsSnapshot = await getDocs(
               query(billsCollectionRef, where("amount", ">", 0))
             );
-            if (unpaidBillsSnapshot.size >= 3) {
+            if (unpaidBillsSnapshot.size >= 2) {
               const noticeData = {
                 accountNumber: reading.accountNumber,
                 name: customer.name,
@@ -1607,6 +1647,21 @@ const Bill: React.FC = () => {
               {billingData.dueDate ? formatToDDMMYYYY(billingData.dueDate) : ""}
             </div>
           </div>
+          {filteredReadings.length > 0 && (
+          <div className="mt-10 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded shadow">
+            <h3 className="text-lg font-semibold text-yellow-800 mb-2">
+              ⚠️ Meter Readings Without Bills
+            </h3>
+            <ul className="list-disc pl-5 text-yellow-700 space-y-1">
+              {filteredReadings.map((reading, idx) => (
+                <li key={idx}>
+                  <strong>{reading.accountNumber}</strong>: No bill found (Due: {reading.dueDate})
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         </TabsContent>
 
         {/* View Bills Tab */}
@@ -1638,7 +1693,7 @@ const Bill: React.FC = () => {
                   size="sm"
                   onClick={handlePrintAllReceipts}
                 >
-                  Print All Receipts
+                  Print All Bills
                 </Button>
               </div>
             </CardHeader>

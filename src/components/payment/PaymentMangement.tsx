@@ -65,6 +65,7 @@ interface PaymentMethod {
 }
 
 interface PaymentVerification {
+  verifiedAt: string | number | Date;
   id: string;
   customerId: string;
   customerName: string;
@@ -173,7 +174,7 @@ const PaymentManagement = () => {
   
 // Add these state variables near your other state declarations:
 const [currentPage, setCurrentPage] = useState(1);
-const itemsPerPage = 10; // Adjust as needed
+// Removed duplicate declaration of itemsPerPage
 
 const filteredBillingCustomers = customers.filter((customer) => {
   const searchLower = billingSearchTerm.toLowerCase();
@@ -190,11 +191,117 @@ const filteredBillingCustomers = customers.filter((customer) => {
 });
 
 // Compute pagination values
-const totalItems = filteredBillingCustomers.length;
-const totalPages = Math.ceil(totalItems / itemsPerPage);
-const indexOfLastItem = currentPage * itemsPerPage;
-const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-const currentCustomers = filteredBillingCustomers.slice(indexOfFirstItem, indexOfLastItem);
+// Removed duplicate declaration of indexOfLastItem
+
+const [paymentHistory, setPaymentHistory] = useState<PaymentVerification[]>([]);
+const [filteredHistory, setFilteredHistory] = useState<PaymentVerification[]>([]);
+const [searchTerm, setSearchTerm] = useState("");
+const [filterSite, setFilterSite] = useState("all");
+const [filterDate, setFilterDate] = useState("");
+const itemsPerPage = 10; // Number of items per page
+
+// Fetch payment history (verified payments)
+useEffect(() => {
+  const fetchPaymentHistory = async () => {
+    try {
+      const { collection, query, where, getDocs, orderBy } = await import("firebase/firestore");
+      const { db } = await import("../../lib/firebase");
+
+      const paymentVerificationsCollection = collection(db, "paymentVerifications");
+
+      // Build the query based on the selected site filter
+      let verifiedPaymentsQuery = query(
+        paymentVerificationsCollection,
+        where("status", "==", "verified"),
+        orderBy("verifiedAt", "desc") // Order by most recent
+      );
+
+      if (filterSite !== "all") {
+        verifiedPaymentsQuery = query(
+          paymentVerificationsCollection,
+          where("status", "==", "verified"),
+          where("site", "==", filterSite), // Filter by site
+          orderBy("verifiedAt", "desc")
+        );
+      }
+
+      const snapshot = await getDocs(verifiedPaymentsQuery);
+      const history = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as PaymentVerification[];
+
+      setPaymentHistory(history);
+      setFilteredHistory(history); // Initialize filtered history
+    } catch (error) {
+      console.error("Error fetching payment history:", error);
+    }
+  };
+
+  fetchPaymentHistory();
+}, [filterSite]); // Re-run when filterSite changes
+
+// Filter and search logic
+useEffect(() => {
+  const filtered = paymentHistory.filter((payment) => {
+    const matchesSearch =
+      payment.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      payment.accountNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      payment.referenceNumber.toLowerCase().includes(searchTerm.toLowerCase());
+
+    const matchesSite = filterSite === "all"; // Simplified
+
+    const matchesDate =
+      !filterDate || new Date(payment.paymentDate).toLocaleDateString() === new Date(filterDate).toLocaleDateString();
+
+    return matchesSearch && matchesSite && matchesDate;
+  });
+
+  setFilteredHistory(filtered);
+  setCurrentPage(1); // Reset to the first page when filters change
+}, [searchTerm, filterSite, filterDate, paymentHistory]);
+
+// Pagination logic
+const indexOfFirstItem = (currentPage * itemsPerPage) - itemsPerPage;
+const currentItems = filteredHistory.slice(indexOfFirstItem, currentPage * itemsPerPage);
+
+const totalPages = Math.ceil(filteredHistory.length / itemsPerPage);
+
+const handleNextPage = () => {
+  if (currentPage < totalPages) setCurrentPage((prev) => prev + 1);
+};
+
+const handlePreviousPage = () => {
+  if (currentPage > 1) setCurrentPage((prev) => prev - 1);
+};
+
+// Fetch payment history (verified payments)
+useEffect(() => {
+  const fetchPaymentHistory = async () => {
+    try {
+      const { collection, query, where, getDocs } = await import("firebase/firestore");
+      const { db } = await import("../../lib/firebase");
+
+      const paymentVerificationsCollection = collection(db, "paymentVerifications");
+      const verifiedPaymentsQuery = query(
+        paymentVerificationsCollection,
+        where("status", "==", "verified")
+      );
+
+      const snapshot = await getDocs(verifiedPaymentsQuery);
+      const history = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as PaymentVerification[];
+
+      setPaymentHistory(history);
+    } catch (error) {
+      console.error("Error fetching payment history:", error);
+    }
+  };
+
+  fetchPaymentHistory();
+}, []);
 
   useEffect(() => {
     const fetchPaymentData = async () => {
@@ -555,8 +662,6 @@ const currentCustomers = filteredBillingCustomers.slice(indexOfFirstItem, indexO
         where,
         query,
         addDoc,
-        orderBy,
-        limit,
       } = await import("firebase/firestore");
       const { db } = await import("../../lib/firebase");
   
@@ -649,6 +754,7 @@ const currentCustomers = filteredBillingCustomers.slice(indexOfFirstItem, indexO
           {
             type: "payment",
             verificationId: selectedVerification.id,
+            accountNumber: accountNumber,
             customerId: customerId,
             status: "rejected",
             paymentAmount: paymentAmount,
@@ -679,6 +785,7 @@ const currentCustomers = filteredBillingCustomers.slice(indexOfFirstItem, indexO
             type: "payment",
             verificationId: selectedVerification.id,
             customerId: customerId,
+            accountNumber: accountNumber,
             status: "rejected",
             paymentAmount: paymentAmount,
             description: "Your payment verification has been rejected.",
@@ -904,6 +1011,7 @@ const currentCustomers = filteredBillingCustomers.slice(indexOfFirstItem, indexO
           type: "payment",
           verificationId: selectedVerification.id,
           customerId: customerId,
+          accountNumber: accountNumber,
           status: "verified", // Updated status for verified payment
           paymentAmount: paymentAmount,
           description: `Your payment verification has been successfully verified. Payment Amount: ₱${paymentAmount.toFixed(2)}.`,
@@ -911,6 +1019,26 @@ const currentCustomers = filteredBillingCustomers.slice(indexOfFirstItem, indexO
         }
       );
   
+      // ✅ Remove disconnection notice if less than 3 unpaid bills remain
+        const unpaidBillsQuery = query(
+          collection(db, "bills", accountNumber, "records"),
+          where("amount", ">", 0)
+        );
+        const unpaidBillsSnapshot = await getDocs(unpaidBillsQuery);
+
+        if (unpaidBillsSnapshot.size < 3) {
+          const noticeQuery = query(
+            collection(db, "notice"),
+            where("accountNumber", "==", accountNumber)
+          );
+          const noticeSnapshot = await getDocs(noticeQuery);
+          for (const docSnap of noticeSnapshot.docs) {
+            await deleteDoc(doc(db, "notice", docSnap.id));
+            console.log(`🗑️ Deleted disconnection notice: ${docSnap.id}`);
+          }
+        }
+
+
       // Reset state and close the dialog.
       setSelectedVerification(null);
       setVerificationStatus("verified");
@@ -925,13 +1053,6 @@ const currentCustomers = filteredBillingCustomers.slice(indexOfFirstItem, indexO
     }
   };
   
-
-
-
-
-
-
-
 
 
 
@@ -1000,507 +1121,6 @@ const formatNotificationTimestamp = () => {
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "PHP" }).format(amount);
   };
 
-  const handleOpenBillDialog = async (customer: Customer) => {
-    setSelectedCustomer(customer);
-    setBillAccountNumber(customer.accountNumber); // Keep this for saving to Firestore
-    setMeterNumber(customer.meterNumber || ""); // Set meter number from customer data
-  
-    const today = new Date();
-    const firstDayOfBilling = new Date(today.getFullYear(), today.getMonth(), 1);
-    const lastDayOfBilling = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-  
-    const dueDate = new Date(lastDayOfBilling);
-    dueDate.setDate(dueDate.getDate() + 19);
-  
-    const formatShortDate = (date: Date) =>
-      date.toLocaleDateString("en-GB").replace(/\//g, "/").slice(0, -2);
-  
-    setBillingPeriod(`${formatShortDate(firstDayOfBilling)} - ${formatShortDate(lastDayOfBilling)}`);
-    setBillDueDate(formatShortDate(dueDate));
-  
-    setCurrentReading("");
-    setWaterUsage("");
-    // setMeterNumber("12345678"); // Remove this line
-  
-    try {
-      const { doc, getDoc, collection, getDocs } = await import("firebase/firestore");
-      const { db } = await import("../../lib/firebase");
-      const customerRef = doc(db, "customers", customer.id);
-      const customerSnap = await getDoc(customerRef);
-  
-      if (customerSnap.exists()) {
-        const customerData = customerSnap.data();
-        const lastReading = customerData.lastReading;
-  
-        // Check if there are any existing bills for the account number
-        const billsCollectionRef = collection(db, "bills", customer.accountNumber, "records");
-        const billsSnapshot = await getDocs(billsCollectionRef);
-  
-        if (billsSnapshot.empty) {
-          // If no bills are found, set the previous reading to 0
-          setPreviousReading("0");
-        } else {
-          // If bills are found, use the last reading from the customer data
-          setPreviousReading(lastReading?.toString() || "0");
-        }
-      } else {
-        // If the customer data is not found, set the previous reading to 0
-        setPreviousReading("0");
-      }
-    } catch (error) {
-      console.error("Error fetching customer data:", error);
-      setPreviousReading("0");
-    }
-  
-    setIsSenior(customer.isSenior || false);
-    setBillDialogOpen(true);
-  };
-
-  // Dynamically recalc when user updates meter readings
-  const updateBillingFields = (prev: string, curr: string) => {
-    const previous = parseInt(prev) || 0;
-    const currentVal = parseInt(curr) || 0;
-    const usage = Math.max(currentVal - previous, 0);
-  
-    // Calculate water charge (pre-tax) using the helper
-    const waterChargeBeforeTax = calculateWaterCharge(usage);
-    const tax = waterChargeBeforeTax * 0.02;
-    const rawTotal = waterChargeBeforeTax + tax;
-    const discount = isSenior ? rawTotal * 0.05 : 0;
-    const discountedTotal = rawTotal - discount;
-    const penalty = discountedTotal * 0.1;
-    const totalDue = discountedTotal + penalty;
-  
-    setPreviousReading(prev);
-    setCurrentReading(curr);
-    setWaterUsage(usage.toString());
-    setWaterCharge(waterChargeBeforeTax.toFixed(2)); // Pre-tax water charge
-    setTaxAmount(tax.toFixed(2)); // Stored but not shown in UI
-    setSeniorDiscount(discount.toFixed(2));
-    setPenaltyAmount(penalty.toFixed(2));
-    setImmediateAmount(discountedTotal.toFixed(2)); // Amount before penalty
-    setAmountAfterDue(totalDue.toFixed(2));
-  };
-
-  // Helper function for water charge calculation
-  const calculateWaterCharge = (consumed: number): number => {
-    let total = 0;
-    if (consumed > 0) {
-      // First 10 m³ at 19.10 per m³
-      const firstBlock = Math.min(consumed, 10);
-      total += firstBlock * 19.10;
-      consumed -= firstBlock;
-
-      // Next 10 m³ (11-20) at 21.10 per m³
-      if (consumed > 0) {
-        const block2 = Math.min(consumed, 10);
-        total += block2 * 21.10;
-        consumed -= block2;
-      }
-      // Next 10 m³ (21-30) at 23.10 per m³
-      if (consumed > 0) {
-        const block3 = Math.min(consumed, 10);
-        total += block3 * 23.10;
-        consumed -= block3;
-      }
-      // Next 10 m³ (31-40) at 25.10 per m³
-      if (consumed > 0) {
-        const block4 = Math.min(consumed, 10);
-        total += block4 * 25.10;
-        consumed -= block4;
-      }
-      // Next 10 m³ (41-50) at 27.10 per m³
-      if (consumed > 0) {
-        const block5 = Math.min(consumed, 10);
-        total += block5 * 27.10;
-        consumed -= block5;
-      }
-      // Above 50 m³ at 29.10 per m³
-      if (consumed > 0) {
-        total += consumed * 29.10;
-      }
-      // Ensure minimum charge of ₱191 if any water is consumed.
-      if (total < 191) total = 191;
-    }
-    return total;
-  };
-
-  const handleCreateBill = async () => {
-    if (!selectedCustomer) return;
-    setIsProcessing(true);
-    
-    try {
-        // Enhanced due date check:
-        if (!billDueDate || isNaN(new Date(billDueDate).getTime())) {
-            alert("⚠️ Please set a valid due date before creating a bill.");
-            setIsProcessing(false);
-            return;
-        }
-        
-        // Import Firestore functions.
-        const { collection, addDoc, doc, updateDoc, getDoc, setDoc, getDocs, Timestamp, query, orderBy, limit } =
-            await import("firebase/firestore");
-        const { db } = await import("../../lib/firebase");
-  
-        // Reference the customer's bills collection.
-        const billsCollectionRef = collection(db, "bills", billAccountNumber, "records");
-  
-        // Get all existing bills (the new bill is not added yet).
-        const billsSnapshot = await getDocs(billsCollectionRef);
-  
-        // Use previous reading from state only if there are existing bills.
-        const previous = billsSnapshot.empty ? 0 : (parseInt(previousReading) || 0);
-        const current = parseInt(currentReading) || 0;
-  
-        // Ensure current reading is greater than previous.
-        if (current <= previous) {
-            alert("⚠️ The current meter reading must be greater than the previous reading.");
-            setIsProcessing(false);
-            return;
-        }
-        const usage = current - previous;
-  
-        // Calculate charges.
-        const waterChargeBeforeTax = calculateWaterCharge(usage);
-        const tax = waterChargeBeforeTax * 0.02;
-        const rawTotal = waterChargeBeforeTax + tax;
-        const discount = isSenior ? rawTotal * 0.05 : 0;
-        const discountedTotal = rawTotal - discount;
-        const penalty = discountedTotal * 0.1;
-        const totalAmountDue = discountedTotal + penalty;
-  
-        // Helper function to format due date as dd/mm/yyyy.
-        const formatToDDMMYYYY = (dateString) => {
-            if (!dateString) return "";
-            const dateObj = new Date(dateString);
-            const day = String(dateObj.getDate()).padStart(2, "0");
-            const month = String(dateObj.getMonth() + 1).padStart(2, "0");
-            const year = dateObj.getFullYear();
-            return `${day}/${month}/${year}`;
-        };
-  
-        // Check if a bill with the same billing period already exists.
-        const duplicateBillingPeriod = billsSnapshot.docs.find((doc) => {
-            const bill = doc.data();
-            return bill.billingPeriod === billingPeriod;
-        });
-        if (duplicateBillingPeriod) {
-            alert("⚠️ A bill for this billing period already exists for this account.");
-            setIsProcessing(false);
-            return;
-        }
-  
-        // Check for bills with amount > 0.
-        const existingBills = billsSnapshot.docs.filter((doc) => {
-            const bill = doc.data();
-            return bill.amount > 0;
-        });
-  
-        // If there are 3 or more unpaid bills, create a notice.
-       // Ensure there are at least 3 unpaid bills
-console.log("🔍 Checking for unpaid bills count:", existingBills.length);
-if (existingBills.length >= 3) {
-    console.log("⚠️ Customer has 3+ unpaid bills. Creating disconnection notice...");
-
-    // Create disconnection notice
-    const noticeData = {
-        accountNumber: billAccountNumber,
-        name: selectedCustomer.name,
-        description: "Your account is at risk of disconnection due to unpaid bills.",
-        timestamp: Timestamp.now(),
-    };
-    const noticeCollectionRef = collection(db, "notice");
-    await addDoc(noticeCollectionRef, noticeData);
-    console.log("✅ Disconnection notice saved!");
-
-    // Create disconnection notification
-    const notificationData = {
-        accountNumber: billAccountNumber,
-        customerId: selectedCustomer.id,
-        description: "Your account is at risk of disconnection due to unpaid bills.",
-        type: "disconnection_warning",
-        createdAt: Timestamp.now(),
-    };
-
-    console.log("🚨 Saving disconnection notification...");
-    const notificationRef = await addDoc(
-        collection(db, "notifications", billAccountNumber, "records"),
-        notificationData
-    );
-    console.log("✅ Disconnection notification saved with ID:", notificationRef.id);
-}
-
-
-        // Calculate arrears.
-        let arrears = 0;
-        billsSnapshot.forEach((billDoc) => {
-            const bill = billDoc.data();
-            arrears += bill.amount || 0;
-        });
-  
-        // Auto-increment billNumber.
-        const billNumber = (billsSnapshot.size + 1).toString().padStart(10, "0");
-        
-        // Fetch any overpayment from the latest bill
-        let overpayment = 0;
-        const latestBillQuery = query(
-            billsCollectionRef,
-            orderBy("dueDate", "desc"),
-            limit(1)
-        );
-        const latestBillSnap = await getDocs(latestBillQuery);
-        
-        if (!latestBillSnap.empty) {
-            const latestBillData = latestBillSnap.docs[0].data();
-            overpayment = parseFloat(latestBillData.overPayment || 0);
-            console.log(`✅ Found overpayment of ${overpayment} from previous bill`);
-            
-            // Reset overpayment in the latest bill since we're applying it to the new bill
-            if (overpayment > 0) {
-                await updateDoc(latestBillSnap.docs[0].ref, { overPayment: 0 });
-                console.log(`✅ Reset overpayment in previous bill`);
-            }
-        }
-        
-        // Apply overpayment to current bill
-        let finalDiscountedTotal = discountedTotal;
-        let finalTotalAmountDue = totalAmountDue;
-        let finalOriginalAmount = discountedTotal; // Initialize with discountedTotal
-        
-        if (overpayment > 0) {
-            if (overpayment >= discountedTotal) {
-                // Overpayment covers the entire bill
-                const remainingOverpayment = overpayment - discountedTotal;
-                finalDiscountedTotal = 0;
-                finalTotalAmountDue = 0;
-                finalOriginalAmount = 0; // Set originalAmount to 0 as well
-                overpayment = remainingOverpayment; // Store remaining overpayment
-            } else {
-                // Partial coverage
-                finalDiscountedTotal = discountedTotal - overpayment;
-                finalTotalAmountDue = totalAmountDue - overpayment;
-                finalOriginalAmount = discountedTotal - overpayment; // Apply to originalAmount too
-                overpayment = 0;
-            }
-        }
-  
-        // Build the bill data object.
-        const billData = {
-            customerId: selectedCustomer.id,
-            date: new Date().toLocaleDateString("en-US"),
-            amount: finalDiscountedTotal,
-            originalAmount: finalOriginalAmount, // Use finalOriginalAmount that considers overpayment
-            status: "pending",
-            dueDate: formatToDDMMYYYY(billDueDate),
-            billingPeriod,
-            description: billDescription,
-            waterUsage: usage,
-            meterReading: { current, previous, consumption: usage },
-            accountNumber: billAccountNumber,
-            meterNumber,
-            waterCharge: rawTotal,
-            waterChargeBeforeTax,
-            tax,
-            seniorDiscount: discount,
-            penalty,
-            amountAfterDue: finalTotalAmountDue,
-            currentAmountDue: finalTotalAmountDue,
-            arrears,
-            billNumber,
-            overPayment: overpayment, // Store any remaining overpayment
-            appliedOverpayment: discountedTotal - finalDiscountedTotal, // Track how much overpayment was applied
-            rawCalculatedAmount: discountedTotal, // Keep record of the original calculated amount before overpayment
-        };
-  
-        // Create the new bill document.
-        const newBillRef = await addDoc(billsCollectionRef, billData);
-        console.log(`✅ Created new bill with ID: ${newBillRef.id}`);
-        
-        if (discountedTotal - finalDiscountedTotal > 0) {
-            console.log(`✅ Applied overpayment of ${discountedTotal - finalDiscountedTotal} to the new bill`);
-        }
-  
-        // Update customer's last reading.
-        const customerRef = doc(db, "customers", selectedCustomer.id);
-        await updateDoc(customerRef, { lastReading: current });
-  
-        // Update updatedPayments.
-        const updatedPaymentsRef = doc(db, "updatedPayments", billAccountNumber);
-        const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
-        const previousAmount = updatedPaymentsSnap.exists() ? updatedPaymentsSnap.data().amount || 0 : 0;
-  
-        await setDoc(
-            updatedPaymentsRef,
-            {
-                accountNumber: billAccountNumber,
-                customerId: selectedCustomer.id,
-                amount: previousAmount + finalDiscountedTotal, // Use the amount after overpayment
-            },
-            { merge: true }
-        );
-  
-        // Create a notification.
-        let notificationDescription = `A new bill for the billing period ${billingPeriod} with due date ${billDueDate} has been created for your account.`;
-        
-        if (discountedTotal - finalDiscountedTotal > 0) {
-            notificationDescription += ` An overpayment of ₱${(discountedTotal - finalDiscountedTotal).toFixed(2)} was applied to this bill.`;
-        }
-        
-        await addDoc(collection(db, "notifications", billAccountNumber, "records"), {
-          type: "bill_created",
-          customerId: selectedCustomer.id,
-          accountNumber: billAccountNumber,
-          description: notificationDescription,
-          createdAt: Timestamp.now(),
-      });
-
-  
-        let successMessage = `✅ Bill created successfully for ${selectedCustomer.name}`;
-        if (discountedTotal - finalDiscountedTotal > 0) {
-            successMessage += ` with ₱${(discountedTotal - finalDiscountedTotal).toFixed(2)} overpayment applied`;
-        }
-        
-        alert(successMessage);
-        setBillDialogOpen(false);
-      } catch (error) {
-        console.error("❌ Error creating bill:", error);
-        alert("Error creating bill. Please try again.");
-    } finally {
-        setIsProcessing(false);
-    }
-};
-
-
-
-
-
-  
-
-
-
-
-
-  
-
-  const handleDueDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newDueDate = e.target.value;
-    setBillDueDate(newDueDate);
-
-    const dueDateObj = new Date(newDueDate + "T00:00:00");
-    const startBillingDate = new Date(dueDateObj.getFullYear(), dueDateObj.getMonth() - 1, 1);
-    const endBillingDate = new Date(dueDateObj.getFullYear(), dueDateObj.getMonth(), 1);
-
-    const formatDateFn = (date: Date) =>
-      `${date.getDate().toString().padStart(2, "0")}/${(date.getMonth() + 1)
-        .toString()
-        .padStart(2, "0")}/${date.getFullYear()}`;
-
-    const formattedBillingPeriod = `${formatDateFn(startBillingDate)} - ${formatDateFn(endBillingDate)}`;
-    setBillingPeriod(formattedBillingPeriod);
-  };
-
-  // Add missing state variables and functions for receipt functionality
-const [isReceiptDialogOpen, setReceiptDialogOpen] = useState(false);
-const [receiptData, setReceiptData] = useState<Bill | null>(null);
-
-const handleOpenReceiptDialog = async (customer: Customer) => {
-  try {
-    const { collection, query, where, getDocs } = await import("firebase/firestore");
-    const { db } = await import("../../lib/firebase");
-
-    const billsCollection = collection(db, "bills", customer.accountNumber, "records");
-    const billsQuery = query(billsCollection, where("status", "==", "pending"));
-    const billsSnapshot = await getDocs(billsQuery);
-
-    if (!billsSnapshot.empty) {
-      const latestBill = billsSnapshot.docs[0].data() as Bill;
-      setReceiptData(latestBill);
-      setReceiptDialogOpen(true);
-    } else {
-      alert("No pending bills found for this customer.");
-    }
-  } catch (error) {
-    console.error("Error fetching receipt data:", error);
-  }
-};
-
-const handlePrintReceipt = async (bill: Bill) => {
-  const { jsPDF } = await import("jspdf");
-  const doc = new jsPDF();
-
-  // Header
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "bold");
-  doc.text("CENTENNIAL WATER RESOURCE VENTURE CORPORATION", 105, 20, { align: "center" });
-
-  // Address
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
-  doc.text("Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna", 105, 30, { align: "center" });
-
-  // Bill details
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.text("BILLING STATEMENT", 105, 45, { align: "center" });
-  doc.setFontSize(10);
-  doc.text(`Bill No.: ${bill.billNumber || "N/A"}`, 20, 55);
-
-  // Customer details in a box
-  doc.rect(20, 60, 170, 35);
-  doc.setFont("helvetica", "normal");
-  doc.text(`Name: ${bill.customerId}`, 25, 70);
-  doc.text(`Account No.: ${bill.accountNumber}`, 25, 78);
-  doc.text(`Address: ${bill.description || "N/A"}`, 25, 86);
-  doc.text(`Due Date: ${bill.dueDate || "N/A"}`, 25, 94);
-
-  // Meter reading details in a box
-  doc.rect(20, 100, 170, 35);
-  doc.setFont("helvetica", "bold");
-  doc.text("Previous Reading", 25, 110);
-  doc.text("Present Reading", 70, 110);
-  doc.text("Consumption", 115, 110);
-  doc.text("Period Covered", 160, 110);
-
-  doc.setFont("helvetica", "normal");
-  doc.text(`${bill.meterReading?.previous || "N/A"}`, 25, 120);
-  doc.text(`${bill.meterReading?.current || "N/A"}`, 70, 120);
-  doc.text(`${bill.meterReading?.consumption || "N/A"}`, 115, 120);
-  doc.text(`${bill.billingPeriod || "N/A"}`, 160, 120);
-
-  // Billing breakdown in a box
-  doc.rect(20, 140, 170, 60);
-  doc.setFont("helvetica", "bold");
-  doc.text("BILLING BREAKDOWN:", 25, 150);
-  
-  doc.setFont("helvetica", "normal");
-  doc.text("Water Charge:", 25, 160);
-  doc.text(`₱${bill.waterChargeBeforeTax?.toFixed(2) || "0.00"}`, 170, 160, { align: "right" });
-  
-  doc.text("Tax:", 25, 170);
-  doc.text(`₱${bill.tax?.toFixed(2) || "0.00"}`, 170, 170, { align: "right" });
-  
-  doc.text("Senior Discount:", 25, 180);
-  doc.text(`₱${bill.seniorDiscount?.toFixed(2) || "0.00"}`, 170, 180, { align: "right" });
-
-  // Total amount
-  doc.setFont("helvetica", "bold");
-  doc.text("TOTAL AMOUNT DUE:", 25, 190);
-  doc.text(`₱${bill.amount.toFixed(2)}`, 170, 190, { align: "right" });
-
-  // Footer notes
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "normal");
-  doc.text([
-    "IMPORTANT REMINDERS:",
-    "1. Please bring your billing statement when paying.",
-    "2. To avoid penalty, please pay on or before the due date.",
-    "3. Service will be disconnected 5 days after due date if unpaid.",
-    "This serves as your official receipt when validated."
-  ], 20, 210);
-
-  // Save the PDF
-  doc.save(`WaterBill_${bill.accountNumber}.pdf`);
-};
 
   return (
     <div className="w-full h-full bg-gray-50 p-6">
@@ -1516,6 +1136,7 @@ const handlePrintReceipt = async (bill: Bill) => {
           <TabsList className="mb-6">
             <TabsTrigger value="payment-methods">Payment Methods</TabsTrigger>
             <TabsTrigger value="payment-verification">Payment Verification</TabsTrigger>
+            <TabsTrigger value="payment-history">Payment History</TabsTrigger> {/* New Tab */}
           </TabsList>
 
           {/* Payment Methods Tab */}
@@ -1765,450 +1386,216 @@ const handlePrintReceipt = async (bill: Bill) => {
             </Card>
 
             <Dialog open={isVerificationDialogOpen} onOpenChange={setIsVerificationDialogOpen}>
-              <DialogContent className="sm:max-w-[600px]">
-                <DialogHeader>
-                  <DialogTitle>Verify Payment</DialogTitle>
-                  <DialogDescription>
-                    Review the payment details and verify or reject the payment.
-                  </DialogDescription>
-                </DialogHeader>
-                {selectedVerification && (
-                  <div className="grid gap-4 py-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-sm text-gray-500">Account Number</Label>
-                        <p className="font-medium">{selectedVerification.accountNumber}</p>
-                      </div>
-                      <div>
-                        <Label className="text-sm text-gray-500">Customer</Label>
-                        <p className="font-medium">{selectedVerification.customerName}</p>
-                      </div>
-                      <div>
-                        <Label className="text-sm text-gray-500">Amount</Label>
-                        <p className="font-medium">{formatCurrency(selectedVerification.amount)}</p>
-                      </div>
-                      <div>
-                        <Label className="text-sm text-gray-500">Reference Number</Label>
-                        <p className="font-medium">{selectedVerification.referenceNumber}</p>
-                      </div>
-                      <div>
-                        <Label className="text-sm text-gray-500">Payment Method</Label>
-                        <p className="font-medium">{selectedVerification.paymentMethod}</p>
-                      </div>
-                      <div>
-                        <Label className="text-sm text-gray-500">Payment Date</Label>
-                        <p className="font-medium">{formatDate(selectedVerification.paymentDate)}</p>
-                      </div>
-                      <div>
-                        <Label className="text-sm text-gray-500">Submitted At</Label>
-                        <p className="font-medium">
-                          {new Date(selectedVerification.submissionDateTime!).toLocaleString()}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-4">
-                      <Label htmlFor="verification-status">Verification Status</Label>
-                      <Select
-                        value={verificationStatus}
-                        onValueChange={(value: "verified" | "rejected") => setVerificationStatus(value)}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="verified">Verified</SelectItem>
-                          <SelectItem value="rejected">Rejected</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="mt-2">
-                      <Label htmlFor="verification-notes">Notes</Label>
-                      <Textarea
-                        id="verification-notes"
-                        placeholder="Add any notes about this verification"
-                        value={verificationNotes}
-                        onChange={(e) => setVerificationNotes(e.target.value)}
-                        rows={3}
-                      />
-                    </div>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle>Verify Payment</DialogTitle>
+              <DialogDescription>
+                Review the payment details and verify or reject the payment.
+              </DialogDescription>
+            </DialogHeader>
+            {selectedVerification && (
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm text-gray-500">Account Number</Label>
+                    <p className="font-medium">{selectedVerification.accountNumber}</p>
                   </div>
-                )}
-                <DialogFooter>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setSelectedVerification(null);
-                      setVerificationStatus("verified");
-                      setVerificationNotes("");
-                      setIsVerificationDialogOpen(false);
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={handleVerifyPayment}
-                    disabled={isProcessing}
-                    className={`
-                      ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}
-                      ${verificationStatus === "verified"
-                        ? "bg-green-600 hover:bg-green-700"
-                        : "bg-red-600 hover:bg-red-700"
-                      }
-                    `}
-                  >
-                    {isProcessing ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Processing...
-                      </>
-                    ) : verificationStatus === "verified" ? (
-                      <>
-                        <Check className="mr-2 h-4 w-4" />
-                        Verify Payment
-                      </>
-                    ) : (
-                      <>
-                        <X className="mr-2 h-4 w-4" />
-                        Reject Payment
-                      </>
-                    )}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </TabsContent>
-
-          
-          {/*Customer Billing Tab*/}
-          <TabsContent value="customer-billing" className="space-y-6">
-          <Card>
-            <CardHeader className="flex flex-col md:flex-row md:items-center md:justify-between">
-              <div>
-                <CardTitle>Customer Billing</CardTitle>
-                <CardDescription>Create and manage bills for customers</CardDescription>
-              </div>
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2 mt-4 md:mt-0">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                  <Input
-                    placeholder="Search customers..."
-                    value={billingSearchTerm}
-                    onChange={(e) => {
-                      setBillingSearchTerm(e.target.value);
-                      setCurrentPage(1); // Reset to first page on search change
-                    }}
-                    className="pl-10 w-64"
+                  <div>
+                    <Label className="text-sm text-gray-500">Customer</Label>
+                    <p className="font-medium">{selectedVerification.customerName}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-500">Amount</Label>
+                    <p className="font-medium">{formatCurrency(selectedVerification.amount)}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-500">Reference Number</Label>
+                    <p className="font-medium">{selectedVerification.referenceNumber}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-500">Payment Method</Label>
+                    <p className="font-medium">{selectedVerification.paymentMethod}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-500">Payment Date</Label>
+                    <p className="font-medium">{formatDate(selectedVerification.paymentDate)}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-500">Submitted At</Label>
+                    <p className="font-medium">
+                      {new Date(selectedVerification.submissionDateTime!).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <Select>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select verification status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="verified">Verified</SelectItem>
+                      <SelectItem value="rejected">Rejected</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="mt-2">
+                  <Label htmlFor="verification-notes">Notes</Label>
+                  <Textarea
+                    id="verification-notes"
+                    placeholder="Add any notes about this verification"
+                    value={verificationNotes}
+                    onChange={(e) => setVerificationNotes(e.target.value)}
+                    rows={3}
                   />
                 </div>
-                <Button variant="outline" size="icon" onClick={() => setBillingShowFilters((prev) => !prev)}>
-                  <Filter className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardHeader>
-            {billingShowFilters && (
-              <div className="px-6 pb-4 flex space-x-2">
-                <Select
-                  value={billingFilterSite}
-                  onValueChange={(value) => {
-                    setBillingFilterSite(value);
-                    setCurrentPage(1); // Reset page on filter change
-                  }}
-                >
-                  <SelectTrigger className="w-[150px]">
-                    <SelectValue placeholder="Filter by Site" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Sites</SelectItem>
-                    <SelectItem value="site1">Site 1</SelectItem>
-                    <SelectItem value="site2">Site 2</SelectItem>
-                    <SelectItem value="site3">Site 3</SelectItem>
-                  </SelectContent>
-                </Select>
-                <label className="flex items-center space-x-2">
-                  <Checkbox
-                    checked={billingFilterSenior}
-                    onCheckedChange={(val) => {
-                      setBillingFilterSenior(val as boolean);
-                      setCurrentPage(1); // Reset page on filter change
-                    }}
-                  />
-                  <span className="text-sm">Senior Only</span>
-                </label>
               </div>
             )}
-            <CardContent>
-              {(() => {
-                // Compute filtered customers (logic based on CustomerList)
-                const searchLower = billingSearchTerm.toLowerCase();
-                const filteredCustomers = customers.filter((customer) => {
-                  const matchesSearch =
-                    customer.name.toLowerCase().includes(searchLower) ||
-                    (customer.email && customer.email.toLowerCase().includes(searchLower)) ||
-                    customer.accountNumber.toLowerCase().includes(searchLower) ||
-                    (customer.phone && customer.phone.toLowerCase().includes(searchLower));
-                  const matchesSite = billingFilterSite === "all" || customer.site === billingFilterSite;
-                  const matchesSenior = !billingFilterSenior || customer.isSenior === true;
-                  return matchesSearch && matchesSite && matchesSenior;
-                }).sort((a, b) => a.name.localeCompare(b.name)); // Sort customers alphabetically by name
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSelectedVerification(null);
+                  setVerificationStatus("verified");
+                  setVerificationNotes("");
+                  setIsVerificationDialogOpen(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleVerifyPayment}
+                disabled={isProcessing}
+                className={`
+                  ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}
+                  ${verificationStatus === "verified"
+                    ? "bg-green-600 hover:bg-green-700"
+                    : "bg-red-600 hover:bg-red-700"
+                  }
+                `}
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Processing...
+                  </>
+                ) : verificationStatus === "verified" ? (
+                  <>
+                    <Check className="mr-2 h-4 w-4" />
+                    Verify Payment
+                  </>
+                ) : (
+                  <>
+                    <X className="mr-2 h-4 w-4" />
+                    Reject Payment
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+          </TabsContent>
 
-                const itemsPerPage = 10;
-                const indexOfLastCustomer = currentPage * itemsPerPage;
-                const indexOfFirstCustomer = indexOfLastCustomer - itemsPerPage;
-                const currentCustomers = filteredCustomers.slice(indexOfFirstCustomer, indexOfLastCustomer);
-                const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
+          {/* Payment History Tab */}
+          <TabsContent value="payment-history" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Payment History</CardTitle>
+                <CardDescription>View the payment history of customers</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4 space-y-4 md:space-y-0">
+                  {/* Search */}
+                  <Input
+                    placeholder="Search by customer name, account #, or reference #"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full md:w-1/3"
+                  />
 
-                return (
+                  {/* Filter by Site */}
+                  <div className="w-full md:w-1/4">
+                    <Select value={filterSite} onValueChange={setFilterSite}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Filter by Site" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Sites</SelectItem>
+                        <SelectItem value="Site 1">Site 1</SelectItem>
+                        <SelectItem value="Site 2">Site 2</SelectItem>
+                        <SelectItem value="Site 3">Site 3</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  
+                </div>
+
+                {filteredHistory.length > 0 ? (
                   <>
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>Account #</TableHead>
-                          <TableHead>Customer Name</TableHead>
-                          <TableHead>Email / Phone</TableHead>
-                          <TableHead>Current Amount Due</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
+                          <TableHead>Customer</TableHead>
+                          <TableHead>Amount</TableHead>
+                          <TableHead>Reference #</TableHead>
+                          <TableHead>Payment Date</TableHead>
+                          <TableHead>Method</TableHead>
+                          <TableHead>Verified At</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {currentCustomers.length > 0 ? (
-                          currentCustomers.map((customer) => (
-                            <TableRow key={customer.id}>
-                              <TableCell className="font-medium">{customer.accountNumber}</TableCell>
-                              <TableCell>{customer.name}</TableCell>
-                              <TableCell>
-                                {customer.email ? customer.email : customer.phone}
-                              </TableCell>
-                              <TableCell>{formatCurrency(customer.amountDue)}</TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex space-x-2">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleOpenBillDialog(customer)}
-                                  >
-                                    <FileText className="h-4 w-4 mr-2" />
-                                    Create Bill
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleOpenReceiptDialog(customer)}
-                                  >
-                                    <FileText className="h-4 w-4 mr-2" />
-                                    Create Receipt
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        ) : (
-                          <TableRow>
-                            <TableCell colSpan={5} className="text-center py-8">
-                              No customers found.
+                        {currentItems.map((payment) => (
+                          <TableRow key={payment.id}>
+                            <TableCell>{payment.accountNumber}</TableCell>
+                            <TableCell>{payment.customerName}</TableCell>
+                            <TableCell>{formatCurrency(Number(payment.amount))}</TableCell>
+                            <TableCell>{payment.referenceNumber}</TableCell>
+                            <TableCell>{formatDate(payment.paymentDate)}</TableCell>
+                            <TableCell>{payment.paymentMethod}</TableCell>
+                            <TableCell>
+                              {new Date(payment.verifiedAt).toLocaleString("en-US", {
+                                year: "numeric",
+                                month: "long",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                second: "2-digit",
+                                hour12: true,
+                              })}
                             </TableCell>
                           </TableRow>
-                        )}
+                        ))}
                       </TableBody>
                     </Table>
 
-                    {/* Pagination Controls */}
-                    {filteredCustomers.length > itemsPerPage && (
-                      <div className="flex items-center justify-between mt-4">
-                        <div className="text-sm text-gray-500">
-                          Showing {indexOfFirstCustomer + 1} to{" "}
-                          {Math.min(indexOfLastCustomer, filteredCustomers.length)} of{" "}
-                          {filteredCustomers.length} customers
-                        </div>
-                        <div className="flex space-x-1">
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            disabled={currentPage === 1}
-                            onClick={() => setCurrentPage(currentPage - 1)}
-                          >
-                            <ChevronLeft className="h-4 w-4" />
-                          </Button>
-                          <span className="text-sm">
-                            {currentPage} / {totalPages}
-                          </span>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            disabled={currentPage === totalPages}
-                            onClick={() => setCurrentPage(currentPage + 1)}
-                          >
-                            <ChevronRight className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    )}
+                    {/* Pagination */}
+                    <div className="flex justify-between items-center mt-4">
+                      <Button
+                        variant="outline"
+                        onClick={handlePreviousPage}
+                        disabled={currentPage === 1}
+                      >
+                        Previous
+                      </Button>
+                      <p>
+                        Page {currentPage} of {totalPages}
+                      </p>
+                      <Button
+                        variant="outline"
+                        onClick={handleNextPage}
+                        disabled={currentPage === totalPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
                   </>
-                );
-              })()}
-            </CardContent>
-          </Card>
-
-          {/* Create Bill Dialog */}
-          <Dialog open={isBillDialogOpen} onOpenChange={setBillDialogOpen}>
-            <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle className="text-xl font-bold">Create New Bill</DialogTitle>
-                <DialogDescription>
-                  Create a new bill for {selectedCustomer?.name} based on the billing statement.
-                </DialogDescription>
-              </DialogHeader>
-              {selectedCustomer && (
-                <div className="space-y-4">
-                  {/* Customer Details */}
-                  <div className="bg-gray-50 p-3 rounded-lg">
-                    <h3 className="font-medium text-gray-700 mb-1">Customer Details</h3>
-                    <div className="flex items-center gap-3">
-                      <div className="grow">
-                        <p className="font-medium">{selectedCustomer.name}</p>
-                        <p className="text-sm text-gray-500">
-                          Account #: {selectedCustomer.accountNumber} {/* Keep this for saving */}
-                        </p>
-                      </div>
-                      {/* Removed Account Number Input Field */}
-                    </div>
-                  </div>
-                  {/* Billing Period */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label htmlFor="billing-period">Billing Period</Label>
-                      <Input
-                        id="billing-period"
-                        type="text"
-                        value={billingPeriod}
-                        onChange={(e) => setBillingPeriod(e.target.value)}
-                        placeholder="e.g., 01/03/25 - 02/01/25"
-                        disabled // Disable this field
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="due-date">Due Date</Label>
-                      <Input id="due-date" type="date" value={billDueDate} onChange={handleDueDateChange} />
-                    </div>
-                  </div>
-                  {/* Meter Reading */}
-                  <div className="bg-blue-50 p-3 rounded-lg">
-                    <h3 className="font-medium text-blue-700 mb-1">Meter Reading</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div className="space-y-1">
-                        <Label htmlFor="meter-number">Meter #</Label>
-                        <Input
-                          id="meter-number"
-                          type="text"
-                          value={meterNumber} // Ensure this is set correctly
-                          disabled // Keep this field read-only
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="previous-reading">Previous Reading (m³)</Label>
-                        <Input
-                          id="previous-reading"
-                          type="number"
-                          value={previousReading}
-                          onChange={(e) => updateBillingFields(e.target.value, currentReading)}
-                          disabled // Disable this field
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="current-reading">Current Reading (m³)</Label>
-                        <Input
-                          id="current-reading"
-                          type="number"
-                          value={currentReading}
-                          onChange={(e) => updateBillingFields(previousReading, e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  {/* Usage and Charges */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label htmlFor="water-usage">Water Usage (m³)</Label>
-                      <Input id="water-usage" type="number" value={waterUsage} disabled />
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="water-charge">Water Charge (₱)</Label>
-                      <Input id="water-charge" type="number" value={waterCharge} disabled />
-                    </div>
-                  </div>
-                  {/* Additional Charges */}
-                  <div className="bg-gray-50 p-3 rounded-lg">
-                    <h3 className="font-medium text-gray-700 mb-1">Additional Charges</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div className="space-y-1">
-                        <Label htmlFor="tax-amount">Tax (₱)</Label>
-                        <Input id="tax-amount" type="number" value={taxAmount} disabled />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="senior-discount">Senior Discount (₱)</Label>
-                        <Input id="senior-discount" type="number" value={seniorDiscount} disabled />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="penalty-amount">Penalty (₱)</Label>
-                        <Input id="penalty-amount" type="number" value={penaltyAmount} disabled />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="amount-now">Amount (₱)</Label>
-                        <Input id="amount-now" type="number" value={immediateAmount} disabled />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="amount-after-due">Amount After Due (₱)</Label>
-                        <Input id="amount-after-due" type="number" value={amountAfterDue} disabled />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              <DialogFooter className="mt-4 pt-3 border-t border-gray-200 sticky bottom-0 bg-white">
-                <Button variant="outline" onClick={() => setBillDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleCreateBill} disabled={isProcessing}>
-                  {isProcessing ? "Processing..." : "Create Bill"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-          {/* Create Receipt Dialog */}
-          <Dialog open={isReceiptDialogOpen} onOpenChange={setReceiptDialogOpen}>
-            <DialogContent className="sm:max-w-[600px]">
-              <DialogHeader>
-                <DialogTitle>Receipt</DialogTitle>
-                <DialogDescription>
-                  This is the receipt for the latest bill of the customer.
-                </DialogDescription>
-              </DialogHeader>
-              {receiptData && (
-                <div className="space-y-4">
-                  <div className="bg-gray-50 p-3 rounded-lg">
-                    <h3 className="font-medium text-gray-700 mb-1">Customer Details</h3>
-                    <p className="font-medium">{receiptData.customerId}</p>
-                    <p className="text-sm text-gray-500">
-                      Account #: {receiptData.accountNumber}
-                    </p>
-                  </div>
-                  <div className="bg-gray-50 p-3 rounded-lg">
-                    <h3 className="font-medium text-gray-700 mb-1">Billing Details</h3>
-                    <p>Billing Period: {receiptData.billingPeriod}</p>
-                    <p>Due Date: {receiptData.dueDate}</p>
-                    <p>Amount Due: ₱{receiptData.amount.toFixed(2)}</p>
-                  </div>
-                  <Button
-                    onClick={() => handlePrintReceipt(receiptData)}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    Print Receipt
-                  </Button>
-                </div>
-              )}
-            </DialogContent>
-          </Dialog>
-        </TabsContent>
-
+                ) : (
+                  <p className="text-center py-8">No payment history found.</p>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
       </div>
     </div>

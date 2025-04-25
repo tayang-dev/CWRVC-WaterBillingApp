@@ -23,6 +23,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 interface Feedback {
   id: string;
@@ -41,6 +50,8 @@ const Feedbacks = () => {
     paymentProcess: 0,
     otherCategories: 0,
   });
+  const [selectedFeedback, setSelectedFeedback] = useState<Feedback | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     const fetchFeedback = async () => {
@@ -85,6 +96,11 @@ const Feedbacks = () => {
       month: "short",
       day: "numeric",
     });
+  };
+
+  const handleViewFeedback = (feedback: Feedback) => {
+    setSelectedFeedback(feedback);
+    setIsModalOpen(true);
   };
 
   return (
@@ -206,6 +222,7 @@ const Feedbacks = () => {
                           <TableHead>Rating</TableHead>
                           <TableHead>Date</TableHead>
                           <TableHead>User ID</TableHead>
+                          <TableHead>Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -214,14 +231,26 @@ const Feedbacks = () => {
                             <TableCell>
                               {feedback.categories.join(", ")}
                             </TableCell>
-                            <TableCell>{feedback.feedback}</TableCell>
+                            <TableCell className="max-w-xs truncate">
+                              {feedback.feedback}
+                            </TableCell>
                             <TableCell>
                               <Badge className="bg-yellow-500">
                                 {feedback.rating}
                               </Badge>
                             </TableCell>
                             <TableCell>{formatDate(feedback.timestamp)}</TableCell>
-                            <TableCell>{feedback.userId}</TableCell>
+                            <TableCell className="max-w-xs truncate">{feedback.userId}</TableCell>
+                            <TableCell>
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleViewFeedback(feedback)}
+                                className="text-blue-600 hover:text-blue-800"
+                              >
+                                View
+                              </Button>
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -232,6 +261,59 @@ const Feedbacks = () => {
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* Feedback Detail Modal */}
+        <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+          <DialogContent className="sm:max-w-lg">
+            {selectedFeedback && (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="text-xl font-semibold">Feedback Details</DialogTitle>
+                  <DialogDescription>
+                    View complete feedback information
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <h3 className="font-medium text-gray-700">Categories</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedFeedback.categories.map((category, index) => (
+                        <Badge key={index} className="bg-blue-100 text-blue-800">
+                          {category}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="font-medium text-gray-700">Rating</h3>
+                    <Badge className="bg-yellow-500">
+                      {selectedFeedback.rating} / 5
+                    </Badge>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="font-medium text-gray-700">Date</h3>
+                    <p>{formatDate(selectedFeedback.timestamp)}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="font-medium text-gray-700">User ID</h3>
+                    <p className="text-sm font-mono bg-gray-100 p-2 rounded">
+                      {selectedFeedback.userId}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="font-medium text-gray-700">Feedback</h3>
+                    <div className="bg-gray-50 p-4 rounded-md border text-gray-800">
+                      {selectedFeedback.feedback}
+                    </div>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button onClick={() => setIsModalOpen(false)}>Close</Button>
+                </DialogFooter>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

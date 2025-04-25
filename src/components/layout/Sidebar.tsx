@@ -143,7 +143,13 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
               <h1 className="text-xl font-bold text-blue-800">
                 CWRVC - Water Billing App
               </h1>
-              <p className="text-xs text-gray-500">Admin Portal</p>
+              <p className="text-xs text-gray-500">
+                {userRole === "admin"
+                  ? "Admin Portal"
+                  : userRole === "meter_reader"
+                  ? "Meter Reader Portal"
+                  : "Cashier Portal"}
+              </p>
             </div>
           )}
         </div>

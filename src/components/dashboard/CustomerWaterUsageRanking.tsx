@@ -10,13 +10,12 @@ import {
   CardTitle,
 } from "../ui/card";
 
-// Define the interface for Customer data
 interface Customer {
   id: string;
   accountNumber: string;
   name: string;
   site: string;
-  totalWaterUsage?: number; // Optional property for total water usage
+  totalWaterUsage?: number;
 }
 
 const CustomerWaterUsageRanking = () => {
@@ -24,25 +23,6 @@ const CustomerWaterUsageRanking = () => {
   const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
   const [siteFilter, setSiteFilter] = useState("All");
   const [sortOrder, setSortOrder] = useState("highest");
-
-  useEffect(() => {
-    const fetchCustomers = async () => {
-      try {
-        const customersSnapshot = await getDocs(collection(db, "customers"));
-        const customerData = await Promise.all(customersSnapshot.docs.map(async (doc) => {
-          const customer = { id: doc.id, ...doc.data() } as Customer; // Cast to Customer type
-          const totalWaterUsage = await fetchTotalWaterUsage(customer.accountNumber);
-          return { ...customer, totalWaterUsage };
-        }));
-        setCustomers(customerData);
-        setFilteredCustomers(customerData);
-      } catch (error) {
-        console.error("❌ Error fetching customer data:", error);
-      }
-    };
-
-    fetchCustomers();
-  }, []);
 
   const fetchTotalWaterUsage = async (accountNumber: string) => {
     let totalUsage = 0;
@@ -61,24 +41,35 @@ const CustomerWaterUsageRanking = () => {
   };
 
   useEffect(() => {
-    let filtered = customers;
+    const fetchCustomers = async () => {
+      try {
+        const customersSnapshot = await getDocs(collection(db, "customers"));
+        const customerData = await Promise.all(customersSnapshot.docs.map(async (doc) => {
+          const customer = { id: doc.id, ...doc.data() } as Customer;
+          const totalWaterUsage = await fetchTotalWaterUsage(customer.accountNumber);
+          return { ...customer, totalWaterUsage };
+        }));
+        setCustomers(customerData); // Will trigger filtering below
+      } catch (error) {
+        console.error("❌ Error fetching customer data:", error);
+      }
+    };
 
-    // Filter by site
+    fetchCustomers();
+  }, []);
+
+  useEffect(() => {
+    let filtered = [...customers];
+
     if (siteFilter !== "All") {
       filtered = filtered.filter(customer => customer.site === siteFilter);
     }
 
-    // Sort by total water usage
     filtered.sort((a, b) => {
-      if (sortOrder === "highest") {
-        return (b.totalWaterUsage || 0) - (a.totalWaterUsage || 0); // Sort descending
-      } else {
-        return (a.totalWaterUsage || 0) - (b.totalWaterUsage || 0); // Sort ascending
-      }
+      const usageA = a.totalWaterUsage || 0;
+      const usageB = b.totalWaterUsage || 0;
+      return sortOrder === "highest" ? usageB - usageA : usageA - usageB;
     });
-
-    // Reverse the list to put the highest or lowest at the top
-    filtered = filtered.reverse();
 
     setFilteredCustomers(filtered);
   }, [customers, siteFilter, sortOrder]);
