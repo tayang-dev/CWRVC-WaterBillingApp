@@ -14,6 +14,7 @@ import {
   Menu,
   ArrowLeft,
   MessageCircle,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -193,11 +194,56 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
               ]}
               collapsed={collapsed}
             />
+            
+            {/* Payment Management and Bills next to each other */}
+            <SidebarItem
+              icon={<CreditCard className="h-5 w-5" />}
+              label="Payment Management"
+              path="/payments"
+              isActive={location.pathname.startsWith("/payments")}
+              collapsed={collapsed}
+            />
+            <SidebarItem
+              icon={<FileText className="h-5 w-5" />}
+              label="Bills"
+              path="/bills"
+              isActive={location.pathname.startsWith("/bills")}
+              collapsed={collapsed}
+            />
+            
+            <SidebarItem
+              icon={<MessageSquare className="h-5 w-5" />}
+              label="Customer Service"
+              path="/customer-support"
+              isActive={location.pathname.startsWith("/customer-support")}
+              collapsed={collapsed}
+            />
+            <SidebarItem
+              icon={<ClipboardList className="h-5 w-5" />}
+              label="Service Requests"
+              path="/requests"
+              isActive={location.pathname.startsWith("/requests")}
+              collapsed={collapsed}
+            />
+            <SidebarItem
+              icon={<BarChart className="h-5 w-5" />}
+              label="Reports"
+              path="/reports"
+              isActive={location.pathname.startsWith("/reports")}
+              collapsed={collapsed}
+            />
             <SidebarItem
               icon={<MessageCircle className="h-5 w-5" />}
               label="Feedback"
               path="/feedback"
               isActive={location.pathname.startsWith("/feedback")}
+              collapsed={collapsed}
+            />
+            <SidebarItem
+              icon={<Settings className="h-5 w-5" />}
+              label="Settings"
+              path="/settings"
+              isActive={location.pathname === "/settings"}
               collapsed={collapsed}
             />
           </>
@@ -215,8 +261,9 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
           </>
         )}
 
-        {userRole !== "meter_reader" && (
+        {userRole === "staff" && (
           <>
+            {/* Payment Management and Bills next to each other for cashier */}
             <SidebarItem
               icon={<CreditCard className="h-5 w-5" />}
               label="Payment Management"
@@ -224,6 +271,14 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
               isActive={location.pathname.startsWith("/payments")}
               collapsed={collapsed}
             />
+            <SidebarItem
+              icon={<FileText className="h-5 w-5" />}
+              label="Bills"
+              path="/bills"
+              isActive={location.pathname.startsWith("/bills")}
+              collapsed={collapsed}
+            />
+            
             <SidebarItem
               icon={<MessageSquare className="h-5 w-5" />}
               label="Customer Service"
@@ -250,13 +305,6 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
               label="Settings"
               path="/settings"
               isActive={location.pathname === "/settings"}
-              collapsed={collapsed}
-            />
-            <SidebarItem
-              icon={<CreditCard className="h-5 w-5" />}
-              label="Bills"
-              path="/bills"
-              isActive={location.pathname.startsWith("/bills")}
               collapsed={collapsed}
             />
           </>
