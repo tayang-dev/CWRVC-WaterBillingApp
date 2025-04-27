@@ -88,6 +88,8 @@ interface MeterReading {
 const Bill: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [meterReadings, setMeterReadings] = useState<MeterReading[]>([]);
+  const [allMeterReadings, setAllMeterReadings] = useState<MeterReading[]>([]);
+
   const [filteredReadings, setFilteredReadings] = useState<MeterReading[]>([]);
   const [selectedSite, setSelectedSite] = useState<string>("All");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -140,6 +142,10 @@ const Bill: React.FC = () => {
     fetchCustomers();
   }, []);
 
+  useEffect(() => {
+    fetchAllMeterReadingsWithoutBills();
+  }, []);
+  
   useEffect(() => {
     const unsub = onSnapshot(
       collectionGroup(db, "records"),
@@ -241,7 +247,48 @@ const fetchMeterReadingsByDueDate = async (formattedDueDate: string) => {
   }
 };
   
-  
+const fetchAllMeterReadingsWithoutBills = async () => {
+  try {
+    const readingsSnapshot = await getDocs(collectionGroup(db, "records"));
+
+    const allReadings = readingsSnapshot.docs
+      .map((doc) => {
+        const data = doc.data() as MeterReading;
+        const pathSegments = doc.ref.path.split("/");
+        const accountNumber = data.accountNumber || pathSegments[1];
+
+        return {
+          id: doc.id,
+          ...data,
+          accountNumber,
+        };
+      })
+      .filter((reading) =>
+        reading.currentReading !== undefined &&
+        reading.previousReading !== undefined &&
+        reading.accountNumber &&
+        reading.dueDate // Must have due date
+      );
+
+    setAllMeterReadings(allReadings);
+  } catch (error) {
+    console.error("Error fetching all meter readings:", error);
+  }
+};
+
+const calculateBillingPeriodFromDueDate = (dueDateStr: string): string => {
+  if (!dueDateStr) return "";
+  const [day, month, year] = dueDateStr.split("/").map(Number);
+  const dueDate = new Date(year, month - 1, day);
+  const from = new Date(dueDate.getFullYear(), dueDate.getMonth() - 1, 1);
+  const to = new Date(dueDate.getFullYear(), dueDate.getMonth(), 1);
+
+  const format = (date: Date) =>
+    `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
+
+  return `${format(from)} - ${format(to)}`;
+};
+
 
   const showNotification = (message: string, type: "success" | "error" | "info") => {
     setNotification({ message, type });
@@ -1647,20 +1694,37 @@ const fetchMeterReadingsByDueDate = async (formattedDueDate: string) => {
               {billingData.dueDate ? formatToDDMMYYYY(billingData.dueDate) : ""}
             </div>
           </div>
-          {filteredReadings.length > 0 && (
-          <div className="mt-10 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded shadow">
-            <h3 className="text-lg font-semibold text-yellow-800 mb-2">
-              ⚠️ Meter Readings Without Bills
-            </h3>
-            <ul className="list-disc pl-5 text-yellow-700 space-y-1">
-              {filteredReadings.map((reading, idx) => (
-                <li key={idx}>
-                  <strong>{reading.accountNumber}</strong>: No bill found (Due: {reading.dueDate})
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+          {allMeterReadings.length > 0 && (
+            <div className="mt-10 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded shadow">
+              <h3 className="text-lg font-semibold text-yellow-800 mb-2">
+                ⚠️ All Meter Readings Without Bills
+              </h3>
+              <ul className="list-disc pl-5 text-yellow-700 space-y-1">
+                {(() => {
+                  const billedAccounts = new Set(bills.map(b => b.accountNumber + "_" + b.billingPeriod)); // 🔥 Match by account + period
+
+                  return allMeterReadings
+                    .filter(reading => {
+                      const billingPeriod = calculateBillingPeriodFromDueDate(reading.dueDate);
+                      return !billedAccounts.has(reading.accountNumber + "_" + billingPeriod);
+                    })
+                    .sort((a, b) => {
+                      const [dayA, monthA, yearA] = a.dueDate.split("/").map(Number);
+                      const [dayB, monthB, yearB] = b.dueDate.split("/").map(Number);
+                      const dateA = new Date(yearA, monthA - 1, dayA);
+                      const dateB = new Date(yearB, monthB - 1, dayB);
+                      return dateA.getTime() - dateB.getTime();
+                    })
+                    .map((reading, idx) => (
+                      <li key={idx}>
+                        <strong>{reading.accountNumber}</strong>: No bill found (Due: {reading.dueDate})
+                      </li>
+                    ));
+                })()}
+              </ul>
+            </div>
+          )}
+
 
         </TabsContent>
 

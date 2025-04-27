@@ -65,6 +65,7 @@ interface PaymentMethod {
 }
 
 interface PaymentVerification {
+  site: string;
   verifiedAt: string | number | Date;
   id: string;
   customerId: string;
@@ -200,7 +201,6 @@ const [filterSite, setFilterSite] = useState("all");
 const [filterDate, setFilterDate] = useState("");
 const itemsPerPage = 10; // Number of items per page
 
-// Fetch payment history (verified payments)
 useEffect(() => {
   const fetchPaymentHistory = async () => {
     try {
@@ -208,48 +208,56 @@ useEffect(() => {
       const { db } = await import("../../lib/firebase");
 
       const paymentVerificationsCollection = collection(db, "paymentVerifications");
+      const customersCollection = collection(db, "customers");
 
-      // Build the query based on the selected site filter
-      let verifiedPaymentsQuery = query(
+      const verifiedPaymentsQuery = query(
         paymentVerificationsCollection,
         where("status", "==", "verified"),
-        orderBy("verifiedAt", "desc") // Order by most recent
+        orderBy("verifiedAt", "desc")
       );
 
-      if (filterSite !== "all") {
-        verifiedPaymentsQuery = query(
-          paymentVerificationsCollection,
-          where("status", "==", "verified"),
-          where("site", "==", filterSite), // Filter by site
-          orderBy("verifiedAt", "desc")
-        );
-      }
-
       const snapshot = await getDocs(verifiedPaymentsQuery);
-      const history = snapshot.docs.map((doc) => ({
+      const payments = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       })) as PaymentVerification[];
 
-      setPaymentHistory(history);
-      setFilteredHistory(history); // Initialize filtered history
+      // Fetch all customers once
+      const customerSnapshot = await getDocs(customersCollection);
+      const customerMap = new Map<string, Customer>();
+      customerSnapshot.docs.forEach((doc) => {
+        const data = doc.data() as Customer;
+        customerMap.set(data.accountNumber, { ...data, id: doc.id });
+      });
+
+      // Attach the 'site' info from customer data
+      const paymentsWithSite = payments.map((payment) => {
+        const customer = customerMap.get(payment.accountNumber || "");
+        return {
+          ...payment,
+          site: customer?.site || "unknown",
+        };
+      });
+
+      setPaymentHistory(paymentsWithSite);
+      setFilteredHistory(paymentsWithSite);
     } catch (error) {
       console.error("Error fetching payment history:", error);
     }
   };
 
   fetchPaymentHistory();
-}, [filterSite]); // Re-run when filterSite changes
+}, []);
 
-// Filter and search logic
+
 useEffect(() => {
   const filtered = paymentHistory.filter((payment) => {
     const matchesSearch =
-      payment.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      payment.accountNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      payment.referenceNumber.toLowerCase().includes(searchTerm.toLowerCase());
+      payment.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      payment.accountNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      payment.referenceNumber?.toLowerCase().includes(searchTerm.toLowerCase());
 
-    const matchesSite = filterSite === "all"; // Simplified
+    const matchesSite = filterSite === "all" || (payment.site || "").toLowerCase() === filterSite.toLowerCase();
 
     const matchesDate =
       !filterDate || new Date(payment.paymentDate).toLocaleDateString() === new Date(filterDate).toLocaleDateString();
@@ -258,8 +266,9 @@ useEffect(() => {
   });
 
   setFilteredHistory(filtered);
-  setCurrentPage(1); // Reset to the first page when filters change
+  setCurrentPage(1);
 }, [searchTerm, filterSite, filterDate, paymentHistory]);
+
 
 // Pagination logic
 const indexOfFirstItem = (currentPage * itemsPerPage) - itemsPerPage;
@@ -275,26 +284,46 @@ const handlePreviousPage = () => {
   if (currentPage > 1) setCurrentPage((prev) => prev - 1);
 };
 
-// Fetch payment history (verified payments)
 useEffect(() => {
   const fetchPaymentHistory = async () => {
     try {
-      const { collection, query, where, getDocs } = await import("firebase/firestore");
+      const { collection, query, where, getDocs, orderBy } = await import("firebase/firestore");
       const { db } = await import("../../lib/firebase");
 
       const paymentVerificationsCollection = collection(db, "paymentVerifications");
+      const customersCollection = collection(db, "customers");
+
       const verifiedPaymentsQuery = query(
         paymentVerificationsCollection,
-        where("status", "==", "verified")
+        where("status", "==", "verified"),
+        orderBy("verifiedAt", "desc")
       );
 
       const snapshot = await getDocs(verifiedPaymentsQuery);
-      const history = snapshot.docs.map((doc) => ({
+      const payments = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       })) as PaymentVerification[];
 
-      setPaymentHistory(history);
+      // Fetch all customers once
+      const customerSnapshot = await getDocs(customersCollection);
+      const customerMap = new Map<string, Customer>();
+      customerSnapshot.docs.forEach((doc) => {
+        const data = doc.data() as Customer;
+        customerMap.set(data.accountNumber, { ...data, id: doc.id });
+      });
+
+      // Attach the 'site' info from customer data
+      const paymentsWithSite = payments.map((payment) => {
+        const customer = customerMap.get(payment.accountNumber || "");
+        return {
+          ...payment,
+          site: customer?.site || "unknown",
+        };
+      });
+
+      setPaymentHistory(paymentsWithSite);
+      setFilteredHistory(paymentsWithSite);
     } catch (error) {
       console.error("Error fetching payment history:", error);
     }
@@ -302,6 +331,7 @@ useEffect(() => {
 
   fetchPaymentHistory();
 }, []);
+
 
   useEffect(() => {
     const fetchPaymentData = async () => {
@@ -1520,9 +1550,9 @@ const formatNotificationTimestamp = () => {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Sites</SelectItem>
-                        <SelectItem value="Site 1">Site 1</SelectItem>
-                        <SelectItem value="Site 2">Site 2</SelectItem>
-                        <SelectItem value="Site 3">Site 3</SelectItem>
+                        <SelectItem value="site1">Site 1</SelectItem>
+                        <SelectItem value="site2">Site 2</SelectItem>
+                        <SelectItem value="site3">Site 3</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
