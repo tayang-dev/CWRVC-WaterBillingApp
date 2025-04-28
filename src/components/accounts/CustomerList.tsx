@@ -152,10 +152,12 @@ interface Customer {
 interface CustomerListProps {
   customers: Customer[];
   onViewCustomer?: (customerId: string) => void;
+  onFilteredDataChange?: (filteredData: Customer[]) => void;
 }
 
 const CustomerList: React.FC<CustomerListProps> = ({
   onViewCustomer = (id) => console.log(`View customer ${id}`),
+  onFilteredDataChange = () => {}, // Default empty function
 }) => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -591,7 +593,14 @@ const handleDeleteCustomer = async () => {
 
     return matchesSearchTerm && matchesSite && matchesSenior;
   });
-
+  // Update the filteredCustomers calculation to notify parent component
+  // This can be added at the end of your existing filteredCustomers calculation
+  useEffect(() => {
+    // Send the filtered customers to parent component for export
+    if (onFilteredDataChange) {
+      onFilteredDataChange(filteredCustomers);
+    }
+  }, [filteredCustomers, onFilteredDataChange]);
   // Get current page customers
   const indexOfLastCustomer = currentPage * itemsPerPage;
   const indexOfFirstCustomer = indexOfLastCustomer - itemsPerPage;

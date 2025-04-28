@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, addDoc } from "firebase/firestore";
+import { collection, addDoc, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 
 import {
@@ -47,14 +47,14 @@ const formSchema = z.object({
     .refine((val) => val.trim().length > 0, { message: "Last name cannot be empty or spaces only." }),
 
   middleInitial: z.string()
-    .max(2, { message: "Middle initial can be up to 2 characters." }) // Up to 2 characters
-    .regex(/^[A-Z]{1,2}$/, "Middle initial must be 1 or 2 uppercase letters.") // Enforce uppercase
+    .max(2, { message: "Middle initial can be up to 2 characters." })
+    .regex(/^[A-Z]{1,2}$/, "Middle initial must be 1 or 2 uppercase letters.")
     .or(z.literal(""))
     .optional(),
 
-    email: z.string()
-    .regex(/^[A-Za-z0-9Ññ._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/, "Invalid email address. Ensure it follows the format: example@domain.com") // Custom email validation allowing ñ, Ñ
-    .or(z.literal("")) // Allows empty string
+  email: z.string()
+    .regex(/^[A-Za-z0-9Ññ._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/, "Invalid email address. Ensure it follows the format: example@domain.com")
+    .or(z.literal(""))
     .optional(),
 
   phone: z.string()
@@ -69,7 +69,7 @@ const formSchema = z.object({
 
   meterNumber: z.string()
     .min(1, { message: "Meter number is required" })
-    .regex(/^[A-Za-z0-9\-]+$/, "Meter number can only contain letters, numbers, and dash (-)"), // Allow letters
+    .regex(/^[A-Za-z0-9\-]+$/, "Meter number can only contain letters, numbers, and dash (-)"),
 
   block: z.string()
     .min(2, { message: "Block must be at least 2 characters." })
@@ -82,13 +82,12 @@ const formSchema = z.object({
     .regex(/^[A-Za-z0-9]+$/, "Lot can only contain letters and numbers"),
 });
 
-
-
 interface AddCustomerFormProps {
   defaultValues?: Partial<z.infer<typeof formSchema>>;
   onSubmit?: (data: z.infer<typeof formSchema>) => void;
   onCancel?: () => void;
 }
+
 const handleNumberOnly = (e: React.KeyboardEvent<HTMLInputElement>) => {
   if (!/^[0-9]$/.test(e.key) && e.key !== "Backspace" && e.key !== "Tab") {
     e.preventDefault();
@@ -102,6 +101,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [generatedAccountNumber, setGeneratedAccountNumber] = useState("");
+  const [isValidatingDetails, setIsValidatingDetails] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -120,7 +120,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
     },
   });
 
-  // ✨ Generate Account Number based on block, lot, site
+  // Generate Account Number based on block, lot, site
   const generateAccountNumber = (block: string, lot: string, selectedSite: string) => {
     const siteCode = selectedSite === "site1" ? "15" :
                      selectedSite === "site2" ? "14" :
@@ -147,13 +147,61 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
     });
     return () => subscription.unsubscribe();
   }, [form]);
-  
+
+  // Check if account number or meter number already exists
+  const checkIfDetailsExist = async (accountNumber: string, meterNumber: string) => {
+    setIsValidatingDetails(true);
+    
+    try {
+      // Check if account number exists
+      const accountQuery = query(
+        collection(db, "customers"), 
+        where("accountNumber", "==", accountNumber)
+      );
+      const accountSnapshot = await getDocs(accountQuery);
+      
+      if (!accountSnapshot.empty) {
+        setError("Account number already exists. Please use a different block/lot/site combination.");
+        setIsValidatingDetails(false);
+        return true;
+      }
+      
+      // Check if meter number exists
+      const meterQuery = query(
+        collection(db, "customers"), 
+        where("meterNumber", "==", meterNumber)
+      );
+      const meterSnapshot = await getDocs(meterQuery);
+      
+      if (!meterSnapshot.empty) {
+        setError("Meter number already exists. Please enter a different meter number.");
+        setIsValidatingDetails(false);
+        return true;
+      }
+      
+      setError("");
+      setIsValidatingDetails(false);
+      return false;
+    } catch (error: any) {
+      setError("Error validating customer details: " + error.message);
+      setIsValidatingDetails(false);
+      return true;
+    }
+  };
 
   const handleSubmit = async (data: z.infer<typeof formSchema>) => {
     setIsSubmitting(true);
     setError("");
   
     try {
+      // Check if account number or meter number already exists
+      const detailsExist = await checkIfDetailsExist(generatedAccountNumber, data.meterNumber);
+      
+      if (detailsExist) {
+        setIsSubmitting(false);
+        return;
+      }
+      
       const siteAddresses = {
         site1: "Site 1, Brgy. Dayap, Calauan, Laguna",
         site2: "Site 2, Brgy. Dayap, Calauan, Laguna",
@@ -163,13 +211,13 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
       const fullName = `${data.firstName} ${data.middleInitial ? data.middleInitial + '. ' : ''}${data.lastName}`.trim();
   
       const customerData = {
-        firstName: data.firstName, // Save first name to Firestore
-        lastName: data.lastName,   // Save last name to Firestore
-        middleInitial: data.middleInitial || null, // Save middle initial to Firestore (null if not provided)
-        name: fullName, // Save the full name to Firestore
+        firstName: data.firstName,
+        lastName: data.lastName,
+        middleInitial: data.middleInitial || null,
+        name: fullName,
         email: data.email || null,
         phone: data.phone || null,
-        site: data.site, // Save site to Firestore
+        site: data.site,
         accountNumber: generatedAccountNumber,
         meterNumber: data.meterNumber,
         address: siteAddresses[data.site as keyof typeof siteAddresses],
@@ -320,9 +368,14 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
         </Form>
       </CardContent>
       <CardFooter className="flex justify-between border-t p-6">
-        <Button variant="outline" onClick={onCancel} disabled={isSubmitting}>Cancel</Button>
-        <Button onClick={form.handleSubmit(handleSubmit)} disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700">
-          {isSubmitting ? "Adding Customer..." : "Add Customer"}
+        <Button variant="outline" onClick={onCancel} disabled={isSubmitting || isValidatingDetails}>Cancel</Button>
+        <Button 
+          onClick={form.handleSubmit(handleSubmit)} 
+          disabled={isSubmitting || isValidatingDetails} 
+          className="bg-blue-600 hover:bg-blue-700"
+        >
+          {isSubmitting ? "Adding Customer..." : 
+           isValidatingDetails ? "Validating Details..." : "Add Customer"}
         </Button>
       </CardFooter>
     </Card>

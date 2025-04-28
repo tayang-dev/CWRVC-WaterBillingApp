@@ -274,32 +274,67 @@ const updateRequestStatus = async (newStatus: string, remarks?: string) => {
 };
 
 
-  // Handle export to CSV
-  const exportToCSV = () => {
-    if (filteredRequests.length === 0) return;
-    
-    const headers = ["Service ID", "Account Number", "Type", "Subject", "Status", "Date"];
-    const csvContent = [
-      headers.join(","),
-      ...filteredRequests.map(req => [
-        req.serviceId,
-        req.accountNumber,
-        req.type,
-        `"${req.subject.replace(/"/g, '""')}"`,
-        req.status,
-        formatDate(req.timestamp)
-      ].join(","))
-    ].join("\n");
-    
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `service-requests-report-${new Date().toISOString().split("T")[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+// Enhanced exportToCSV function with better formatting and filtered data
+const exportToCSV = () => {
+  if (filteredRequests.length === 0) return;
+  
+  // Enhanced headers with more comprehensive information
+  const headers = [
+    "Service ID",
+    "Account Number",
+    "Request Type",
+    "Subject", 
+    "Description",
+    "Status",
+    "Email",
+    "Submission Date",
+    "Attachment"
+  ];
+  
+  // Format the CSV content with proper escaping for all fields
+  const csvContent = [
+    headers.join(","),
+    ...filteredRequests.map(req => [
+      // Escape all fields properly to handle commas and quotes within data
+      `"${req.serviceId.replace(/"/g, '""')}"`,
+      `"${req.accountNumber.replace(/"/g, '""')}"`,
+      `"${req.type.replace(/"/g, '""')}"`,
+      `"${req.subject.replace(/"/g, '""')}"`,
+      `"${req.description.replace(/"/g, '""')}"`,
+      `"${req.status.replace(/"/g, '""')}"`,
+      `"${req.email.replace(/"/g, '""')}"`,
+      `"${formatDate(req.timestamp)}"`,
+      req.attachmentUri ? `"${req.attachmentUri.replace(/"/g, '""')}"` : '""'
+    ].join(","))
+  ].join("\n");
+  
+  // Create a more descriptive filename that includes filter information
+  let filename = `service-requests-${new Date().toISOString().split("T")[0]}`;
+  
+  // Add filter information to the filename
+  if (statusFilter !== "all") filename += `-${statusFilter}`;
+  if (typeFilter !== "all") filename += `-${typeFilter}`;
+  if (dateRange !== "all") filename += `-${dateRange}`;
+  if (searchTerm) filename += `-search`;
+  
+  filename += ".csv";
+  
+  // Create and trigger the download
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  
+  // Clean up
+  URL.revokeObjectURL(url);
+  
+  // Optional: Give feedback to the user about the export
+  // You could add a toast notification here
+};
 
   // Handle confirmation for status update
   const handleConfirmStatus = (newStatus: string) => {

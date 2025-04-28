@@ -366,26 +366,64 @@ const performMarkAsRejected = async (remarks: string) => {
 
   const exportToCSV = () => {
     if (filteredReports.length === 0) return;
-
-    const headers = ["Account Number", "Address", "Description", "User ID", "Date"];
+  
+    // Enhanced headers with more descriptive fields
+    const headers = [
+      "Account Number",
+      "Address",
+      "Description",
+      "User ID",
+      "Status",
+      "Has Image",
+      "Date Reported",
+      "Time Reported"
+    ];
+  
+    // Format the data with proper escaping for CSV
     const csvContent = [
       headers.join(","),
-      ...filteredReports.map(report =>
-        [
-          report.accountNumber,
+      ...filteredReports.map(report => {
+        // Get status text
+        const status = report.rejected ? "Rejected" : report.resolved ? "Resolved" : "Pending";
+        // Get has image status
+        const hasImage = report.imageUrl ? "Yes" : "No";
+        
+        return [
+          // Escape any commas in the data by wrapping in quotes
+          `"${report.accountNumber.replace(/"/g, '""')}"`,
           `"${report.address.replace(/"/g, '""')}"`,
           `"${report.leakDescription.replace(/"/g, '""')}"`,
-          report.uniqueUserId,
-          formatDate(report.timestamp)
-        ].join(",")
-      )
+          `"${report.uniqueUserId.replace(/"/g, '""')}"`,
+          `"${status}"`,
+          `"${hasImage}"`,
+          `"${formatDate(report.timestamp)}"`,
+          `"${formatTime(report.timestamp)}"`
+        ].join(",");
+      })
     ].join("\n");
-
+  
+    // Create a descriptive filename that includes the current filters
+    let filename = `leak-reports-${new Date().toISOString().split("T")[0]}`;
+    
+    // Add filter information to the filename
+    if (statusFilter !== "all") {
+      filename += `-${statusFilter}`;
+    }
+    if (dateRange !== "all") {
+      filename += `-${dateRange}`;
+    }
+    if (searchTerm) {
+      filename += `-search`;
+    }
+    
+    filename += ".csv";
+  
+    // Create and trigger download
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `leak-reports-${new Date().toISOString().split("T")[0]}.csv`);
+    link.setAttribute("download", filename);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
