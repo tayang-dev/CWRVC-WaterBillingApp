@@ -46,8 +46,13 @@ interface FirestoreData {
   date?: string;
   read?: boolean;
   timestamp?: Timestamp | string;
-  firstName: string;
-  lastName: string;
+  firstName?: string;
+  lastName?: string;
+  feedback?: string;
+  rating?: number;
+  categories?: string[];
+  userId?: string;
+  appVersion?: string;
 }
 
 const Header = ({
@@ -68,6 +73,7 @@ const Header = ({
       { name: "requests", condition: where("status", "==", "in-progress"), title: "New Service Request", link: "/requests" },
       { name: "chats", condition: where("status", "==", "active"), title: "New Chat Message", link: "/customer-support" },
       { name: "leaks", condition: where("read", "==", false), title: "New Leak Report", link: "/reports" },
+      { name: "feedback", condition: where("read", "==", false), title: "New Customer Feedback", link: "/feedback" },
     ];
   
     const sortByDateDesc = (notifications: Notification[]) => {
@@ -83,7 +89,7 @@ const Header = ({
         const updates: Notification[] = [];
   
         for (const docSnap of snapshot.docs) {
-          const data = docSnap.data() ?? {};
+          const data = docSnap.data() as FirestoreData;
           const notificationId = docSnap.id;
           const readStatus = data.read ?? false;
   
@@ -110,6 +116,11 @@ const Header = ({
             message = data.accountNumber || "Customer request";
           } else if (name === "users") {
             message = [data.firstName, data.lastName].filter(Boolean).join(" ") || "User verification";
+          } else if (name === "feedback") {
+            // Format feedback message to include rating and categories
+            const rating = data.rating ? `${data.rating}★` : "";
+            const category = data.categories && data.categories.length > 0 ? `[${data.categories[0]}]` : "";
+            message = `${rating} ${category} ${data.feedback?.substring(0, 30)}${data.feedback && data.feedback.length > 30 ? '...' : ''}`.trim();
           }
   
           updates.push({
@@ -297,7 +308,9 @@ const Header = ({
                     <div
                       key={`${notification.collectionName}-${notification.id}`}
                       onClick={() => markAsRead(notification)}
-                      className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${!notification.read ? "bg-blue-50" : ""}`}
+                      className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
+                        !notification.read ? "bg-blue-50" : ""
+                      } ${notification.collectionName === "feedback" ? "bg-green-50 hover:bg-green-100" : ""}`}
                     >
                       <div className="flex justify-between">
                         <div>
