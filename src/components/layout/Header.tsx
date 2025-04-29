@@ -68,12 +68,42 @@ const Header = ({
 
   useEffect(() => {
     const collections = [
-      { name: "users", condition: where("verificationStatus", "==", "pending"), title: "Pending User Verification", link: "/users" },
-      { name: "paymentVerifications", condition: where("status", "==", "pending"), title: "Pending Payment", link: "/payments" },
-      { name: "requests", condition: where("status", "==", "in-progress"), title: "New Service Request", link: "/requests" },
-      { name: "chats", condition: where("status", "==", "active"), title: "New Chat Message", link: "/customer-support" },
-      { name: "leaks", condition: where("read", "==", false), title: "New Leak Report", link: "/reports" },
-      { name: "feedback", condition: where("read", "==", false), title: "New Customer Feedback", link: "/feedback" },
+      { 
+        name: "users", 
+        condition: where("verificationStatus", "==", "pending"), 
+        title: "Pending User Verification", 
+        link: (id: string) => `/users?tab=verifications&id=${id}` 
+      },
+      { 
+        name: "paymentVerifications", 
+        condition: where("status", "==", "pending"), 
+        title: "Pending Payment", 
+        link: (id: string) => `/payments?tab=payment-verification&id=${id}` 
+      },
+      { 
+        name: "requests", 
+        condition: where("status", "==", "in-progress"), 
+        title: "New Service Request", 
+        link: (id: string) => `/requests?tab=in-progress&id=${id}` 
+      },
+      { 
+        name: "chats", 
+        condition: where("status", "==", "active"), 
+        title: "New Chat Message", 
+        link: (id: string) => `/customer-support?chat=${id}` 
+      },
+      { 
+        name: "leaks", 
+        condition: where("read", "==", false), 
+        title: "New Leak Report", 
+        link: (id: string) => `/reports?tab=leaks&id=${id}` 
+      },
+      { 
+        name: "feedback", 
+        condition: where("read", "==", false), 
+        title: "New Customer Feedback", 
+        link: (id: string) => `/feedback?id=${id}` 
+      },
     ];
   
     const sortByDateDesc = (notifications: Notification[]) => {
@@ -127,7 +157,7 @@ const Header = ({
             id: notificationId,
             title,
             message,
-            link,
+            link: link(notificationId), // Generate direct link with document ID
             date,
             read: readStatus,
             collectionName: name,
@@ -173,16 +203,18 @@ const Header = ({
           return updated;
         });
         
-        // Navigate to the link if provided
+        // Navigate to the specific link with tab parameters
         if (notification.link) {
           navigate(notification.link);
+          setShowNotifications(false);
         }
       } catch (error) {
         console.error(`Error marking notification as read (${notification.collectionName}/${notification.id}):`, error);
       }
     } else if (notification.link) {
-      // If already read, just navigate
+      // If already read, just navigate and close the notification panel
       navigate(notification.link);
+      setShowNotifications(false);
     }
   };
   

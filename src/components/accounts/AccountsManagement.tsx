@@ -37,7 +37,7 @@ const exportToExcel = (data: any[], exportName: string) => {
 
   // Define columns explicitly with better formatting
   const formattedData = data.map((item) => ({
-    "User ID": item.id || "",
+    "Account Number": item.accountNumber || "",
     "Name": item.name || "",
     "First Name": item.firstName || "",
     "Last Name": item.lastName || "",
@@ -45,15 +45,12 @@ const exportToExcel = (data: any[], exportName: string) => {
     "Email": item.email || "",
     "Phone": item.phone || "",
     "Address": item.address || "",
-    "Account Number": item.accountNumber || "",
+    "User ID": item.id || "",
     "Site": item.site || "",
     "Block": item.block || "",
     "Lot": item.lot || "",
     "Meter Number": item.meterNumber || "",
     "Status": item.status || "",
-    "Amount Due": typeof item.amountDue === 'number' ? item.amountDue.toFixed(2) : "0.00",
-    "Last Reading": item.lastReading || "",
-    "Last Billing Date": item.lastBillingDate ? new Date(item.lastBillingDate).toLocaleDateString() : "",
     "Is Senior": item.isSenior ? "Yes" : "No",
   }));
 
@@ -62,7 +59,7 @@ const exportToExcel = (data: any[], exportName: string) => {
   
   // Set column widths optimally based on content
   const columnWidths = [
-    { wch: 10 },  // User ID
+    { wch: 15 },  // User ID
     { wch: 20 },  // Name
     { wch: 15 },  // First Name
     { wch: 15 },  // Last Name
@@ -76,9 +73,6 @@ const exportToExcel = (data: any[], exportName: string) => {
     { wch: 10 },  // Lot
     { wch: 15 },  // Meter Number
     { wch: 12 },  // Status
-    { wch: 12 },  // Amount Due
-    { wch: 12 },  // Last Reading
-    { wch: 15 },  // Last Billing Date
     { wch: 10 },  // Is Senior
   ];
   

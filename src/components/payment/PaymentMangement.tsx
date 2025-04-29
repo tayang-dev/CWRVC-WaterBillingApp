@@ -53,6 +53,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { Checkbox } from "@radix-ui/react-checkbox";
+import jsPDF from "jspdf";
 
 interface PaymentMethod {
   id: string;
@@ -172,7 +173,11 @@ const PaymentManagement = () => {
   const [billingFilterSite, setBillingFilterSite] = useState("all");
   const [billingFilterSenior, setBillingFilterSenior] = useState(false);
   const [billingShowFilters, setBillingShowFilters] = useState(false);
-  
+  const [printMonth, setPrintMonth] = useState("");
+  const [printYear, setPrintYear] = useState("");
+  const [printSite, setPrintSite] = useState("all");
+  const [isPrintDialogOpen, setIsPrintDialogOpen] = useState(false);
+
 // Add these state variables near your other state declarations:
 const [currentPage, setCurrentPage] = useState(1);
 // Removed duplicate declaration of itemsPerPage
@@ -249,6 +254,28 @@ useEffect(() => {
   fetchPaymentHistory();
 }, []);
 
+// Inside your payment verification component
+useEffect(() => {
+  // Get URL parameters
+  const searchParams = new URLSearchParams(window.location.search);
+  const verificationId = searchParams.get('id');
+  
+  // If an ID is provided in the URL, find and select that verification
+  if (verificationId && pendingVerifications.length > 0) {
+    const targetVerification = pendingVerifications.find(v => v.id === verificationId);
+    if (targetVerification) {
+      handleOpenVerificationDialog(targetVerification);
+    }
+  }
+}, [pendingVerifications]);
+
+useEffect(() => {
+  const searchParams = new URLSearchParams(window.location.search);
+  const tab = searchParams.get("tab");
+  if (tab) {
+    setActiveTab(tab);
+  }
+}, []);
 
 useEffect(() => {
   const filtered = paymentHistory.filter((payment) => {
@@ -1085,7 +1112,76 @@ useEffect(() => {
   
 
 
-
+  const handlePrintReceipts = (month: string, year: string, site: string) => {
+    const filtered = paymentHistory.filter((payment) => {
+      const [day, mon, yr] = payment.paymentDate.split("/");
+      const matchesMonth = mon === month;
+      const matchesYear = yr === year;
+      const matchesSite = site === "all" || payment.site === site;
+      return matchesMonth && matchesYear && matchesSite;
+    });
+  
+    if (filtered.length === 0) {
+      alert("No receipts found for the selected filters.");
+      return;
+    }
+  
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4"
+    });
+  
+    filtered.forEach((p, index) => {
+      if (index !== 0) doc.addPage();
+  
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.text("Payment Receipt", 105, 25, { align: "center" });
+  
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "normal");
+  
+      const lineSpacing = 10;
+      let y = 45;
+  
+      const drawLabel = (label: string, value: string) => {
+        doc.setFont("helvetica", "bold");
+        doc.text(label, 20, y);
+        doc.setFont("helvetica", "normal");
+        doc.text(value, 70, y);
+        y += lineSpacing;
+      };
+  
+      drawLabel("Customer Name:", p.customerName || "N/A");
+      drawLabel("Account Number:", p.accountNumber || "N/A");
+      drawLabel("Amount Paid:", `₱${parseFloat(p.amount as any).toFixed(2)}`);
+      drawLabel("Payment Date:", p.paymentDate || "N/A");
+      drawLabel("Reference Number:", p.referenceNumber || "N/A");
+      drawLabel("Payment Method:", p.paymentMethod || "N/A");
+      drawLabel("Site:", p.site || "N/A");
+  
+      // Divider
+      doc.setLineWidth(0.1);
+      doc.line(20, y, 190, y);
+      y += lineSpacing;
+  
+      // Thank you footer
+      doc.setFont("helvetica", "italic");
+      doc.setTextColor(90, 90, 90);
+      doc.text(
+        "Thank you for your payment. Please keep this receipt for your records.",
+        105,
+        y + 10,
+        { align: "center" }
+      );
+    });
+  
+    doc.save(`Receipts_${month}_${year}_${site}.pdf`);
+  };
+  
+  
+  
 
 
 
@@ -1162,7 +1258,17 @@ const formatNotificationTimestamp = () => {
           </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <Tabs
+          value={activeTab}
+          onValueChange={(tab) => {
+            setActiveTab(tab);
+            const params = new URLSearchParams(window.location.search);
+            params.set("tab", tab);
+            window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+          }}
+          className="w-full"
+        >
+
           <TabsList className="mb-6">
             <TabsTrigger value="payment-methods">Payment Methods</TabsTrigger>
             <TabsTrigger value="payment-verification">Payment Verification</TabsTrigger>
@@ -1527,6 +1633,71 @@ const formatNotificationTimestamp = () => {
 
           {/* Payment History Tab */}
           <TabsContent value="payment-history" className="space-y-6">
+            <Dialog open={isPrintDialogOpen} onOpenChange={setIsPrintDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" className="mb-4">
+                        <FileText className="mr-2 h-4 w-4" />
+                        Print All Receipts
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[400px]">
+                      <DialogHeader>
+                        <DialogTitle>Filter Receipts</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div>
+                          <Label>Month</Label>
+                          <Select value={printMonth} onValueChange={setPrintMonth}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select month" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Array.from({ length: 12 }, (_, i) => {
+                                const month = String(i + 1).padStart(2, "0");
+                                return <SelectItem key={month} value={month}>{month}</SelectItem>;
+                              })}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label>Year</Label>
+                          <Select value={printYear} onValueChange={setPrintYear}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select year" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {["2024", "2025", "2026"].map((year) => (
+                                <SelectItem key={year} value={year}>{year}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label>Site</Label>
+                          <Select value={printSite} onValueChange={setPrintSite}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select site" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All</SelectItem>
+                              <SelectItem value="site1">Site 1</SelectItem>
+                              <SelectItem value="site2">Site 2</SelectItem>
+                              <SelectItem value="site3">Site 3</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Button
+                          onClick={() => {
+                            setIsPrintDialogOpen(false);
+                            handlePrintReceipts(printMonth, printYear, printSite);
+                          }}
+                          className="w-full"
+                        >
+                          Print
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
             <Card>
               <CardHeader>
                 <CardTitle>Payment History</CardTitle>
@@ -1562,6 +1733,8 @@ const formatNotificationTimestamp = () => {
 
                 {filteredHistory.length > 0 ? (
                   <>
+                  
+
                     <Table>
                       <TableHeader>
                         <TableRow>

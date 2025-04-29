@@ -45,6 +45,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog"; 
 import BillDisplay from "./BillDisplay"; 
 import jsPDF from "jspdf"; // Import jsPDF for PDF generation
@@ -114,6 +115,12 @@ const Bill: React.FC = () => {
   const defaultDueDate = new Date(currentDate);
   defaultDueDate.setDate(currentDate.getDate() + 15);
 
+  const [printFilterDialogOpen, setPrintFilterDialogOpen] = useState(false);
+  const [printFilterDueDate, setPrintFilterDueDate] = useState("");
+  const [printFilterSite, setPrintFilterSite] = useState("all");
+  const [printFilterMonth, setPrintFilterMonth] = useState<string>("");
+  const [printFilterYear, setPrintFilterYear] = useState<string>("");
+  
   // Keep billingData.dueDate as a string (formatted as "yyyy-MM-dd" for the date input)
   const [billingData, setBillingData] = useState({
     billDescription: "Monthly Water Bill",
@@ -809,7 +816,8 @@ const calculateBillingPeriodFromDueDate = (dueDateStr: string): string => {
     }
   };
   
-  const handlePrintAllReceipts = async () => {
+  const handlePrintAllReceipts = async (printFilterMonth?: string,printFilterYear?: string, filterSite?: string) => {
+
     try {
       // Show processing notification
       showNotification("Preparing bills for printing...", "info");
@@ -820,33 +828,53 @@ const calculateBillingPeriodFromDueDate = (dueDateStr: string): string => {
         return;
       }
   
-      // Filter only documents that are actual bills
-      const allBills = allBillsSnapshot.docs
-        .filter(doc => doc.data().billNumber && doc.data().customerName)
-        .map((doc) => ({
-          id: doc.id,
-          billNumber: doc.data().billNumber || "0000000000",
-          customerName: doc.data().customerName || "Unknown Customer",
-          customerAddress: doc.data().customerAddress || "Unknown Address",
-          meterReading: doc.data().meterReading || { current: 0, previous: 0 },
-          waterUsage: doc.data().waterUsage || 0,
-          billingPeriod: doc.data().billingPeriod || "N/A",
-          waterChargeBeforeTax: doc.data().waterChargeBeforeTax || 0,
-          tax: doc.data().tax || 0,
-          seniorDiscount: doc.data().seniorDiscount || 0,
-          arrears: doc.data().arrears || 0,
-          appliedOverpayment: doc.data().appliedOverpayment || 0,
-          amount: doc.data().amount || 0,
-          accountNumber: doc.data().accountNumber || "00-00-0000",
-          meterNumber: doc.data().meterNumber || "00000000",
-          dueDate: doc.data().dueDate || "00/00/0000",
-          penalty: doc.data().penalty || 0,
-          amountAfterDue: doc.data().amountAfterDue || 0,
-          // Add rates breakdown data
-          ratesBreakdown: doc.data().ratesBreakdown || calculateDefaultRates(doc.data().waterUsage || 0)
-        }));
-  
-      if (allBills.length === 0) {
+      let filteredDocs = allBillsSnapshot.docs.filter(
+        (doc) => doc.data().billNumber && doc.data().customerName
+      );
+      
+      if (printFilterMonth && printFilterYear) {
+        filteredDocs = filteredDocs.filter((doc) => {
+          const due = doc.data().dueDate; // format: dd/mm/yyyy
+          if (!due) return false;
+          const [day, month, year] = due.split("/");
+          return month === printFilterMonth && year === printFilterYear;
+        });
+        console.log("Formatted filter due date:", printFilterDueDate);
+        console.log("Bill due date sample:", filteredDocs[0]?.data().dueDate);
+
+      }
+      
+      if (filterSite && filterSite !== "all") {
+        filteredDocs = filteredDocs.filter((doc) => doc.data().site === filterSite);
+        console.log("Selected site:", filterSite);
+console.log("Bill site sample:", filteredDocs[0]?.data().site);
+
+      }
+      
+      const filteredBills = filteredDocs.map((doc) => ({
+        id: doc.id,
+        billNumber: doc.data().billNumber || "0000000000",
+        customerName: doc.data().customerName || "Unknown Customer",
+        customerAddress: doc.data().customerAddress || "Unknown Address",
+        meterReading: doc.data().meterReading || { current: 0, previous: 0 },
+        waterUsage: doc.data().waterUsage || 0,
+        billingPeriod: doc.data().billingPeriod || "N/A",
+        waterChargeBeforeTax: doc.data().waterChargeBeforeTax || 0,
+        tax: doc.data().tax || 0,
+        seniorDiscount: doc.data().seniorDiscount || 0,
+        arrears: doc.data().arrears || 0,
+        appliedOverpayment: doc.data().appliedOverpayment || 0,
+        amount: doc.data().amount || 0,
+        accountNumber: doc.data().accountNumber || "00-00-0000",
+        meterNumber: doc.data().meterNumber || "00000000",
+        dueDate: doc.data().dueDate || "00/00/0000",
+        penalty: doc.data().penalty || 0,
+        amountAfterDue: doc.data().amountAfterDue || 0,
+        ratesBreakdown: doc.data().ratesBreakdown || calculateDefaultRates(doc.data().waterUsage || 0),
+      }));
+      
+      console.log(filteredBills); // Debug filtered bills data
+      if (filteredBills.length === 0) {
         showNotification("No valid bills found to print.", "info");
         return;
       }
@@ -929,8 +957,8 @@ const calculateBillingPeriodFromDueDate = (dueDateStr: string): string => {
       };
       
       // For each bill
-      for (let i = 0; i < allBills.length; i++) {
-        const bill = allBills[i];
+      for (let i = 0; i < filteredBills.length; i++) {
+        const bill = filteredBills[i];
         
         // Add new page if not the first bill
         if (i > 0) {
@@ -1410,7 +1438,8 @@ const calculateBillingPeriodFromDueDate = (dueDateStr: string): string => {
           { align: "center" }
         );
       }
-      
+      console.log("Saving PDF with", filteredBills.length, "bills");
+
       // Save the PDF
       pdf.save("All_Water_Bills.pdf");
       showNotification("All bills have been printed successfully.", "success");
@@ -1752,13 +1781,78 @@ const calculateBillingPeriodFromDueDate = (dueDateStr: string): string => {
                 <Button variant="outline" size="icon" onClick={() => setBillingShowFilters((prev) => !prev)}>
                   <FilterIcon className="h-4 w-4" />
                 </Button>
-                <Button
-                  variant="default" // Replace "primary" with a valid variant
-                  size="sm"
-                  onClick={handlePrintAllReceipts}
+                <Dialog open={printFilterDialogOpen} onOpenChange={setPrintFilterDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button>Print All Bills</Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Filter Bills to Print</DialogTitle>
+                      <DialogDescription>Print all bills for the selected month and year.</DialogDescription>
+                  
+                    </DialogHeader>
+                    <div className="space-y-4">
+                    <div>
+                  <Label>Month</Label>
+                  <Select value={printFilterMonth} onValueChange={setPrintFilterMonth}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select Month" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: 12 }, (_, i) => {
+                        const month = String(i + 1).padStart(2, "0");
+                        return <SelectItem key={month} value={month}>{month}</SelectItem>;
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label>Year</Label>
+                  <Select value={printFilterYear} onValueChange={setPrintFilterYear}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select Year" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {["2024", "2025", "2026"].map(year => (
+                        <SelectItem key={year} value={year}>{year}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                      <div>
+                        <Label>Site</Label>
+                        <Select
+                          value={printFilterSite}
+                          onValueChange={setPrintFilterSite}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select Site" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All</SelectItem>
+                            {siteOptions.map((site) => (
+                              <SelectItem key={site} value={site}>
+                                {site}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                  onClick={() => {
+                    setPrintFilterDialogOpen(false);
+                    handlePrintAllReceipts(printFilterMonth, printFilterYear, printFilterSite);
+                  }}
                 >
-                  Print All Bills
+                  Print Filtered Bills
                 </Button>
+
+                    </div>
+                  </DialogContent>
+                </Dialog>
+
               </div>
             </CardHeader>
             {billingShowFilters && (
