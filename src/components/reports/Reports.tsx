@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Download, Search, Filter, MapPin, BarChart, Calendar } from "lucide-react";
+import * as XLSX from "xlsx";
 import {
   Card,
   CardContent,
@@ -364,8 +365,19 @@ const performMarkAsRejected = async (remarks: string) => {
     setConfirmAction(null);
   };
 
-  const exportToCSV = () => {
+
+  const exportToXLSX = () => {
     if (filteredReports.length === 0) return;
+  
+    // Title and metadata
+    const title = "Leak Reports Summary";
+    const metadata = [
+      [`Generated on: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`],
+      [`Filters Applied:`],
+      [`- Status: ${statusFilter !== "all" ? statusFilter : "All"}`],
+      [`- Date Range: ${dateRange !== "all" ? dateRange : "All Time"}`],
+      [`- Search Term: ${searchTerm || "None"}`],
+    ];
   
     // Enhanced headers with more descriptive fields
     const headers = [
@@ -376,59 +388,51 @@ const performMarkAsRejected = async (remarks: string) => {
       "Status",
       "Has Image",
       "Date Reported",
-      "Time Reported"
+      "Time Reported",
     ];
   
-    // Format the data with proper escaping for CSV
-    const csvContent = [
-      headers.join(","),
-      ...filteredReports.map(report => {
-        // Get status text
-        const status = report.rejected ? "Rejected" : report.resolved ? "Resolved" : "Pending";
-        // Get has image status
-        const hasImage = report.imageUrl ? "Yes" : "No";
-        
-        return [
-          // Escape any commas in the data by wrapping in quotes
-          `"${report.accountNumber.replace(/"/g, '""')}"`,
-          `"${report.address.replace(/"/g, '""')}"`,
-          `"${report.leakDescription.replace(/"/g, '""')}"`,
-          `"${report.uniqueUserId.replace(/"/g, '""')}"`,
-          `"${status}"`,
-          `"${hasImage}"`,
-          `"${formatDate(report.timestamp)}"`,
-          `"${formatTime(report.timestamp)}"`
-        ].join(",");
-      })
-    ].join("\n");
+    // Format the data for XLSX
+    const data = filteredReports.map((report) => {
+      const status = report.rejected ? "Rejected" : report.resolved ? "Resolved" : "Pending";
+      const hasImage = report.imageUrl ? "Yes" : "No";
   
-    // Create a descriptive filename that includes the current filters
-    let filename = `leak-reports-${new Date().toISOString().split("T")[0]}`;
-    
-    // Add filter information to the filename
-    if (statusFilter !== "all") {
-      filename += `-${statusFilter}`;
-    }
-    if (dateRange !== "all") {
-      filename += `-${dateRange}`;
-    }
-    if (searchTerm) {
-      filename += `-search`;
-    }
-    
-    filename += ".csv";
+      return [
+        report.accountNumber,
+        report.address,
+        report.leakDescription,
+        report.uniqueUserId,
+        status,
+        hasImage,
+        formatDate(report.timestamp),
+        formatTime(report.timestamp),
+      ];
+    });
   
-    // Create and trigger download
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // Combine metadata, headers, and data
+    const sheetData = [
+      [title], // Title row
+      [""], // Blank row
+      ...metadata, // Metadata rows
+      [""], // Blank row
+      headers, // Header row
+      ...data, // Data rows
+    ];
+  
+    // Create a worksheet
+    const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+  
+    // Auto-adjust column widths
+    const columnWidths = headers.map((header) => ({ wch: Math.max(header.length + 5, 20) }));
+    worksheet["!cols"] = columnWidths;
+  
+    // Create a workbook and append the worksheet
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Leak Reports");
+  
+    // Generate and download the XLSX file
+    const filename = `leak-reports-${new Date().toISOString().split("T")[0]}.xlsx`;
+    XLSX.writeFile(workbook, filename);
   };
-
   const resolvedCount = leakReports.filter((report) => report.resolved).length;
 
   const getReportDistributionData = (reports: LeakReport[]) => {
@@ -464,7 +468,7 @@ const performMarkAsRejected = async (remarks: string) => {
             <p className="text-gray-600 mt-1">Manage and analyze customer reported leaks</p>
           </div>
           <Button
-            onClick={exportToCSV}
+            onClick={exportToXLSX}
             className="mt-4 sm:mt-0 bg-blue-600 hover:bg-blue-700"
             disabled={filteredReports.length === 0}
           >

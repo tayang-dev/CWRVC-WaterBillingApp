@@ -51,6 +51,7 @@ import BillDisplay from "./BillDisplay";
 import jsPDF from "jspdf"; // Import jsPDF for PDF generation
 import "jspdf-autotable"; // Optional for table formatting
 import html2canvas from "html2canvas"; // Import html2canvas for rendering HTML to canvas
+import QRCode from "qrcode";
 
 // Utility function to format currency
 const formatCurrency = (amount: number) => {
@@ -841,7 +842,10 @@ const calculateBillingPeriodFromDueDate = (dueDateStr: string): string => {
         });
         console.log("Formatted filter due date:", printFilterDueDate);
         console.log("Bill due date sample:", filteredDocs[0]?.data().dueDate);
-
+        if (filteredDocs.length === 0) {
+          alert("No bills found to print.");
+          return;
+        }
       }
       
       if (filterSite && filterSite !== "all") {
@@ -1004,6 +1008,22 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
         pdf.setFontSize(10);
         pdf.text(companyAddress, marginX + contentWidth / 2, marginY + 28, { align: "center" });
         
+        // --- QR CODE SECTION ---
+        const qrCodeData = {
+          billNumber: bill.billNumber,
+          customerName: bill.customerName,
+          amount: bill.amount,
+          dueDate: bill.dueDate,
+          accountNumber: bill.accountNumber,
+          amountAfterDue: bill.amountAfterDue,
+        };
+
+        const qrCodeString = JSON.stringify(qrCodeData);
+
+        // Generate QR code as a base64 image
+        const qrCodeBase64 = await QRCode.toDataURL(qrCodeString);
+
+
         // Right side - "BILLING STATEMENT NO."
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(12);
@@ -1087,7 +1107,7 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
           bill.meterReading?.current || 0,
           bill.meterReading?.previous || 0,
           bill.waterUsage || 0,
-          bill.billingPeriod || "4-2025"
+          formatBillingMonth(bill.billingPeriod || "01/04/2025 - 01/05/2025")
         ];
         
         meterValues.forEach((value, idx) => {
@@ -1153,8 +1173,20 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
         pdf.setFont("helvetica", "normal");
         pdf.setFontSize(9); // Reduced from 10
         
+        const formatBillingPeriod = (billingPeriod) => {
+          // Check if the billing period is in the format "01/04/2025 - 01/05/2025"
+          if (billingPeriod && billingPeriod.includes(" - ")) {
+            // Split the dates
+            const [startDate, endDate] = billingPeriod.split(" - ");
+            // Format with line breaks and centered dash
+            return `${startDate}\n          -\n${endDate}`;
+          }
+          // If not in the expected format, return as is (fallback)
+          return billingPeriod || "4-2025";
+        };
+
         const leftColumnValues = [
-          bill.billingPeriod || "4-2025",
+          formatBillingPeriod(bill.billingPeriod || "01/04/2025 - 01/05/2025"),
           formatCurrency(bill.waterChargeBeforeTax || 517.50),
           formatCurrency(bill.tax || 10.35),
           formatCurrency(0.00), // SCF
@@ -1399,6 +1431,21 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
         // Adjust footer position to ensure it fits
         const footerY = accountRowY + accountRowHeight + 5; // Reduced from 10
         
+        // Add QR code to the right side of the footer
+          const qrCodeSize = 20; // You can adjust the size as needed
+          const qrCodeY = footerY;
+          const qrCodeX = marginX + contentWidth - qrCodeSize - 8; // Position it on the right with a 10mm margin
+
+          // Add QR code to the PDF
+          pdf.addImage(
+            qrCodeBase64, 
+            "PNG", 
+            qrCodeX, 
+            qrCodeY, 
+            qrCodeSize, 
+            qrCodeSize
+          );
+
         // Notes with adaptive font size based on available space
         const footerFontSize = availableFooterSpace < 40 ? 7 : 8; // Smaller font if space is limited
         
@@ -1458,39 +1505,47 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
     return num.toFixed(2);
   }
   
-  // Format billing period to month name
-  function formatBillingMonth(billingPeriod) {
+  // Update the meter table values if needed - this converts billing period to month name for the meter table
+  const formatBillingMonth = (billingPeriod) => {
     if (!billingPeriod) return "N/A";
     
     const monthNames = ["January", "February", "March", "April", "May", "June", 
                         "July", "August", "September", "October", "November", "December"];
     
     // Handle different formats
-    if (billingPeriod.includes("-")) {
+    if (billingPeriod.includes(" - ")) {
+      // Format like "dd/mm/yyyy - dd/mm/yyyy"
+      const [startDate] = billingPeriod.split(" - ");
+      const dateParts = startDate.split("/");
+      
+      if (dateParts.length === 3) {
+        const monthNum = parseInt(dateParts[1]); // Month is the second part in dd/mm/yyyy
+        if (monthNum >= 1 && monthNum <= 12) {
+          return `${monthNames[monthNum - 1]} ${dateParts[2]}`; // Month Year
+        }
+      }
+    } else if (billingPeriod.includes("-")) {
       // Format like "4-2025"
       const parts = billingPeriod.split("-");
       if (parts.length === 2) {
         const monthNum = parseInt(parts[0]);
         if (monthNum >= 1 && monthNum <= 12) {
-          return monthNames[monthNum - 1];
+          return `${monthNames[monthNum - 1]} ${parts[1]}`;
         }
       }
-      
-      // Format like "01/03/25 - 02/01/25"
-      const endDatePart = billingPeriod.split("-")[1]?.trim();
-      if (endDatePart) {
-        const dateParts = endDatePart.split("/");
-        if (dateParts.length === 3) {
-          const monthNum = parseInt(dateParts[1]);
-          if (monthNum >= 1 && monthNum <= 12) {
-            return monthNames[monthNum - 1];
-          }
+    } else if (billingPeriod.includes("/")) {
+      // Format like "dd/mm/yyyy"
+      const dateParts = billingPeriod.split("/");
+      if (dateParts.length === 3) {
+        const monthNum = parseInt(dateParts[1]); // Month is the second part in dd/mm/yyyy
+        if (monthNum >= 1 && monthNum <= 12) {
+          return `${monthNames[monthNum - 1]} ${dateParts[2]}`;
         }
       }
     }
     
     return billingPeriod;
-  }
+  };
   
   // Calculate water rate tiers
   function calculateTiers(waterUsage) {

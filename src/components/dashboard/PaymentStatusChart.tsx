@@ -32,7 +32,11 @@ interface Bill {
   dueDate: string; // Assuming dueDate is a string in "DD/MM/YYYY" format
 }
 
-const PaymentStatusChart = () => {
+const PaymentStatusChart = ({
+  onData,
+}: {
+  onData: (data: { name: string; value: number; color: string }[]) => void;
+}) => {
   const [selectedSite, setSelectedSite] = useState("site1");
   const [chartData, setChartData] = useState(getDefaultChartData());
 
@@ -47,47 +51,64 @@ const PaymentStatusChart = () => {
         );
         const customersSnapshot = await getDocs(customersQuery);
 
-        const customers = customersSnapshot.docs.map(doc => ({
+        const customers = customersSnapshot.docs.map((doc) => ({
           id: doc.id,
-          accountNumber: doc.data().accountNumber
+          accountNumber: doc.data().accountNumber,
         }));
 
-        console.log(`👥 Found ${customers.length} customers in ${selectedSite}:`, customers);
+        console.log(
+          `👥 Found ${customers.length} customers in ${selectedSite}:`,
+          customers
+        );
 
         if (customers.length === 0) {
           console.warn(`⚠️ No customers found in ${selectedSite}`);
-          setChartData(getDefaultChartData());
+          const defaultData = getDefaultChartData();
+          setChartData(defaultData);
+          onData(defaultData); // Pass default data to the parent component
           return;
         }
 
-        let paymentStatusCounts = { Paid: 0, Pending: 0, Overdue: 0, "Partially Paid": 0 };
+        let paymentStatusCounts = {
+          Paid: 0,
+          Pending: 0,
+          Overdue: 0,
+          "Partially Paid": 0,
+        };
 
         // Fetch all bills concurrently
-        const billFetchPromises = customers.map(customer => {
-          const recordsQuery = collection(db, "bills", customer.accountNumber, "records");
-          return getDocs(recordsQuery).then(recordsSnapshot => {
-            return recordsSnapshot.docs.map(doc => ({
+        const billFetchPromises = customers.map((customer) => {
+          const recordsQuery = collection(
+            db,
+            "bills",
+            customer.accountNumber,
+            "records"
+          );
+          return getDocs(recordsQuery).then((recordsSnapshot) => {
+            return recordsSnapshot.docs.map((doc) => ({
               id: doc.id,
-              ...doc.data() as Bill // Type assertion here
+              ...(doc.data() as Bill), // Type assertion here
             }));
           });
         });
 
         // Wait for all bill fetch promises to resolve
         const allBills = await Promise.all(billFetchPromises);
-        
+
         // Flatten the array of bills
         const bills = allBills.flat();
 
         console.log(`📦 Found ${bills.length} total bills for all customers`);
 
         // Process each bill
-        bills.forEach(bill => {
+        bills.forEach((bill) => {
           console.log(`🔍 Bill Data (${bill.id}):`, bill);
 
           const amount = bill.amount;
           const originalAmount = bill.originalAmount;
-          const dueDate = new Date(bill.dueDate.split("/").reverse().join("-")); // Convert to YYYY-MM-DD format
+          const dueDate = new Date(
+            bill.dueDate.split("/").reverse().join("-")
+          ); // Convert to YYYY-MM-DD format
           const currentDate = new Date();
 
           // Determine payment status
@@ -104,18 +125,39 @@ const PaymentStatusChart = () => {
 
         console.log("📊 Payment status counts:", paymentStatusCounts);
 
-        const totalBills = Object.values(paymentStatusCounts).reduce((sum, val) => sum + val, 0);
+        const totalBills = Object.values(paymentStatusCounts).reduce(
+          (sum, val) => sum + val,
+          0
+        );
 
         if (totalBills === 0) {
-          console.warn(`⚠️ No billing data found for ${selectedSite}, showing default values.`);
-          setChartData(getDefaultChartData());
+          console.warn(
+            `⚠️ No billing data found for ${selectedSite}, showing default values.`
+          );
+          const defaultData = getDefaultChartData();
+          setChartData(defaultData);
+          onData(defaultData); // Pass default data to the parent component
         } else {
-          setChartData([
+          const chartData = [
             { name: "Paid", value: paymentStatusCounts.Paid, color: "#4ade80" },
-            { name: "Pending", value: paymentStatusCounts.Pending, color: "#facc15" },
-            { name: "Overdue", value: paymentStatusCounts.Overdue, color: "#f87171" },
-            { name: "Partially Paid", value: paymentStatusCounts["Partially Paid"], color: "#60a5fa" },
-          ]);
+            {
+              name: "Pending",
+              value: paymentStatusCounts.Pending,
+              color: "#facc15",
+            },
+            {
+              name: "Overdue",
+              value: paymentStatusCounts.Overdue,
+              color: "#f87171",
+            },
+            {
+              name: "Partially Paid",
+              value: paymentStatusCounts["Partially Paid"],
+              color: "#60a5fa",
+            },
+          ];
+          setChartData(chartData);
+          onData(chartData); // Pass fetched data to the parent component
         }
       } catch (error) {
         console.error("❌ Error fetching payment data:", error);
@@ -123,7 +165,7 @@ const PaymentStatusChart = () => {
     };
 
     fetchPaymentsBySite();
-  }, [selectedSite]);
+  }, [selectedSite, onData]);
 
   return (
     <Card className="w-full h-full bg-white">
@@ -159,7 +201,9 @@ const PaymentStatusChart = () => {
               fill="#8884d8"
               dataKey="value"
               label={({ name, percent, value }) =>
-                percent > 0 ? `${name}: ${value} (${(percent * 100).toFixed(0)}%)` : ""
+                percent > 0
+                  ? `${name}: ${value} (${(percent * 100).toFixed(0)}%)`
+                  : ""
               }
               labelLine={false}
             >

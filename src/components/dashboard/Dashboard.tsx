@@ -4,15 +4,9 @@ import { db } from "../../lib/firebase";
 import KpiCards from "./KpiCards";
 import BillingTrendsChart from "./BillingTrendsChart";
 import PaymentStatusChart from "./PaymentStatusChart";
-import WaterLeakagePerSite from "./WaterLeakagePerSite"; // Import the new component
-import CustomerWaterUsageRanking from "./CustomerWaterUsageRanking"; // Import the new component
-
-// Helper: Currency Formatter
-const currencyFormatter = new Intl.NumberFormat("en-PH", {
-  style: "currency",
-  currency: "PHP",
-  minimumFractionDigits: 2,
-});
+import WaterLeakagePerSite from "./WaterLeakagePerSite";
+import CustomerWaterUsageRanking from "./CustomerWaterUsageRanking";
+import { exportDashboardData } from "./exportDashboardData";
 
 const Dashboard = () => {
   const [dashboardData, setDashboardData] = useState({
@@ -26,47 +20,51 @@ const Dashboard = () => {
     consumptionChange: "+4%",
   });
 
+  const [leakageData, setLeakageData] = useState([]);
+  const [billingData, setBillingData] = useState([]);
+  const [paymentStatusData, setPaymentStatusData] = useState([]);
+  const [filteredCustomers, setFilteredCustomers] = useState([]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [debugInfo, setDebugInfo] = useState<string[]>([]);
 
   // Filters
   const [selectedSite, setSelectedSite] = useState("All");
-  const [selectedMonth, setSelectedMonth] = useState("All"); // Change to string
-  const [selectedYear, setSelectedYear] = useState("All"); // Change to string
+  const [selectedMonth, setSelectedMonth] = useState("All");
+  const [selectedYear, setSelectedYear] = useState("All");
 
   const handleSiteChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedSite(e.target.value);
   };
 
   const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedMonth(e.target.value); // Keep as string
+    setSelectedMonth(e.target.value);
   };
 
   const handleYearChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedYear(e.target.value); // Keep as string
+    setSelectedYear(e.target.value);
   };
-
-  const formatCurrency = (amount: number) => currencyFormatter.format(amount);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
       const debug: string[] = [];
       setLoading(true);
-  
+
       try {
         let totalConsumption = 0;
         let totalRevenue = 0;
         let pendingAmount = 0;
-  
+
         debug.push("🚀 Starting optimized dashboard data fetch");
-  
+
         // Fetch customers filtered by site in one query
-        const customerQuery = selectedSite === "All"
-          ? collection(db, "customers")
-          : query(collection(db, "customers"), where("site", "==", selectedSite));
+        const customerQuery =
+          selectedSite === "All"
+            ? collection(db, "customers")
+            : query(collection(db, "customers"), where("site", "==", selectedSite));
         const customerSnapshot = await getDocs(customerQuery);
-  
+
         if (customerSnapshot.empty) {
           debug.push("⚠️ No customers found in Firestore!");
           setError("No customer data available.");
@@ -74,36 +72,38 @@ const Dashboard = () => {
           setDebugInfo(debug);
           return;
         }
-  
-        const customers = customerSnapshot.docs.map(doc => ({
+
+        const customers = customerSnapshot.docs.map((doc) => ({
           id: doc.id,
-          accountNumber: doc.data().accountNumber, // Explicitly include accountNumber
+          accountNumber: doc.data().accountNumber,
           ...doc.data(),
         }));
-  
+
         debug.push(`📊 Found ${customers.length} customers for site: ${selectedSite}`);
-  
+
         // Fetch all bills and payments in parallel
         const [billsSnapshots, paymentSnapshot] = await Promise.all([
           Promise.all(
-            customers.map(customer =>
+            customers.map((customer) =>
               getDocs(collection(db, "bills", customer.accountNumber, "records"))
             )
           ),
           getDocs(collection(db, "paymentVerifications")),
         ]);
-  
+
         // Process bills
-        billsSnapshots.forEach(billsSnapshot => {
-          billsSnapshot.forEach(billDoc => {
+        billsSnapshots.forEach((billsSnapshot) => {
+          billsSnapshot.forEach((billDoc) => {
             const billData = billDoc.data();
             const billDate = new Date(billData.date);
             const billMonth = billDate.getMonth() + 1;
             const billYear = billDate.getFullYear();
-  
-            const matchesMonth = selectedMonth === "All" || parseInt(selectedMonth) === billMonth;
-            const matchesYear = selectedYear === "All" || parseInt(selectedYear) === billYear;
-  
+
+            const matchesMonth =
+              selectedMonth === "All" || parseInt(selectedMonth) === billMonth;
+            const matchesYear =
+              selectedYear === "All" || parseInt(selectedYear) === billYear;
+
             if (matchesMonth && matchesYear) {
               if (typeof billData.waterUsage === "number") {
                 totalConsumption += billData.waterUsage;
@@ -117,20 +117,22 @@ const Dashboard = () => {
             }
           });
         });
-  
+
         debug.push(`💧 Filtered Total Water Usage: ${totalConsumption} m³`);
-        debug.push(`⏳ Filtered Pending Payments: ${formatCurrency(pendingAmount)}`);
-  
+        debug.push(`⏳ Filtered Pending Payments: ${pendingAmount}`);
+
         // Process payments
-        paymentSnapshot.forEach(doc => {
+        paymentSnapshot.forEach((doc) => {
           const data = doc.data();
           const paymentDate = new Date(data.date);
           const month = paymentDate.getMonth() + 1;
           const year = paymentDate.getFullYear();
-  
-          const matchesMonth = selectedMonth === "All" || parseInt(selectedMonth) === month;
-          const matchesYear = selectedYear === "All" || parseInt(selectedYear) === year;
-  
+
+          const matchesMonth =
+            selectedMonth === "All" || parseInt(selectedMonth) === month;
+          const matchesYear =
+            selectedYear === "All" || parseInt(selectedYear) === year;
+
           if (matchesMonth && matchesYear) {
             const amount = parseFloat(data.amount);
             if (!isNaN(amount)) {
@@ -138,20 +140,20 @@ const Dashboard = () => {
             }
           }
         });
-  
-        debug.push(`💸 Filtered Total Revenue: ${formatCurrency(totalRevenue)}`);
-  
+
+        debug.push(`💸 Filtered Total Revenue: ${totalRevenue}`);
+
         setDashboardData({
           totalCustomers: customers.length.toString(),
-          totalRevenue: formatCurrency(totalRevenue),
-          pendingPayments: formatCurrency(pendingAmount),
+          totalRevenue: `₱${totalRevenue.toFixed(2)}`,
+          pendingPayments: `₱${pendingAmount.toFixed(2)}`,
           waterConsumption: `${totalConsumption} m³`,
           customerGrowth: "+5%",
           revenueGrowth: "+8%",
           pendingChange: "+3%",
           consumptionChange: "+4%",
         });
-  
+
         setError(null);
       } catch (err: any) {
         debug.push(`❌ Error: ${err.message}`);
@@ -161,10 +163,10 @@ const Dashboard = () => {
         setDebugInfo(debug);
       }
     };
-  
+
     fetchDashboardData();
   }, [selectedSite, selectedMonth, selectedYear]);
-  
+
   return (
     <div className="w-full h-full p-6 bg-gray-50">
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -218,8 +220,25 @@ const Dashboard = () => {
               );
             })}
           </select>
-
         </div>
+      </div>
+
+      {/* Export Button */}
+      <div className="mb-6 flex justify-end">
+        <button
+          className="px-6 py-2 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
+          onClick={() =>
+            exportDashboardData({
+              dashboardStats: dashboardData,
+              leakageData,
+              billingTrends: billingData,
+              paymentStatus: paymentStatusData,
+              customerUsage: filteredCustomers,
+            })
+          }
+        >
+          Export Dashboard Data
+        </button>
       </div>
 
       {/* Loader / Error / Content */}
@@ -243,13 +262,11 @@ const Dashboard = () => {
           <KpiCards {...dashboardData} />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-            <BillingTrendsChart />
-            <PaymentStatusChart />
-            <CustomerWaterUsageRanking />
-            <WaterLeakagePerSite />
+            <BillingTrendsChart onData={setBillingData} />
+            <PaymentStatusChart onData={setPaymentStatusData} />
+            <CustomerWaterUsageRanking onData={setFilteredCustomers} />
+            <WaterLeakagePerSite onData={setLeakageData} />
           </div>
-
-          
         </>
       )}
     </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Download, Search, Filter, FileText, BarChart } from "lucide-react";
+  import * as XLSX from "xlsx";
 import {
   Card,
   CardContent,
@@ -274,66 +275,85 @@ const updateRequestStatus = async (newStatus: string, remarks?: string) => {
 };
 
 
-// Enhanced exportToCSV function with better formatting and filtered data
-const exportToCSV = () => {
+
+const exportToXLSX = () => {
   if (filteredRequests.length === 0) return;
-  
-  // Enhanced headers with more comprehensive information
+
+  // Title and metadata
+  const title = "Service Requests Report";
+  const metadata = [
+    [`Generated on: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`],
+    [`Filters Applied:`],
+    [`- Status: ${statusFilter !== "all" ? statusFilter : "All"}`],
+    [`- Type: ${typeFilter !== "all" ? typeFilter : "All"}`],
+    [`- Date Range: ${dateRange !== "all" ? dateRange : "All Time"}`],
+    [`- Search Term: ${searchTerm || "None"}`],
+  ];
+
+  // Enhanced headers with more descriptive fields
   const headers = [
     "Service ID",
     "Account Number",
     "Request Type",
-    "Subject", 
+    "Subject",
     "Description",
     "Status",
     "Email",
     "Submission Date",
-    "Attachment"
+    "Attachment",
   ];
-  
-  // Format the CSV content with proper escaping for all fields
-  const csvContent = [
-    headers.join(","),
-    ...filteredRequests.map(req => [
-      // Escape all fields properly to handle commas and quotes within data
-      `"${req.serviceId.replace(/"/g, '""')}"`,
-      `"${req.accountNumber.replace(/"/g, '""')}"`,
-      `"${req.type.replace(/"/g, '""')}"`,
-      `"${req.subject.replace(/"/g, '""')}"`,
-      `"${req.description.replace(/"/g, '""')}"`,
-      `"${req.status.replace(/"/g, '""')}"`,
-      `"${req.email.replace(/"/g, '""')}"`,
-      `"${formatDate(req.timestamp)}"`,
-      req.attachmentUri ? `"${req.attachmentUri.replace(/"/g, '""')}"` : '""'
-    ].join(","))
-  ].join("\n");
-  
-  // Create a more descriptive filename that includes filter information
-  let filename = `service-requests-${new Date().toISOString().split("T")[0]}`;
-  
-  // Add filter information to the filename
-  if (statusFilter !== "all") filename += `-${statusFilter}`;
-  if (typeFilter !== "all") filename += `-${typeFilter}`;
-  if (dateRange !== "all") filename += `-${dateRange}`;
-  if (searchTerm) filename += `-search`;
-  
-  filename += ".csv";
-  
-  // Create and trigger the download
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  
-  // Clean up
-  URL.revokeObjectURL(url);
-  
-  // Optional: Give feedback to the user about the export
-  // You could add a toast notification here
+
+  // Format the data for XLSX
+  const data = filteredRequests.map((req) => {
+    return [
+      req.serviceId,
+      req.accountNumber,
+      req.type,
+      req.subject,
+      req.description,
+      req.status,
+      req.email,
+      formatDate(req.timestamp),
+      req.attachmentUri || "None",
+    ];
+  });
+
+  // Combine metadata, headers, and data
+  const sheetData = [
+    [title], // Title row
+    [""], // Blank row
+    ...metadata, // Metadata rows
+    [""], // Blank row
+    headers, // Header row
+    ...data, // Data rows
+  ];
+
+  // Create a worksheet
+  const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+
+  // Style the title row
+  worksheet["A1"] = {
+    v: title,
+    t: "s",
+    s: {
+      font: { bold: true, sz: 16, color: { rgb: "FFFFFF" } },
+      alignment: { horizontal: "center", vertical: "center" },
+      fill: { fgColor: { rgb: "4F81BD" } }, // Blue background
+    },
+  };
+  worksheet["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } }];
+
+  // Auto-adjust column widths
+  const columnWidths = headers.map((header) => ({ wch: Math.max(header.length + 5, 20) }));
+  worksheet["!cols"] = columnWidths;
+
+  // Create a workbook and append the worksheet
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Service Requests");
+
+  // Generate and download the XLSX file
+  const filename = `service-requests-${new Date().toISOString().split("T")[0]}.xlsx`;
+  XLSX.writeFile(workbook, filename);
 };
 
   // Handle confirmation for status update
@@ -350,7 +370,7 @@ const exportToCSV = () => {
             <p className="text-gray-600 mt-1">Track and manage customer service requests</p>
           </div>
           <Button 
-            onClick={exportToCSV}
+            onClick={exportToXLSX}
             className="bg-blue-600 hover:bg-blue-700"
             disabled={filteredRequests.length === 0}
           >

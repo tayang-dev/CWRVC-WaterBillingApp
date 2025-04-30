@@ -18,7 +18,11 @@ interface Customer {
   totalWaterUsage?: number;
 }
 
-const CustomerWaterUsageRanking = () => {
+const CustomerWaterUsageRanking = ({
+  onData,
+}: {
+  onData: (data: Customer[]) => void;
+}) => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
   const [siteFilter, setSiteFilter] = useState("All");
@@ -72,7 +76,8 @@ const CustomerWaterUsageRanking = () => {
     });
 
     setFilteredCustomers(filtered);
-  }, [customers, siteFilter, sortOrder]);
+    onData(filtered); // Pass filtered data to the parent component
+  }, [customers, siteFilter, sortOrder, onData]);
 
   return (
     <Card className="w-full h-full bg-white">

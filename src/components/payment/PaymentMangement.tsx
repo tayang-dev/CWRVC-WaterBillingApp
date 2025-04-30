@@ -66,6 +66,7 @@ interface PaymentMethod {
 }
 
 interface PaymentVerification {
+  time: string;
   site: string;
   verifiedAt: string | number | Date;
   id: string;
@@ -93,6 +94,25 @@ interface Customer {
   isSenior: boolean;
   meterNumber: string;
 }
+
+// Add this type definition for your payment history items
+interface PaymentHistoryItem {
+  customerName: string;
+  accountNumber: string;
+  amount: string | number;
+  paymentDate: string;
+  referenceNumber: string;
+  paymentMethod: string;
+  site: string;
+  time?: string; // Optional time field
+}
+// Utility function to format currency
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "PHP",
+  }).format(amount);
+};
 
 interface Bill {
   id?: string;
@@ -1126,59 +1146,142 @@ useEffect(() => {
       return;
     }
   
+    // Create a new jsPDF instance
     const doc = new jsPDF({
       orientation: "portrait",
       unit: "mm",
-      format: "a4"
+      format: [100, 180] // Custom size to match mobile receipt
     });
   
-    filtered.forEach((p, index) => {
-      if (index !== 0) doc.addPage();
-  
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(18);
-      doc.text("Payment Receipt", 105, 25, { align: "center" });
-  
-      doc.setFontSize(12);
-      doc.setFont("helvetica", "normal");
-  
-      const lineSpacing = 10;
-      let y = 45;
-  
-      const drawLabel = (label: string, value: string) => {
+    // Load image - we'll need to add it for each receipt
+    const img = new Image();
+    img.src = "src/assets/logo.png";
+    
+    // Process and add receipts after image is loaded
+    img.onload = () => {
+      filtered.forEach((payment, index) => {
+        if (index !== 0) doc.addPage();
+        
+        // Add background color (light blue header)
+        doc.setFillColor(62, 84, 172); // Adjust color to match the screenshot
+        doc.rect(0, 0, 100, 35, 'F');
+        
+        // Add logo - scale appropriately
+        const logoWidth = 10;
+        const aspectRatio = img.height / img.width;
+        const logoHeight = logoWidth * aspectRatio;
+        doc.addImage(img, 'PNG', 10, 10, logoWidth, logoHeight);
+        
+        // Add header text
+        doc.setTextColor(255, 255, 255);
         doc.setFont("helvetica", "bold");
-        doc.text(label, 20, y);
+        doc.setFontSize(10);
+        doc.text("CENTENNIAL WATER RESOURCE", 25, 15);
+        doc.text("VENTURE CORPORATION", 25, 20);
         doc.setFont("helvetica", "normal");
-        doc.text(value, 70, y);
-        y += lineSpacing;
-      };
-  
-      drawLabel("Customer Name:", p.customerName || "N/A");
-      drawLabel("Account Number:", p.accountNumber || "N/A");
-      drawLabel("Amount Paid:", `₱${parseFloat(p.amount as any).toFixed(2)}`);
-      drawLabel("Payment Date:", p.paymentDate || "N/A");
-      drawLabel("Reference Number:", p.referenceNumber || "N/A");
-      drawLabel("Payment Method:", p.paymentMethod || "N/A");
-      drawLabel("Site:", p.site || "N/A");
-  
-      // Divider
-      doc.setLineWidth(0.1);
-      doc.line(20, y, 190, y);
-      y += lineSpacing;
-  
-      // Thank you footer
-      doc.setFont("helvetica", "italic");
-      doc.setTextColor(90, 90, 90);
-      doc.text(
-        "Thank you for your payment. Please keep this receipt for your records.",
-        105,
-        y + 10,
-        { align: "center" }
-      );
-    });
-  
-    doc.save(`Receipts_${month}_${year}_${site}.pdf`);
-  };
+        doc.setFontSize(8);
+        doc.text("Official Payment Receipt", 25, 25);
+        
+        // Add verification badge
+        doc.setFillColor(76, 175, 80); // Green color for verified badge
+        doc.roundedRect(65, 30, 25, 7, 3, 3, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text("VERIFIED", 77.5, 35, { align: "center" });
+        
+        // Reset text color for remaining content
+        doc.setTextColor(0, 0, 0);
+        
+        // Reference number
+        doc.setFillColor(240, 240, 250); // Light background
+        doc.rect(0, 40, 100, 10, 'F');
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.text("Reference #:", 10, 46);
+        doc.setFont("helvetica", "bold");
+        doc.text(payment.referenceNumber || "N/A", 30, 46);
+        
+        // Add timestamp on right side
+        // Extract time from verifiedAt or use default
+        const verifiedAt = payment.verifiedAt ? new Date(payment.verifiedAt).toLocaleString("en-US", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: true,
+        }) : "N/A";
+
+        doc.setFont("helvetica", "normal");
+        doc.text(`${verifiedAt}`, 90, 46, { align: "right" });
+        
+        // Customer Information section
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(62, 84, 172); // Blue color for section headers
+        doc.text("CUSTOMER INFORMATION", 10, 58);
+        doc.setTextColor(0, 0, 0);
+        
+        // Customer details
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.text("Customer Name:", 10, 65);
+        doc.text(payment.customerName || "N/A", 50, 65);
+        
+        doc.text("Account Number:", 10, 72);
+        doc.text(payment.accountNumber || "N/A", 50, 72);
+        
+        // Payment Details section
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(62, 84, 172); // Blue color for section headers
+        doc.text("PAYMENT DETAILS", 10, 85);
+        doc.setTextColor(0, 0, 0);
+        
+        // Payment details
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.text("Payment Date:", 10, 92);
+        doc.text(payment.paymentDate || "N/A", 50, 92);
+        
+        doc.text("Payment Method:", 10, 99);
+        doc.text(payment.paymentMethod || "N/A", 50, 99);
+        
+        // Amount paid section
+        doc.setFillColor(240, 240, 250); // Light background
+        doc.rect(0, 110, 100, 30, 'F');
+        
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(62, 84, 172); // Blue color for section headers
+        doc.text("AMOUNT PAID", 50, 120, { align: "center" });
+        
+        // Currency and amount
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(62, 84, 172); // Blue color for the amount
+        doc.setFontSize(18);
+        doc.text(`Php ${formatCurrency(typeof payment.amount === 'string' ? parseFloat(payment.amount) : payment.amount)}`, 50, 130, { align: "center" });        
+        
+        // Thank you note
+        doc.setTextColor(100, 100, 100); // Gray color for thank you
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(9);
+        doc.text("Thank you for your payment!", 50, 145, { align: "center" });
+        
+        // Contact information
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        doc.text("For inquiries, please contact:", 50, 152, { align: "center" });
+        doc.text("centennialwaterresourceventure@gmail.com", 50, 157, { align: "center" });
+      });
+      
+      // Save the PDF
+      doc.save(`Receipts_${month}_${year}_${site}.pdf`);
+    };
+    
+  }
   
   
   
@@ -1243,10 +1346,11 @@ const formatNotificationTimestamp = () => {
     });
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency: "PHP" }).format(amount);
-  };
 
+// Format currency helper
+const formatCurrency = (value) => {
+  return (parseFloat(value) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+};
 
   return (
     <div className="w-full h-full bg-gray-50 p-6">
@@ -1633,9 +1737,20 @@ const formatNotificationTimestamp = () => {
 
           {/* Payment History Tab */}
           <TabsContent value="payment-history" className="space-y-6">
-            <Dialog open={isPrintDialogOpen} onOpenChange={setIsPrintDialogOpen}>
+            <Card>
+              <CardHeader>
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <CardTitle className="text-lg font-semibold text-gray-800">
+                      Payment History
+                    </CardTitle>
+                    <CardDescription className="text-sm text-gray-600">
+                      View the payment history of customers
+                    </CardDescription>
+                  </div>
+                  <Dialog open={isPrintDialogOpen} onOpenChange={setIsPrintDialogOpen}>
                     <DialogTrigger asChild>
-                      <Button variant="outline" className="mb-4">
+                      <Button variant="outline" className="mt-4 md:mt-0">
                         <FileText className="mr-2 h-4 w-4" />
                         Print All Receipts
                       </Button>
@@ -1654,7 +1769,11 @@ const formatNotificationTimestamp = () => {
                             <SelectContent>
                               {Array.from({ length: 12 }, (_, i) => {
                                 const month = String(i + 1).padStart(2, "0");
-                                return <SelectItem key={month} value={month}>{month}</SelectItem>;
+                                return (
+                                  <SelectItem key={month} value={month}>
+                                    {month}
+                                  </SelectItem>
+                                );
                               })}
                             </SelectContent>
                           </Select>
@@ -1667,7 +1786,9 @@ const formatNotificationTimestamp = () => {
                             </SelectTrigger>
                             <SelectContent>
                               {["2024", "2025", "2026"].map((year) => (
-                                <SelectItem key={year} value={year}>{year}</SelectItem>
+                                <SelectItem key={year} value={year}>
+                                  {year}
+                                </SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
@@ -1689,7 +1810,7 @@ const formatNotificationTimestamp = () => {
                         <Button
                           onClick={() => {
                             setIsPrintDialogOpen(false);
-                            handlePrintReceipts(printMonth, printYear, printSite);
+                            handlePrintReceipts( printMonth, printYear, printSite);
                           }}
                           className="w-full"
                         >
@@ -1698,10 +1819,7 @@ const formatNotificationTimestamp = () => {
                       </div>
                     </DialogContent>
                   </Dialog>
-            <Card>
-              <CardHeader>
-                <CardTitle>Payment History</CardTitle>
-                <CardDescription>View the payment history of customers</CardDescription>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4 space-y-4 md:space-y-0">
@@ -1727,17 +1845,13 @@ const formatNotificationTimestamp = () => {
                       </SelectContent>
                     </Select>
                   </div>
-
-                  
                 </div>
 
                 {filteredHistory.length > 0 ? (
                   <>
-                  
-
-                    <Table>
+                    <Table className="border border-gray-200 rounded-lg overflow-hidden">
                       <TableHeader>
-                        <TableRow>
+                        <TableRow className="bg-gray-100">
                           <TableHead>Account #</TableHead>
                           <TableHead>Customer</TableHead>
                           <TableHead>Amount</TableHead>
@@ -1749,10 +1863,15 @@ const formatNotificationTimestamp = () => {
                       </TableHeader>
                       <TableBody>
                         {currentItems.map((payment) => (
-                          <TableRow key={payment.id}>
+                          <TableRow
+                            key={payment.id}
+                            className="hover:bg-gray-50 transition-colors"
+                          >
                             <TableCell>{payment.accountNumber}</TableCell>
                             <TableCell>{payment.customerName}</TableCell>
-                            <TableCell>{formatCurrency(Number(payment.amount))}</TableCell>
+                            <TableCell>
+                              {formatCurrency(Number(payment.amount))}
+                            </TableCell>
                             <TableCell>{payment.referenceNumber}</TableCell>
                             <TableCell>{formatDate(payment.paymentDate)}</TableCell>
                             <TableCell>{payment.paymentMethod}</TableCell>
@@ -1794,7 +1913,9 @@ const formatNotificationTimestamp = () => {
                     </div>
                   </>
                 ) : (
-                  <p className="text-center py-8">No payment history found.</p>
+                  <p className="text-center py-8 text-gray-600">
+                    No payment history found.
+                  </p>
                 )}
               </CardContent>
             </Card>
