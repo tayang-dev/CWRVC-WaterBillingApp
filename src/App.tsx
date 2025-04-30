@@ -12,6 +12,7 @@ import SettingsPage from "./components/settings/SettingPage";
 import MeterReading from "./components/meters/meterReading";
 import ViewBills from "./components/bills/bill"; // Moved import to top
 import Feedback from "./components/feedbacks/Feedbacks"; // Import Feedback component
+import StaffManagement from "./components/staffs/StaffManagement";
 
 // Lazy load components for better performance
 const Dashboard = lazy(() => import("./components/dashboard/Dashboard"));
@@ -163,6 +164,18 @@ function App() {
             }
            />
       
+
+      <Route
+        path="/staff-management"
+        element={
+          <RoleBasedRoute allowedRoles={["admin"]}>
+            <AdminLayout>
+              <StaffManagement />
+            </AdminLayout>
+          </RoleBasedRoute>
+        }
+      />
+
 
           {/* View Individual Bill route */}
           <Route

@@ -182,15 +182,17 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
               label="Customers"
               path="#"
               hasSubItems
-              isOpen={openSection === "accounts"}
+              isOpen={openSection === "accounts" || location.pathname.startsWith("/staff-management")}
               onClick={() => toggleSection("accounts")}
               isActive={
                 location.pathname.startsWith("/accounts") ||
-                location.pathname.startsWith("/users")
+                location.pathname.startsWith("/users") ||
+                location.pathname.startsWith("/staff-management")
               }
               subItems={[
                 { label: "Customer Management", path: "/accounts" },
                 { label: "Accounts", path: "/users" },
+                { label: "Staff Management", path: "/staff-management" },
               ]}
               collapsed={collapsed}
             />

@@ -59,30 +59,9 @@ const LoginForm = ({
   });
 
   const handleSubmit = (values: FormValues) => {
-    // Define allowed emails
-    const allowedEmails = {
-      admin: "centennialwaterventureresource@gmail.com",
-      staff: "sarahfabella11@gmail.com",
-      meter_reader: "haroldbatula34@gmail.com", // Add Meter Reader email
-    };
-
-    // Check if the email is allowed and redirect accordingly
-    if (values.email === allowedEmails.admin) {
-      // Redirect to admin dashboard
-      onSubmit({ ...values, role: "admin" }); // Include role in the submission
-    } else if (values.email === allowedEmails.staff) {
-      // Redirect to staff dashboard
-      onSubmit({ ...values, role: "staff" }); // Include role in the submission
-    } else if (values.email === allowedEmails.meter_reader) {
-      onSubmit({ ...values, role: "meter_reader" }); // Include role in the submission
-    }else {
-      // Set an error message if the email is not allowed
-      form.setError("email", {
-        type: "manual",
-        message: "Unauthorized email. Please use a valid email.",
-      });
-    }
+    onSubmit(values); // Let home.tsx handle validation and role lookup
   };
+  
 
   return (
     <Card className="w-full max-w-md mx-auto bg-white shadow-lg">

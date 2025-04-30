@@ -1,32 +1,39 @@
-import React, { useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { useState } from "react";
+import { useNavigate } from "react-router";
 import LoginForm from "./auth/LoginForm";
-import { useAuth } from "../contexts/AuthContext";
-import { useNavigate } from "react-router-dom";
-
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 const Home = () => {
   const { login, forgotPassword, error } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
   const navigate = useNavigate();
 
-  // Define allowed emails
+  // Define allowed emails with roles
   const allowedEmails = {
-    admin: "centennialwaterventureresource@gmail.com",
-    staff: "sarahfabella11@gmail.com",
-    meter_reader: "haroldbatula34@gmail.com",
+    "centennialwaterventureresource@gmail.com": "admin",
+    "sarahfabella11@gmail.com": "staff",
+    "haroldbatula34@gmail.com": "meter_reader",
   };
 
   const handleLogin = async (values) => {
     setIsLoading(true);
     setLoginError("");
+  
     try {
-      // Check if the email is allowed
-      if (
-        values.email === allowedEmails.admin ||
-        values.email === allowedEmails.staff ||
-        values.email === allowedEmails.meter_reader // Include meter_reader
-      ) {
-        await login(values.email, values.password, values.role);
+      const q = query(collection(db, "staffs"), where("email", "==", values.email));
+      const querySnapshot = await getDocs(q);
+  
+      if (!querySnapshot.empty) {
+        const userDoc = querySnapshot.docs[0];
+        const userData = userDoc.data();
+  
+        if (userData.status !== "active") {
+          throw new Error("Account is inactive. Contact administrator.");
+        }
+  
+        await login(values.email, values.password, userData.role); // Assume login accepts role
         navigate("/dashboard");
       } else {
         throw new Error("Unauthorized email. Please use a valid email.");
