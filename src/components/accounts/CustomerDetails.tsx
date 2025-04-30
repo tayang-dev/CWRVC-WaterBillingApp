@@ -39,6 +39,7 @@ interface CustomerDetailsProps {
     amountDue?: number;
   };
   billingHistory?: Array<{
+    billNumber: string;
     id: string;
     date: string;
     amount: number;
@@ -96,6 +97,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
             status: data.status || "pending",
             dueDate: data.dueDate || "",
             billingPeriod: data.billingPeriod || "",
+            billNumber: data.billNumber || "",
             waterUsage: data.waterUsage || data.meterReading?.consumption || 0,
             penalty: data.penalty || 0,
             tax: data.tax || 0,
@@ -151,7 +153,13 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
           </Badge>
         );
       case "paid":
-        return <Badge className="bg-green-500">Paid</Badge>;
+        return <Badge variant="outline" className="text-green-500 border-green-500">Paid</Badge>;
+        case "partially paid": // New case for "Partially Paid"
+        return (
+          <Badge variant="outline" className="text-blue-500 border-blue-500">
+            Partially Paid
+          </Badge>
+        );
       case "overdue":
         return <Badge variant="destructive">Overdue</Badge>;
       default:
@@ -161,7 +169,21 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
 
   const formatDate = (dateString: string) => {
     if (!dateString) return "N/A";
+  
+    // Check if the date is in "DD/MM/YYYY" format
+    if (/\d{2}\/\d{2}\/\d{4}/.test(dateString)) {
+      const [day, month, year] = dateString.split("/").map(Number); // Split and convert to numbers
+      const parsedDate = new Date(year, month - 1, day); // Create a valid Date object
+      return parsedDate.toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+    }
+  
+    // Handle other formats (e.g., ISO string or timestamp)
     const date = new Date(dateString);
+    if (isNaN(date.getTime())) return "Invalid Date"; // Check if the date is invalid
     return date.toLocaleDateString("en-US", {
       year: "numeric",
       month: "long",
@@ -181,10 +203,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Customer Details</h1>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm">
-            <FileText className="mr-2 h-4 w-4" />
-            Export
-          </Button>
+
           
           
         </div>
@@ -227,12 +246,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
               </div>
             </div>
           </CardContent>
-          <CardFooter className="flex justify-end">
-            <Button variant="outline" size="sm">
-              <Mail className="mr-2 h-4 w-4" />
-              Contact
-            </Button>
-          </CardFooter>
+
         </Card>
 
         <Card className="md:col-span-2">
@@ -319,7 +333,6 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
                       <th className="text-left py-3 px-4 font-medium">Water Usage</th>
                       <th className="text-left py-3 px-4 font-medium">Due Date</th>
                       <th className="text-left py-3 px-4 font-medium">Status</th>
-                      <th className="text-right py-3 px-4 font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -332,19 +345,14 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
                     ) : customerBills.length > 0 ? (
                       customerBills.map((bill) => (
                         <tr key={bill.id} className="border-b hover:bg-gray-50">
-                          <td className="py-3 px-4">{bill.id}</td>
+                          <td className="py-3 px-4">{bill.billNumber}</td>
                           <td className="py-3 px-4">{formatDate(bill.date)}</td>
                           <td className="py-3 px-4">{formatCurrency(bill.amount)}</td>
                           <td className="py-3 px-4">{bill.waterUsage ? `${bill.waterUsage} m³` : "N/A"}</td>
                           <td className="py-3 px-4">{formatDate(bill.dueDate)}</td>
                           <td className="py-3 px-4">{getStatusBadge(bill.status)}</td>
                           <td className="py-3 px-4 text-right">
-                            <Button variant="ghost" size="sm">
-                              <Download className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="sm">
-                              <Mail className="h-4 w-4" />
-                            </Button>
+
                           </td>
                         </tr>
                       ))
@@ -361,9 +369,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
             </CardContent>
             <CardFooter className="flex justify-between">
               <p className="text-sm text-gray-500">Showing {customerBills.length} bills</p>
-              <Button variant="outline" size="sm">
-                View All Bills
-              </Button>
+              
             </CardFooter>
           </Card>
         </TabsContent>

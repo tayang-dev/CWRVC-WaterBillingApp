@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react"; 
+import React, { useState, useEffect, useMemo } from "react"; 
 import {
   ChevronLeft,
   ChevronRight,
@@ -21,7 +21,8 @@ import {
   doc,
   setDoc, 
   updateDoc, 
-  deleteDoc 
+  deleteDoc, 
+  where
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 
@@ -262,33 +263,109 @@ const CustomerList: React.FC<CustomerListProps> = ({
     }
   };
   
+  const checkIfDetailsExist = async (accountNumber: string, meterNumber: string, email?: string, phone?: string, excludeCustomerId?: string) => {
+    try {
+      // Check if account number exists
+      const accountQuery = query(
+        collection(db, "customers"),
+        where("accountNumber", "==", accountNumber)
+      );
+      const accountSnapshot = await getDocs(accountQuery);
+  
+      if (!accountSnapshot.empty && accountSnapshot.docs[0].id !== excludeCustomerId) {
+        setError("Account number already exists. Please use a different block/lot/site combination.");
+        return true;
+      }
+  
+      // Check if meter number exists
+      const meterQuery = query(
+        collection(db, "customers"),
+        where("meterNumber", "==", meterNumber)
+      );
+      const meterSnapshot = await getDocs(meterQuery);
+  
+      if (!meterSnapshot.empty && meterSnapshot.docs[0].id !== excludeCustomerId) {
+        setError("Meter number already exists. Please enter a different meter number.");
+        return true;
+      }
+  
+      // Check if email exists
+      if (email) {
+        const emailQuery = query(
+          collection(db, "customers"),
+          where("email", "==", email)
+        );
+        const emailSnapshot = await getDocs(emailQuery);
+  
+        if (!emailSnapshot.empty && emailSnapshot.docs[0].id !== excludeCustomerId) {
+          setError("Email address already exists. Please use a different email.");
+          return true;
+        }
+      }
+  
+      // Check if phone number exists
+      if (phone) {
+        const phoneQuery = query(
+          collection(db, "customers"),
+          where("phone", "==", phone)
+        );
+        const phoneSnapshot = await getDocs(phoneQuery);
+  
+        if (!phoneSnapshot.empty && phoneSnapshot.docs[0].id !== excludeCustomerId) {
+          setError("Phone number already exists. Please use a different phone number.");
+          return true;
+        }
+      }
+  
+      setError("");
+      return false;
+    } catch (error: any) {
+      setError("Error validating customer details: " + error.message);
+      return true;
+    }
+  };
+
   // Edit Customer Handler
   const handleEditCustomer = async (data: z.infer<typeof formSchema>) => {
     if (!editingCustomer) return;
-
+  
     setIsSubmitting(true);
     setError("");
-
+  
     try {
+      const accountNumber = generateAccountNumber(data.block || "", data.lot || "", data.site || "");
+  
+      // Check if account number, meter number, email, or phone already exists
+      const detailsExist = await checkIfDetailsExist(
+        accountNumber,
+        data.meterNumber,
+        data.email,
+        data.phone,
+        editingCustomer.id // Exclude the current customer being edited
+      );
+  
+      if (detailsExist) {
+        setIsSubmitting(false);
+        return;
+      }
+  
       const siteAddresses = {
         site1: "Site 1, Brgy. Dayap, Calauan, Laguna",
         site2: "Site 2, Brgy. Dayap, Calauan, Laguna",
         site3: "Site 3, Brgy. Dayap, Calauan, Laguna",
       };
-
-      // Use the copied account number generation logic
-      const accountNumber = generateAccountNumber(data.block || "", data.lot || "", data.site || "");
-      const fullName = `${data.firstName} ${data.middleInitial ? data.middleInitial + '. ' : ''}${data.lastName}`.trim();
-      
+  
+      const fullName = `${data.firstName} ${data.middleInitial ? data.middleInitial + ". " : ""}${data.lastName}`.trim();
+  
       const customerRef = doc(db, "customers", editingCustomer.id);
       await updateDoc(customerRef, {
         ...data,
         name: fullName,
-        accountNumber, // updated account number
+        accountNumber, // Updated account number
         email: data.email || null,
         address: siteAddresses[data.site as keyof typeof siteAddresses],
       });
-
+  
       await fetchCustomers();
       setEditingCustomer(null);
     } catch (error: any) {
@@ -297,7 +374,7 @@ const CustomerList: React.FC<CustomerListProps> = ({
       setIsSubmitting(false);
     }
   };
-
+  
 // Delete Customer Handler
 const handleDeleteCustomer = async () => {
   if (!deletingCustomer) return;
@@ -581,22 +658,21 @@ const handleDeleteCustomer = async () => {
     </AlertDialog>
   );
 
-  // Filter customers based on search term, site, and isSenior
-  const filteredCustomers = customers.filter((customer) => {
-    const matchesSearchTerm =
-      customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.accountNumber.toLowerCase().includes(searchTerm.toLowerCase());
-
-    const matchesSite = filterSite === "all" || customer.site === filterSite;
-    const matchesSenior = !filterSenior || customer.isSenior === true;
-
-    return matchesSearchTerm && matchesSite && matchesSenior;
-  });
-  // Update the filteredCustomers calculation to notify parent component
-  // This can be added at the end of your existing filteredCustomers calculation
+  const filteredCustomers = useMemo(() => {
+    return customers.filter((customer) => {
+      const matchesSearchTerm =
+        customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        customer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        customer.accountNumber.toLowerCase().includes(searchTerm.toLowerCase());
+  
+      const matchesSite = filterSite === "all" || customer.site === filterSite;
+      const matchesSenior = !filterSenior || customer.isSenior === true;
+  
+      return matchesSearchTerm && matchesSite && matchesSenior;
+    });
+  }, [customers, searchTerm, filterSite, filterSenior]);
+  
   useEffect(() => {
-    // Send the filtered customers to parent component for export
     if (onFilteredDataChange) {
       onFilteredDataChange(filteredCustomers);
     }

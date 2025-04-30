@@ -149,36 +149,66 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
   }, [form]);
 
   // Check if account number or meter number already exists
-  const checkIfDetailsExist = async (accountNumber: string, meterNumber: string) => {
+  const checkIfDetailsExist = async (accountNumber: string, meterNumber: string, email?: string, phone?: string) => {
     setIsValidatingDetails(true);
-    
+  
     try {
       // Check if account number exists
       const accountQuery = query(
-        collection(db, "customers"), 
+        collection(db, "customers"),
         where("accountNumber", "==", accountNumber)
       );
       const accountSnapshot = await getDocs(accountQuery);
-      
+  
       if (!accountSnapshot.empty) {
         setError("Account number already exists. Please use a different block/lot/site combination.");
         setIsValidatingDetails(false);
         return true;
       }
-      
+  
       // Check if meter number exists
       const meterQuery = query(
-        collection(db, "customers"), 
+        collection(db, "customers"),
         where("meterNumber", "==", meterNumber)
       );
       const meterSnapshot = await getDocs(meterQuery);
-      
+  
       if (!meterSnapshot.empty) {
         setError("Meter number already exists. Please enter a different meter number.");
         setIsValidatingDetails(false);
         return true;
       }
-      
+  
+      // Check if email exists
+      if (email) {
+        const emailQuery = query(
+          collection(db, "customers"),
+          where("email", "==", email)
+        );
+        const emailSnapshot = await getDocs(emailQuery);
+  
+        if (!emailSnapshot.empty) {
+          setError("Email address already exists. Please use a different email.");
+          setIsValidatingDetails(false);
+          return true;
+        }
+      }
+  
+      // Check if phone number exists
+      if (phone) {
+        const phoneQuery = query(
+          collection(db, "customers"),
+          where("phone", "==", phone)
+        );
+        const phoneSnapshot = await getDocs(phoneQuery);
+  
+        if (!phoneSnapshot.empty) {
+          setError("Phone number already exists. Please use a different phone number.");
+          setIsValidatingDetails(false);
+          return true;
+        }
+      }
+  
       setError("");
       setIsValidatingDetails(false);
       return false;
@@ -195,8 +225,13 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
   
     try {
       // Check if account number or meter number already exists
-      const detailsExist = await checkIfDetailsExist(generatedAccountNumber, data.meterNumber);
-      
+      const detailsExist = await checkIfDetailsExist(
+        generatedAccountNumber,
+        data.meterNumber,
+        data.email,
+        data.phone
+      );
+            
       if (detailsExist) {
         setIsSubmitting(false);
         return;

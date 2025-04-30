@@ -914,7 +914,8 @@ useEffect(() => {
             currentAmountDue: data.currentAmountDue || 0,
             dueDate: data.dueDate,
             overPayment: data.overPayment || 0,
-            penaltyApplied: data.penaltyApplied || false  // Renamed from taxApplied to penaltyApplied
+            penaltyApplied: data.penaltyApplied || false, // Renamed from taxApplied to penaltyApplied
+            originalAmount: data.originalAmount || 0, // Ensure originalAmount is included
           };
         })
         .sort((a, b) => parseInt(a.billNumber || "0") - parseInt(b.billNumber || "0"));
@@ -992,7 +993,8 @@ useEffect(() => {
             amount: 0,
             currentAmountDue: 0,
             paidAt: new Date().toISOString(),
-            penaltyApplied: penaltyApplied  // Keep the penaltyApplied status for record
+            penaltyApplied: penaltyApplied,  // Keep the penaltyApplied status for record
+            status: "paid", // Update status to "paid"
           });
         } else {
           // Partial payment: update the bill's amount.
@@ -1000,7 +1002,8 @@ useEffect(() => {
           await updateDoc(bill.ref, {
             amount: newRemaining,
             currentAmountDue: newRemaining,
-            penaltyApplied: penaltyApplied  // Keep the penaltyApplied status
+            penaltyApplied: penaltyApplied,  // Keep the penaltyApplied status
+            status: newRemaining < bill.originalAmount ? "partially paid" : "pending", // Update status to "partially paid" or "pending"
           });
           remainingPayment = 0;
         }

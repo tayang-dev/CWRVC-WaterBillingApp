@@ -106,19 +106,25 @@ const StaffManagement = () => {
     setFormData({ name: "", email: "", password: "", role: "staff", status: "active" });
   };
 
-  const handleDeleteStaff = async (id: string, uid: string) => {
-    try {
-      const user = auth.currentUser;
-      if (user && user.uid === uid) {
-        await deleteUser(user);
-      }
-      const staffRef = doc(db, "staffs", id);
-      await deleteDoc(staffRef);
-      setStaffs((prev) => prev.filter((staff) => staff.id !== id));
-    } catch (error) {
-      console.error("Error deleting user:", error);
-    }
-  };
+const handleDeleteStaff = async (id: string, uid: string) => {
+  try {
+    // Show a confirmation prompt
+    const confirmDelete = window.confirm("Are you sure you want to delete this staff member?");
+    if (!confirmDelete) return; // Exit if the user cancels
+
+    // Remove the `deleteUser` call since the admin is not deleting their own account
+    const staffRef = doc(db, "staffs", id);
+    await deleteDoc(staffRef);
+
+    // Update the state to remove the deleted staff from the list
+    setStaffs((prev) => prev.filter((staff) => staff.id !== id));
+
+    alert("Staff member deleted successfully.");
+  } catch (error) {
+    console.error("Error deleting staff member:", error);
+    alert("An error occurred while deleting the staff member. Please try again.");
+  }
+};
 
   const filteredStaffs = staffs.filter(
     (staff) =>
@@ -142,7 +148,11 @@ const StaffManagement = () => {
           </div>
           <Button
             className="bg-blue-600 text-white hover:bg-blue-700"
-            onClick={() => setIsDialogOpen(true)}
+            onClick={() => {
+              setEditingStaff(null); // Reset editingStaff to null
+              setFormData({ name: "", email: "", password: "", role: "staff", status: "active" }); // Reset form data
+              setIsDialogOpen(true); // Open the dialog
+            }}
           >
             Add Staff
           </Button>
