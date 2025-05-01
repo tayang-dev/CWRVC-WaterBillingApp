@@ -160,7 +160,7 @@ const LoginForm = ({
         <div className="text-center text-sm text-gray-600">
           <p>Water Billing Web-App - Admin Portal</p>
           <p className="mt-1 text-xs text-gray-500">
-            &copy; {new Date().getFullYear()} Water Utility Company          
+            &copy; {new Date().getFullYear()} Centennial Water Resource Venture Corporation         
             </p>
         </div>
       </CardFooter>

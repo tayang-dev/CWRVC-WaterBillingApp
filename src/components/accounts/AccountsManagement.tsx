@@ -6,6 +6,7 @@ import CustomerList from "./CustomerList";
 import CustomerDetails from "./CustomerDetails";
 import AddCustomerForm from "./AddCustomerForm";
 import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
 
 interface AccountsManagementProps {
   initialView?: "list" | "details";
@@ -539,6 +540,183 @@ useEffect(() => {
 
 
 
+
+const handlePrintLoginCredentials = () => {
+  if (filteredCustomersForExport.length === 0) {
+    alert("No customers available to print login credentials.");
+    return;
+  }
+
+  // Create a new PDF with letter size format
+  const doc = new jsPDF({
+    format: 'letter'
+  });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+
+  // Define colors for professional look
+  const primaryColor = [0, 83, 156]; // Deep blue
+  const secondaryColor = [100, 100, 100]; // Dark gray
+  const accentColor = [240, 240, 240]; // Light gray for backgrounds
+
+  // Company information
+  const companyName = "CENTENNIAL WATER RESOURCE VENTURE CORPORATION";
+  const companyAddress = "Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna";
+  const logoPath = "src/assets/logo.png";
+
+  // Add company logo image
+  try {
+    const img = new Image();
+    img.src = logoPath;
+
+    filteredCustomersForExport.forEach((customer, index) => {
+      // Add company logo/header
+      doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.rect(0, 0, pageWidth, 42, "F");
+
+      // Add logo with increased width (from 30 to 35)
+      try {
+        doc.addImage(img, "PNG", 10, 5, 35, 30);
+      } catch (e) {
+        console.warn("Logo couldn't be added:", e);
+      }
+
+      // Company name
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(255, 255, 255); // White text for header
+      doc.text(companyName, pageWidth - 10, 15, { align: "right" });
+
+      // Company address
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(companyAddress, pageWidth - 10, 22, { align: "right" });
+
+      // Title
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(20);
+      doc.text("Initial Login Credentials", pageWidth - 10, 32, { align: "right" });
+
+      // Reset text color for main content
+      doc.setTextColor(0, 0, 0);
+
+      // Add decorative element
+      doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.setLineWidth(1.5);
+      doc.line(10, 47, pageWidth - 10, 47);
+
+      // Recommendation box
+      doc.setFillColor(accentColor[0], accentColor[1], accentColor[2]);
+      doc.roundedRect(10, 52, pageWidth - 20, 20, 3, 3, "F");
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(11);
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.text(
+        "These are your initial login credentials. Please change your password upon first login for security purposes.",
+        pageWidth / 2,
+        64,
+        { align: "center", maxWidth: pageWidth - 40 }
+      );
+
+      // Customer Details Section
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text("Customer Details", 10, 85);
+
+      // Add subtle underline for section headers
+      doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.setLineWidth(0.5);
+      doc.line(10, 87, 80, 87);
+
+      // Customer info
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+
+      // Create two-column layout for customer info
+      const leftColX = 10;
+      const rightColX = pageWidth / 2 + 10;
+
+      doc.text(`Account Number:`, leftColX, 100);
+      doc.setFont("helvetica", "bold");
+      doc.text(`${customer.accountNumber || "N/A"}`, leftColX + 40, 100);
+
+      doc.setFont("helvetica", "normal");
+      doc.text(`Name:`, rightColX, 100);
+      doc.setFont("helvetica", "bold");
+      doc.text(`${customer.name || "N/A"}`, rightColX + 20, 100);
+
+      // Add service address if available
+      doc.setFont("helvetica", "normal");
+      doc.text(`Service Address:`, leftColX, 115);
+      doc.setFont("helvetica", "bold");
+      doc.text(`${customer.address || "N/A"}`, leftColX + 40, 115);
+
+      // Login Credentials Section with highlighted box
+      doc.setFillColor(accentColor[0], accentColor[1], accentColor[2]);
+      doc.roundedRect(10, 130, pageWidth - 20, 60, 3, 3, "F");
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text("Login Credentials", pageWidth / 2, 145, { align: "center" });
+
+      // Add icon-like elements for username and password
+      doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.circle(30, 160, 3, "F");
+      doc.circle(30, 175, 3, "F");
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      const username = customer.email || customer.phone || "N/A";
+      const password = customer.accountNumber;
+
+      // Display credentials with proper spacing
+      doc.text(`Username:`, 40, 160);
+      doc.setFont("helvetica", "bold");
+      doc.text(`${username}`, 90, 160);
+
+      doc.setFont("helvetica", "normal");
+      doc.text(`Password:`, 40, 175);
+      doc.setFont("helvetica", "bold");
+      doc.text(`${password}`, 90, 175);
+
+      // Footer with security notice
+      doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.rect(0, pageHeight - 25, pageWidth, 25, "F");
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(255, 255, 255);
+      doc.text("IMPORTANT SECURITY NOTICE", pageWidth / 2, pageHeight - 15, { align: "center" });
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.text(
+        "For your protection, please keep this document secure and change your password immediately after first login.",
+        pageWidth / 2,
+        pageHeight - 8,
+        { align: "center", maxWidth: pageWidth - 20 }
+      );
+
+      // Add a new page for the next customer, except for the last one
+      if (index < filteredCustomersForExport.length - 1) {
+        doc.addPage();
+      }
+    });
+
+    // Save the PDF with more descriptive filename
+    doc.save(`Filtered_Login_Credentials_${new Date().toISOString().slice(0, 10)}.pdf`);
+  } catch (e) {
+    console.error("Error generating PDF:", e);
+    alert("Error generating PDF. Please try again later.");
+  }
+};
+
+
+
   // Function to handle export button click
   const handleExportData = () => {
     // Use the most recent filtered customers data
@@ -583,6 +761,18 @@ useEffect(() => {
               <Download className="h-4 w-4" />
               Export Data
             </Button>
+            
+            {/* Print Login Credentials Button */}
+            <Button
+              variant="outline"
+              className="flex items-center gap-2"
+              onClick={handlePrintLoginCredentials}
+            >
+              <Download className="h-4 w-4" />
+              Print Login Credentials
+            </Button>
+            
+            {/* Add Customer Button */}
             <Button
               className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
               onClick={() => setView("add")}

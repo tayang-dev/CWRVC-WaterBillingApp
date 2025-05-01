@@ -200,6 +200,24 @@ const Bill: React.FC = () => {
     }
   };
 
+  const fetchAllBills = async () => {
+    try {
+      const allBillsSnapshot = await getDocs(collectionGroup(db, "records")); // From /bills/{account}/records
+      const allBills = allBillsSnapshot.docs.map(doc => doc.data());
+      return allBills;
+    } catch (error) {
+      console.error("Failed to fetch all bills:", error);
+      return [];
+    }
+  };
+  const [allBills, setAllBills] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetchAllBills().then(setAllBills);
+  }, []);
+    
+
+
 const fetchMeterReadingsByDueDate = async (formattedDueDate: string) => {
   setLoadingState("loading");
   try {
@@ -1785,7 +1803,9 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
               </h3>
               <ul className="list-disc pl-5 text-yellow-700 space-y-1">
                 {(() => {
-                  const billedAccounts = new Set(bills.map(b => b.accountNumber + "_" + b.billingPeriod)); // 🔥 Match by account + period
+                  const billedAccounts = new Set(
+                    allBills.map(b => b.accountNumber + "_" + b.billingPeriod)
+                  );
 
                   return allMeterReadings
                     .filter(reading => {

@@ -2,6 +2,7 @@ import React from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import logoImage from "@/assets/logo.png"; // Adjust the path as necessary
+import { QRCodeCanvas } from "qrcode.react";
 
 // Utility function to format currency
 const formatCurrency = (amount) => {
@@ -267,11 +268,24 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills }) => 
                   </p>
                 </div>
 
-                {/* Print Button */}
+                {/* Replace the Print Button with QR Code */}
                 <div className="mt-4 flex justify-end">
-                  <Button onClick={() => window.print()} className="bg-blue-600 text-white">
-                    Print Bill
-                  </Button>
+                  <div className="flex flex-col items-center">
+                  <QRCodeCanvas
+                      value={JSON.stringify({
+                        billNumber: bill.billNumber || "0000000000",
+                        customerName: bill.customerName || "CUSTOMER NAME",
+                        amount: bill.originalAmount?.toFixed(2) || "0.00",
+                        dueDate: bill.dueDate || "01/01/2025",
+                        accountNumber: bill.accountNumber || "00-00-0000",
+                        amountAfterDue: bill.amountAfterDue?.toFixed(2) || "0.00",
+                      })}
+                      size={128} // Size of the QR code
+                      level="H" // Error correction level
+                      includeMargin={true} // Include margin around the QR code
+                    />
+                    <p className="mt-2 text-sm text-gray-600">Scan to view bill details</p>
+                  </div>
                 </div>
               </div>
             );

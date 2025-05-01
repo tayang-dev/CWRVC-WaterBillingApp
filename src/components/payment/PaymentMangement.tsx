@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+
 import {
   Card,
   CardContent,
@@ -197,7 +198,97 @@ const PaymentManagement = () => {
   const [printYear, setPrintYear] = useState("");
   const [printSite, setPrintSite] = useState("all");
   const [isPrintDialogOpen, setIsPrintDialogOpen] = useState(false);
+  const [filterMonth, setFilterMonth] = useState<string>("all");
+const [filterYear, setFilterYear] = useState<string>("all");
+  const formatDateTime = (dateTimeString: string) => {
+    if (!dateTimeString) return "N/A";
+    const dateTimeParts = dateTimeString.split(" ");
+    if (dateTimeParts.length !== 2) return "Invalid Date";
+    const [datePart, timePart] = dateTimeParts;
+    const dateParts = datePart.split("/");
+    if (dateParts.length !== 3) return "Invalid Date";
+    const [day, month, year] = dateParts.map(Number);
+    if (!day || !month || !year) return "Invalid Date";
+    const formattedDate = new Date(year, month - 1, day);
+    const timePartsArr = timePart.split(":").map(Number);
+    if (timePartsArr.length === 3) {
+      formattedDate.setHours(timePartsArr[0], timePartsArr[1], timePartsArr[2]);
+    }
+    return formattedDate.toLocaleString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  };
 
+  const formatSubmissionDateTime = (date: Date) => {
+    // Format as "dd/mm/yyyy hh:mm:ss"
+    const day = String(date.getDate()).padStart(2, "0");
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    const seconds = String(date.getSeconds()).padStart(2, "0");
+  
+    return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+  };
+  const formatDate = (dateString: string) => {
+    if (!dateString) return "N/A";
+    const dateParts = dateString.split("/");
+    if (dateParts.length !== 3) return "Invalid Date";
+    const [day, month, year] = dateParts.map(Number);
+    if (!day || !month || !year) return "Invalid Date";
+    const formattedDate = new Date(year, month - 1, day);
+    return formattedDate.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  };
+  const formatPaymentDate = (date: Date) => {
+    const day = String(date.getDate()).padStart(2, "0");
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
+const [isCreateReceiptDialogOpen, setIsCreateReceiptDialogOpen] = useState(false);
+const [formData, setFormData] = useState({
+  accountNumber: "",
+  amount: "",
+  customerName: "",
+  paymentDate: formatPaymentDate(new Date()), // Default to today's date
+  paymentMethod: "Cash",
+  referenceNumber: "N/A",
+  status: "pending",
+  submissionDateTime: formatSubmissionDateTime(new Date()), // Format as "dd/mm/yyyy hh:mm:ss"
+});
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleCreateReceipt = async () => {
+    setIsProcessing(true);
+    try {
+      const { collection, addDoc } = await import("firebase/firestore");
+      const { db } = await import("../../lib/firebase");
+
+      await addDoc(collection(db, "paymentVerifications"), formData);
+      alert("Cash receipt created successfully!");
+      setIsCreateReceiptDialogOpen(false);
+    } catch (error) {
+      console.error("Error creating cash receipt:", error);
+      alert("Failed to create cash receipt. Please try again.");
+    } finally {
+      setIsProcessing(false); // Reset processing state
+    }
+  };
 // Add these state variables near your other state declarations:
 const [currentPage, setCurrentPage] = useState(1);
 // Removed duplicate declaration of itemsPerPage
@@ -299,22 +390,31 @@ useEffect(() => {
 
 useEffect(() => {
   const filtered = paymentHistory.filter((payment) => {
+    // Parse the payment date in dd/mm/yyyy format
+    const [day, month, year] = payment.paymentDate.split("/").map(Number);
+    const paymentDate = new Date(year, month - 1, day);
+
     const matchesSearch =
       payment.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       payment.accountNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       payment.referenceNumber?.toLowerCase().includes(searchTerm.toLowerCase());
 
-    const matchesSite = filterSite === "all" || (payment.site || "").toLowerCase() === filterSite.toLowerCase();
+    const matchesSite =
+      filterSite === "all" || (payment.site || "").toLowerCase() === filterSite.toLowerCase();
 
-    const matchesDate =
-      !filterDate || new Date(payment.paymentDate).toLocaleDateString() === new Date(filterDate).toLocaleDateString();
+    const matchesMonth =
+      filterMonth === "all" || paymentDate.getMonth() + 1 === parseInt(filterMonth);
 
-    return matchesSearch && matchesSite && matchesDate;
+    const matchesYear =
+      filterYear === "all" || paymentDate.getFullYear() === parseInt(filterYear);
+
+    return matchesSearch && matchesSite && matchesMonth && matchesYear;
   });
 
   setFilteredHistory(filtered);
   setCurrentPage(1);
-}, [searchTerm, filterSite, filterDate, paymentHistory]);
+}, [searchTerm, filterSite, filterMonth, filterYear, paymentHistory]);
+
 
 
 // Pagination logic
@@ -1039,10 +1139,26 @@ useEffect(() => {
           const previousOverPayment = parseFloat(latestBill.data.overPayment || "0");
           const newOverPayment = previousOverPayment + remainingPayment;
           
-          await updateDoc(latestBill.ref, { overPayment: newOverPayment });
+          await updateDoc(latestBill.ref, {
+            overPayment: newOverPayment,
+            appliedOverpayment: remainingPayment  // New field update
+          });
           console.log(
             `✅ Overpayment of ${remainingPayment} applied to latest bill with billNumber ${latestBill.billNumber}`
           );
+          // Send a notification about the overpayment
+          await addDoc(collection(db, "notifications", accountNumber, "records"), {
+            type: "payment",
+            verificationId: selectedVerification.id,
+            customerId: customerId,
+            accountNumber: accountNumber,
+            status: "overpayment",
+            paymentAmount: remainingPayment,
+            description: `An overpayment of ₱${remainingPayment.toFixed(
+              2
+            )} has been recorded for your account. The amount will be applied to future bills.`,
+            createdAt: formatNotificationTimestamp(),
+          });
         }
       }
   
@@ -1310,44 +1426,9 @@ const formatNotificationTimestamp = () => {
 
 
 
-  const formatDateTime = (dateTimeString: string) => {
-    if (!dateTimeString) return "N/A";
-    const dateTimeParts = dateTimeString.split(" ");
-    if (dateTimeParts.length !== 2) return "Invalid Date";
-    const [datePart, timePart] = dateTimeParts;
-    const dateParts = datePart.split("/");
-    if (dateParts.length !== 3) return "Invalid Date";
-    const [day, month, year] = dateParts.map(Number);
-    if (!day || !month || !year) return "Invalid Date";
-    const formattedDate = new Date(year, month - 1, day);
-    const timePartsArr = timePart.split(":").map(Number);
-    if (timePartsArr.length === 3) {
-      formattedDate.setHours(timePartsArr[0], timePartsArr[1], timePartsArr[2]);
-    }
-    return formattedDate.toLocaleString("en-US", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: true,
-    });
-  };
 
-  const formatDate = (dateString: string) => {
-    if (!dateString) return "N/A";
-    const dateParts = dateString.split("/");
-    if (dateParts.length !== 3) return "Invalid Date";
-    const [day, month, year] = dateParts.map(Number);
-    if (!day || !month || !year) return "Invalid Date";
-    const formattedDate = new Date(year, month - 1, day);
-    return formattedDate.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
-  };
+
+
 
 
 // Format currency helper
@@ -1576,6 +1657,164 @@ const formatCurrency = (value) => {
                 <CardDescription>Review and verify customer payment submissions</CardDescription>
               </CardHeader>
               <CardContent>
+                {/* Add the button for creating a cash receipt */}
+                <div className="flex justify-end mb-4">
+                <Dialog open={isCreateReceiptDialogOpen} onOpenChange={setIsCreateReceiptDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="bg-green-600 hover:bg-green-700">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Create Cash Receipt
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-[600px]">
+                    <DialogHeader>
+                      <DialogTitle>Create Cash Receipt</DialogTitle>
+                    </DialogHeader>
+                    <div className="grid gap-6 py-4">
+                      {/* Customer Information Section */}
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-800">Customer Information</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+                          <div>
+                            <Label htmlFor="accountNumber">Account Number</Label>
+                            <Input
+                              id="accountNumber"
+                              name="accountNumber"
+                              value={formData.accountNumber}
+                              onChange={async (e) => {
+                                const accountNumber = e.target.value;
+                                setFormData((prev) => ({ ...prev, accountNumber }));
+
+                                // Fetch customer name from Firestore
+                                if (accountNumber) {
+                                  try {
+                                    const { collection, query, where, getDocs } = await import("firebase/firestore");
+                                    const { db } = await import("../../lib/firebase");
+
+                                    const customersCollection = collection(db, "customers");
+                                    const customerQuery = query(
+                                      customersCollection,
+                                      where("accountNumber", "==", accountNumber)
+                                    );
+                                    const snapshot = await getDocs(customerQuery);
+
+                                    if (!snapshot.empty) {
+                                      const customer = snapshot.docs[0].data();
+                                      setFormData((prev) => ({
+                                        ...prev,
+                                        customerName: customer.name || "",
+                                      }));
+                                    } else {
+                                      setFormData((prev) => ({ ...prev, customerName: "" }));
+                                    }
+                                  } catch (error) {
+                                    console.error("Error fetching customer name:", error);
+                                  }
+                                } else {
+                                  setFormData((prev) => ({ ...prev, customerName: "" }));
+                                }
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="customerName">Customer Name</Label>
+                            <Input
+                              id="customerName"
+                              name="customerName"
+                              value={formData.customerName}
+                              onChange={handleInputChange}
+                              disabled
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Payment Details Section */}
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-800">Payment Details</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+                          <div>
+                            <Label htmlFor="amount">Amount</Label>
+                            <Input
+                              id="amount"
+                              name="amount"
+                              value={formData.amount}
+                              onChange={handleInputChange}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="paymentDate">Payment Date</Label>
+                            <Input
+                              id="paymentDate"
+                              name="paymentDate"
+                              value={formData.paymentDate}
+                              onChange={handleInputChange}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="paymentMethod">Payment Method</Label>
+                            <Input
+                              id="paymentMethod"
+                              name="paymentMethod"
+                              value={formData.paymentMethod}
+                              disabled
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="referenceNumber">Reference Number</Label>
+                            <Input
+                              id="referenceNumber"
+                              name="referenceNumber"
+                              value={formData.referenceNumber}
+                              disabled
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Status Section */}
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-800">Status</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+                          <div>
+                            <Label htmlFor="status">Status</Label>
+                            <Input id="status" name="status" value={formData.status} disabled />
+                          </div>
+                          <div>
+                            <Label htmlFor="submissionDateTime">Submission DateTime</Label>
+                            <Input
+                              id="submissionDateTime"
+                              name="submissionDateTime"
+                              value={formData.submissionDateTime}
+                              disabled
+                            />
+                          </div>
+
+                        </div>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setIsCreateReceiptDialogOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button
+                      onClick={handleCreateReceipt}
+                      disabled={isProcessing} // Disable the button while processing
+                      className={`bg-green-600 hover:bg-green-700 ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
+                    >
+                      {isProcessing ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Processing...
+                        </>
+                      ) : (
+                        "Save Receipt"
+                      )}
+                    </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
                 {loading ? (
                   <div className="flex justify-center items-center h-40">
                     <p>Loading payment verifications...</p>
@@ -1671,15 +1910,18 @@ const formatCurrency = (value) => {
                   </div>
                 </div>
                 <div className="mt-4">
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select verification status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="verified">Verified</SelectItem>
-                      <SelectItem value="rejected">Rejected</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <Select
+                  value={verificationStatus}
+                  onValueChange={(value) => setVerificationStatus(value as "verified" | "rejected")}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select verification status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="verified">Verified</SelectItem>
+                    <SelectItem value="rejected">Rejected</SelectItem>
+                  </SelectContent>
+                </Select>
                 </div>
                 <div className="mt-2">
                   <Label htmlFor="verification-notes">Notes</Label>
@@ -1751,6 +1993,7 @@ const formatCurrency = (value) => {
                       View the payment history of customers
                     </CardDescription>
                   </div>
+                  
                   <Dialog open={isPrintDialogOpen} onOpenChange={setIsPrintDialogOpen}>
                     <DialogTrigger asChild>
                       <Button variant="outline" className="mt-4 md:mt-0">
@@ -1810,6 +2053,7 @@ const formatCurrency = (value) => {
                             </SelectContent>
                           </Select>
                         </div>
+                        
                         <Button
                           onClick={() => {
                             setIsPrintDialogOpen(false);
@@ -1845,6 +2089,42 @@ const formatCurrency = (value) => {
                         <SelectItem value="site1">Site 1</SelectItem>
                         <SelectItem value="site2">Site 2</SelectItem>
                         <SelectItem value="site3">Site 3</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {/* Filter by Month */}
+                  <div className="w-full md:w-1/4">
+                    <Select value={filterMonth} onValueChange={setFilterMonth}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Filter by Month" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Months</SelectItem>
+                        {Array.from({ length: 12 }, (_, i) => {
+                          const month = String(i + 1).padStart(2, "0");
+                          return (
+                            <SelectItem key={month} value={month}>
+                              {new Date(0, i).toLocaleString("en-US", { month: "long" })}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  {/* Filter by Year */}
+                  <div className="w-full md:w-1/4">
+                    <Select value={filterYear} onValueChange={setFilterYear}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Filter by Year" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Years</SelectItem>
+                        {["2023", "2024", "2025", "2026"].map((year) => (
+                          <SelectItem key={year} value={year}>
+                            {year}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1926,6 +2206,7 @@ const formatCurrency = (value) => {
         </Tabs>
       </div>
     </div>
+
   );
 };
 

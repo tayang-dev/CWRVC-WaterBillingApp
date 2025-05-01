@@ -97,12 +97,13 @@ const SidebarItem = ({
 
 interface SidebarProps {
   className?: string;
+  collapsed: boolean;
+  toggleSidebar: () => void;
 }
 
-const Sidebar = ({ className = "" }: SidebarProps) => {
+const Sidebar = ({ className = "", collapsed, toggleSidebar }: SidebarProps) => {
   const location = useLocation();
   const [openSection, setOpenSection] = useState<string | null>("accounts");
-  const [collapsed, setCollapsed] = useState<boolean>(false);
   const { userRole } = useAuth();
 
   const toggleSection = (section: string) => {
@@ -157,7 +158,7 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={toggleSidebar}
           className="p-1"
         >
           {collapsed ? <Menu className="h-5 w-5" /> : <ArrowLeft className="h-5 w-5" />}
@@ -179,25 +180,23 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
           <>
             <SidebarItem
               icon={<Users className="h-5 w-5" />}
-              label="Customers"
+              label="Accounts"
               path="#"
               hasSubItems
               isOpen={openSection === "accounts" || location.pathname.startsWith("/staff-management")}
               onClick={() => toggleSection("accounts")}
               isActive={
                 location.pathname.startsWith("/accounts") ||
-                location.pathname.startsWith("/users") ||
                 location.pathname.startsWith("/staff-management")
               }
               subItems={[
                 { label: "Customer Management", path: "/accounts" },
-                { label: "Accounts", path: "/users" },
                 { label: "Staff Management", path: "/staff-management" },
               ]}
               collapsed={collapsed}
             />
             
-            {/* Payment Management and Bills next to each other */}
+            {/* Payment Management and Bills */}
             <SidebarItem
               icon={<CreditCard className="h-5 w-5" />}
               label="Payment Management"
@@ -229,7 +228,7 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
             />
             <SidebarItem
               icon={<BarChart className="h-5 w-5" />}
-              label="Reports"
+              label="Leaks"
               path="/reports"
               isActive={location.pathname.startsWith("/reports")}
               collapsed={collapsed}
@@ -252,20 +251,17 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
         )}
 
         {userRole === "meter_reader" && (
-          <>
-            <SidebarItem
-              icon={<ClipboardList className="h-5 w-5" />}
-              label="Meter Reading"
-              path="/meters"
-              isActive={location.pathname.startsWith("/meters")}
-              collapsed={collapsed}
-            />
-          </>
+          <SidebarItem
+            icon={<ClipboardList className="h-5 w-5" />}
+            label="Meter Reading"
+            path="/meters"
+            isActive={location.pathname.startsWith("/meters")}
+            collapsed={collapsed}
+          />
         )}
 
         {userRole === "staff" && (
           <>
-            {/* Payment Management and Bills next to each other for cashier */}
             <SidebarItem
               icon={<CreditCard className="h-5 w-5" />}
               label="Payment Management"
@@ -280,7 +276,6 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
               isActive={location.pathname.startsWith("/bills")}
               collapsed={collapsed}
             />
-            
             <SidebarItem
               icon={<MessageSquare className="h-5 w-5" />}
               label="Customer Service"
@@ -297,7 +292,7 @@ const Sidebar = ({ className = "" }: SidebarProps) => {
             />
             <SidebarItem
               icon={<BarChart className="h-5 w-5" />}
-              label="Reports"
+              label="Leaks"
               path="/reports"
               isActive={location.pathname.startsWith("/reports")}
               collapsed={collapsed}

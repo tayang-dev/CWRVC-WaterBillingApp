@@ -53,6 +53,10 @@ interface FirestoreData {
   categories?: string[];
   userId?: string;
   appVersion?: string;
+  lastMessageTime?: Timestamp;
+  lastMessageAdmin?: string;
+  hasNewMessage?: boolean;
+  submissionDateTime?: string;
 }
 
 const Header = ({
@@ -68,64 +72,58 @@ const Header = ({
 
   useEffect(() => {
     const collections = [
-      { 
-        name: "users", 
-        condition: where("verificationStatus", "==", "pending"), 
-        title: "Pending User Verification", 
-        link: (id: string) => `/users?tab=verifications&id=${id}` 
+      {
+        name: "paymentVerifications",
+        condition: where("status", "==", "pending"),
+        title: "Pending Payment",
+        link: (id: string) => `/payments?tab=payment-verification&id=${id}`,
       },
-      { 
-        name: "paymentVerifications", 
-        condition: where("status", "==", "pending"), 
-        title: "Pending Payment", 
-        link: (id: string) => `/payments?tab=payment-verification&id=${id}` 
+      {
+        name: "requests",
+        condition: where("status", "==", "pending"),
+        title: "New Service Request",
+        link: (id: string) => `/requests?tab=in-progress&id=${id}`,
       },
-      { 
-        name: "requests", 
-        condition: where("status", "==", "in-progress"), 
-        title: "New Service Request", 
-        link: (id: string) => `/requests?tab=in-progress&id=${id}` 
+      {
+        name: "chats",
+        condition: where("hasNewMessage", "==", true),
+        title: "New Chat Message",
+        link: (id: string) => `/customer-support?chat=${id}`,
       },
-      { 
-        name: "chats", 
-        condition: where("status", "==", "active"), 
-        title: "New Chat Message", 
-        link: (id: string) => `/customer-support?chat=${id}` 
+      {
+        name: "leaks",
+        condition: where("read", "==", false),
+        title: "New Leak Report",
+        link: (id: string) => `/reports?tab=leaks&id=${id}`,
       },
-      { 
-        name: "leaks", 
-        condition: where("read", "==", false), 
-        title: "New Leak Report", 
-        link: (id: string) => `/reports?tab=leaks&id=${id}` 
-      },
-      { 
-        name: "feedback", 
-        condition: where("read", "==", false), 
-        title: "New Customer Feedback", 
-        link: (id: string) => `/feedback?id=${id}` 
+      {
+        name: "feedback",
+        condition: where("read", "==", false),
+        title: "New Customer Feedback",
+        link: (id: string) => `/feedback?id=${id}`,
       },
     ];
-  
+
     const sortByDateDesc = (notifications: Notification[]) => {
       return [...notifications].sort((a, b) => (b.rawTimestamp ?? 0) - (a.rawTimestamp ?? 0));
     };
-  
+
     const unsubscribeList = collections.map(({ name, condition, title, link }) => {
       const colRef = condition ? query(collection(db, name), condition) : collection(db, name);
-  
+
       return onSnapshot(colRef, (snapshot) => {
         console.log(`[${name}] Fetched ${snapshot.docs.length} documents`);
-  
+
         const updates: Notification[] = [];
-  
+
         for (const docSnap of snapshot.docs) {
           const data = docSnap.data() as FirestoreData;
           const notificationId = docSnap.id;
           const readStatus = data.read ?? false;
-  
+
           let rawTime: number;
           let date: string;
-  
+
           if (data.timestamp instanceof Timestamp) {
             rawTime = data.timestamp.toMillis();
             date = format(data.timestamp.toDate(), "MMM dd, yyyy hh:mm a");
@@ -136,73 +134,73 @@ const Header = ({
             rawTime = Date.now();
             date = format(new Date(rawTime), "MMM dd, yyyy hh:mm a");
           }
-  
+
           let message = "New notification";
-          if (name === "leaks") {
+          if (name === "chats") {
+            message = data.lastMessageAdmin || "New chat message";
+          } else if (name === "leaks") {
             message = data.accountNumber || "Leak report";
           } else if (name === "paymentVerifications") {
             message = data.customerName || data.accountNumber || "Payment verification";
-          } else if (name === "requests" || name === "chats") {
+          } else if (name === "requests") {
             message = data.accountNumber || "Customer request";
           } else if (name === "users") {
             message = [data.firstName, data.lastName].filter(Boolean).join(" ") || "User verification";
           } else if (name === "feedback") {
-            // Format feedback message to include rating and categories
             const rating = data.rating ? `${data.rating}★` : "";
             const category = data.categories && data.categories.length > 0 ? `[${data.categories[0]}]` : "";
             message = `${rating} ${category} ${data.feedback?.substring(0, 30)}${data.feedback && data.feedback.length > 30 ? '...' : ''}`.trim();
           }
-  
+
           updates.push({
             id: notificationId,
             title,
             message,
-            link: link(notificationId), // Generate direct link with document ID
+            link: link(notificationId),
             date,
             read: readStatus,
             collectionName: name,
             rawTimestamp: rawTime,
           });
         }
-  
+
         setNotifications((prev) => {
-          const updatedIds = new Set(updates.map(u => `${u.collectionName}-${u.id}`));
-  
-          const filteredPrev = prev.filter(n => {
+          const updatedIds = new Set(updates.map((u) => `${u.collectionName}-${u.id}`));
+
+          const filteredPrev = prev.filter((n) => {
             const idKey = `${n.collectionName}-${n.id}`;
-            return !updatedIds.has(idKey); // remove any existing version of these
+            return !updatedIds.has(idKey);
           });
-  
+
           const merged = [...filteredPrev, ...updates];
           return sortByDateDesc(merged);
         });
       });
     });
-  
+
     return () => {
       unsubscribeList.forEach((unsubscribe) => unsubscribe());
     };
   }, [db]);
-  
-  
+
   const markAsRead = async (notification: Notification) => {
     if (!notification.read) {
       try {
         // Use the correct collection name stored in the notification
         const notificationRef = doc(db, notification.collectionName, notification.id);
         await updateDoc(notificationRef, { read: true });
-  
+
         // Update local state - maintain sorting when updating
         setNotifications((prev) => {
-          const updated = prev.map((n) => 
-            (n.id === notification.id && n.collectionName === notification.collectionName) 
-              ? { ...n, read: true } 
+          const updated = prev.map((n) =>
+            n.id === notification.id && n.collectionName === notification.collectionName
+              ? { ...n, read: true }
               : n
           );
           // No need to resort since read status doesn't affect sorting
           return updated;
         });
-        
+
         // Navigate to the specific link with tab parameters
         if (notification.link) {
           navigate(notification.link);
@@ -217,23 +215,23 @@ const Header = ({
       setShowNotifications(false);
     }
   };
-  
+
   const markAllAsRead = async () => {
-    const unreadNotifications = notifications.filter(n => !n.read);
+    const unreadNotifications = notifications.filter((n) => !n.read);
     if (unreadNotifications.length === 0) return;
-  
+
     try {
       const batch = writeBatch(db);
       const updatedIds = new Set();
       let batchCount = 0;
-      
+
       for (const notification of unreadNotifications) {
         try {
           const notificationRef = doc(db, notification.collectionName, notification.id);
           batch.update(notificationRef, { read: true });
           updatedIds.add(`${notification.collectionName}-${notification.id}`);
           batchCount++;
-          
+
           // Firestore limits batches to 500 operations
           if (batchCount >= 400) {
             await batch.commit();
@@ -244,16 +242,16 @@ const Header = ({
           console.error(`Error adding to batch: ${notification.collectionName}/${notification.id}`, error);
         }
       }
-      
+
       // Commit any remaining operations
       if (batchCount > 0) {
         await batch.commit();
         console.log(`Committed remaining batch of ${batchCount} notifications`);
       }
-      
+
       // Update local state - maintain sorting when updating
       setNotifications((prev) => {
-        const updated = prev.map((n) => 
+        const updated = prev.map((n) =>
           updatedIds.has(`${n.collectionName}-${n.id}`) ? { ...n, read: true } : n
         );
         // No need to resort since read status doesn't affect sorting
@@ -278,10 +276,10 @@ const Header = ({
       const target = event.target as Node;
       const notificationPanel = document.getElementById("notification-panel");
       const notificationButton = document.getElementById("notification-button");
-      
+
       if (
         showNotifications &&
-        notificationPanel && 
+        notificationPanel &&
         !notificationPanel.contains(target) &&
         notificationButton &&
         !notificationButton.contains(target)
@@ -319,17 +317,17 @@ const Header = ({
           </Button>
 
           {showNotifications && (
-            <div 
+            <div
               id="notification-panel"
               className="absolute right-0 mt-2 w-80 bg-white rounded-md shadow-lg overflow-hidden z-50 border border-gray-200"
             >
               <div className="p-3 border-b border-gray-200 flex justify-between items-center">
                 <h3 className="text-sm font-semibold">Notifications</h3>
-                <Button 
-                  variant="link" 
-                  onClick={markAllAsRead} 
+                <Button
+                  variant="link"
+                  onClick={markAllAsRead}
                   className="text-xs"
-                  disabled={!notifications.some(n => !n.read)}
+                  disabled={!notifications.some((n) => !n.read)}
                 >
                   Mark All as Read
                 </Button>
@@ -342,7 +340,7 @@ const Header = ({
                       onClick={() => markAsRead(notification)}
                       className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
                         !notification.read ? "bg-blue-50" : ""
-                      } ${notification.collectionName === "feedback" ? "bg-green-50 hover:bg-green-100" : ""}`}
+                      } }`}
                     >
                       <div className="flex justify-between">
                         <div>
