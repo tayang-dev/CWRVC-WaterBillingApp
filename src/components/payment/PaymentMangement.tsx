@@ -256,6 +256,12 @@ const [filterYear, setFilterYear] = useState<string>("all");
     return `${day}/${month}/${year}`;
   };
 
+  const generateReferenceNumber = () => {
+    const timestamp = Date.now().toString(36); // Convert current timestamp to base-36
+    const randomString = Math.random().toString(36).substring(2, 8).toUpperCase(); // Generate a random string
+    return `${timestamp}-${randomString}`; // Combine timestamp and random string
+  };
+
 const [isCreateReceiptDialogOpen, setIsCreateReceiptDialogOpen] = useState(false);
 const [formData, setFormData] = useState({
   accountNumber: "",
@@ -263,7 +269,7 @@ const [formData, setFormData] = useState({
   customerName: "",
   paymentDate: formatPaymentDate(new Date()), // Default to today's date
   paymentMethod: "Cash",
-  referenceNumber: "N/A",
+  referenceNumber: generateReferenceNumber(), // Generate a unique reference number
   status: "pending",
   submissionDateTime: formatSubmissionDateTime(new Date()), // Format as "dd/mm/yyyy hh:mm:ss"
 });
