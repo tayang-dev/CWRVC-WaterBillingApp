@@ -160,7 +160,7 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills }) => 
                         <td className="px-2 py-1 border-r border-black">{bill.seniorDiscount?.toFixed(2) || "0.00"}</td>
                         <td className="px-2 py-1 border-r border-black">{bill.arrears?.toFixed(2) || "0.00"}</td>
                         <td className="px-2 py-1 border-r border-black">{bill.appliedOverpayment?.toFixed(2) || "0.00"}</td>
-                        <td className="px-2 py-1 font-bold">{bill.originalAmount?.toFixed(2) || "0.00"}</td>
+                        <td className="px-2 py-1 font-bold">{bill.amountWithArrears?.toFixed(2) || "0.00"}</td>
                       </tr>
                     </tbody>
                   </table>

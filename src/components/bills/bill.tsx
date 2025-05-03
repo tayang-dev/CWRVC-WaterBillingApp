@@ -400,7 +400,7 @@ const calculateBillingPeriodFromDueDate = (dueDateStr: string): string => {
     const discount = isSenior ? total * billingData.seniorDiscountRate : 0;
     const totalBeforePenalty = total + tax - discount;
     const penalty = totalBeforePenalty * billingData.penaltyRate;
-    const totalAmountDue = totalBeforePenalty + penalty;
+    const totalAmountDue = totalBeforePenalty;
   
     return {
       waterCharge: total,
@@ -459,284 +459,267 @@ const calculateBillingPeriodFromDueDate = (dueDateStr: string): string => {
     };
 };
 
-  const handleCreateSelectedBills = async () => {
-    if (selectedReadings.length === 0) {
-      showNotification("Please select at least one meter reading", "info");
-      return;
-    }
-    
-    setIsProcessing(true);
-    
-    try {
-      let successCount = 0;
-      let errorCount = 0;
-      let batchCount = 0;
-      let currentBatch = writeBatch(db);
-      
-      for (const readingId of selectedReadings) {
-        const reading = meterReadings.find(r => r.id === readingId);
-        if (!reading) continue;
-        
-        const customer = customers.find(c => c.accountNumber === reading.accountNumber);
+const handleCreateSelectedBills = async () => {
+  if (selectedReadings.length === 0) {
+    showNotification("Please select at least one meter reading", "info");
+    return;
+  }
+
+  const selectedReadingsData = selectedReadings
+    .map((id) => meterReadings.find((r) => r.id === id))
+    .filter(Boolean);
+
+  await handleCreateBills(selectedReadingsData);
+};
+
+const handleCreateAllBills = async () => {
+  if (filteredReadings.length === 0) {
+    showNotification("No meter readings available to create bills", "info");
+    return;
+  }
+
+  await handleCreateBills(filteredReadings);
+};
+
+const handleCreateBills = async (readings: MeterReading[]) => {
+  setIsProcessing(true);
+
+  try {
+    let successCount = 0;
+    let errorCount = 0;
+
+    const { collection, addDoc, doc, updateDoc, getDoc, setDoc, getDocs, Timestamp, query, where, orderBy, limit } =
+      await import("firebase/firestore");
+    const { db } = await import("../../lib/firebase");
+
+    let currentGlobalBillNumber = await getLatestGlobalBillNumber();
+
+    const processedReadingIds: string[] = []; // To track successfully processed readings
+
+    for (const reading of readings) {
+      try {
+        const customer = customers.find((c) => c.accountNumber === reading.accountNumber);
         if (!customer) {
           errorCount++;
+          console.error(`Customer not found for account ${reading.accountNumber}`);
           continue;
         }
-        
+
         const usage = reading.currentReading - reading.previousReading;
         if (usage <= 0) {
           errorCount++;
+          console.error(`Invalid usage for account ${reading.accountNumber}`);
           continue;
         }
-        
-        const billCalc = calculateBillAmount(usage, customer.isSenior);
-        
-        const billDocRef = doc(collection(db, "bills", reading.accountNumber, "records"));
-        const billData = createBillData(customer, reading, usage, billCalc);
-        
-        currentBatch.set(billDocRef, billData);
-        successCount++;
-        batchCount++;
-        
-        if (batchCount >= 400) {
-          await currentBatch.commit();
-          currentBatch = writeBatch(db);
-          batchCount = 0;
+
+        const billingPeriod = calculateBillingPeriod(billingData.dueDate);
+        const billsCollectionRef = collection(db, "bills", reading.accountNumber, "records");
+        const existingBillsSnapshot = await getDocs(
+          query(billsCollectionRef, where("billingPeriod", "==", billingPeriod))
+        );
+        if (!existingBillsSnapshot.empty) {
+          errorCount++;
+          console.error(`Duplicate billing period for account ${reading.accountNumber}`);
+          continue;
         }
-      }
-      
-      if (batchCount > 0) {
-        await currentBatch.commit();
-      }
-      
-      if (successCount > 0) {
-        showNotification(`Successfully created ${successCount} bills`, "success");
-      } else {
-        showNotification("No bills were created. Please check if selected meter readings are valid.", "error");
-      }
-    } catch (error) {
-      console.error("Error creating bills:", error);
-      showNotification("Failed to create bills. Please try again.", "error");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
 
-    const handleCreateAllBills = async () => {
-      if (filteredReadings.length === 0) {
-        showNotification("No meter readings available to create bills", "info");
-        return;
-      }
-    
-      setIsProcessing(true);
-    
-      try {
-        let successCount = 0;
-        let errorCount = 0;
+        const unpaidBillsSnapshot = await getDocs(
+          query(billsCollectionRef, where("amount", ">", 0))
+        );
+        if (unpaidBillsSnapshot.size >= 2) {
+          const noticeData = {
+            accountNumber: reading.accountNumber,
+            name: customer.name,
+            description: "Your account is at risk of disconnection due to unpaid bills.",
+            timestamp: Timestamp.now(),
+          };
+          const noticeCollectionRef = collection(db, "notice");
+          await addDoc(noticeCollectionRef, noticeData);
+
+          const notificationData = {
+            accountNumber: reading.accountNumber,
+            customerId: customer.id,
+            description: "Your account is at risk of disconnection due to unpaid bills.",
+            type: "disconnection_warning",
+            createdAt: Timestamp.now(),
+          };
+          const notificationRef = collection(db, "notifications", reading.accountNumber, "records");
+          await addDoc(notificationRef, notificationData);
+        }
+
+        const isSenior = customer.isSenior || false;
+        const billCalc = calculateBillAmount(usage, isSenior);
+
+        const waterChargeBeforeTax = billCalc.waterCharge;
+        const tax = billCalc.tax;
+        const discount = billCalc.discount;
+        const penalty = billCalc.penalty;
+        const totalAmountDue = billCalc.totalAmountDue;
+
+        // Fetch unpaid bills for the customer
+        const unpaidBills = await getDocs(
+          query(billsCollectionRef, where("status", "==", "pending"))
+        );
+
+        let arrears = 0;
+        unpaidBills.forEach((doc) => {
+          const bill = doc.data();
+          arrears += bill.amount || 0; // Sum up unpaid amounts
+        });
+
+        // Ensure arrears is rounded to two decimal places
+        arrears = Number(arrears.toFixed(2));
+
+        // Retrieve the latest bill to check for any overpayment
+        let previousBillNumber = "";
+        let availableOverpayment = 0;
         
-        const { collection, addDoc, doc, updateDoc, getDoc, setDoc, getDocs, Timestamp, query, where, orderBy, limit } = await import("firebase/firestore");
-        const { db } = await import("../../lib/firebase");
-    
-        let currentGlobalBillNumber = await getLatestGlobalBillNumber();
+        const latestBillQuery = query(
+          billsCollectionRef,
+          orderBy("createdAt", "desc"),
+          limit(1)
+        );
+        const latestBillSnap = await getDocs(latestBillQuery);
+        
+        if (!latestBillSnap.empty) {
+          const latestBillData = latestBillSnap.docs[0].data();
+          // Ensure we're getting a number value for overPayment
+          availableOverpayment = parseFloat(latestBillData.overPayment || 0);
+          previousBillNumber = latestBillData.billNumber || "";
+        }
 
-        for (const reading of filteredReadings) {
-          try {
-            const customer = customers.find(c => c.accountNumber === reading.accountNumber);
-            if (!customer) {
-              errorCount++;
-              console.error(`Customer not found for account ${reading.accountNumber}`);
-              continue;
-            }
-    
-            const usage = reading.currentReading - reading.previousReading;
-            if (usage <= 0) {
-              errorCount++;
-              console.error(`Invalid usage for account ${reading.accountNumber}`);
-              continue;
-            }
-    
-            const billingPeriod = calculateBillingPeriod(billingData.dueDate);
-            const billsCollectionRef = collection(db, "bills", reading.accountNumber, "records");
-            const existingBillsSnapshot = await getDocs(
-              query(billsCollectionRef, where("billingPeriod", "==", billingPeriod))
-            );
-            if (!existingBillsSnapshot.empty) {
-              errorCount++;
-              console.error(`Duplicate billing period for account ${reading.accountNumber}`);
-              continue;
-            }
-    
-            const unpaidBillsSnapshot = await getDocs(
-              query(billsCollectionRef, where("amount", ">", 0))
-            );
-            if (unpaidBillsSnapshot.size >= 2) {
-              const noticeData = {
-                accountNumber: reading.accountNumber,
-                name: customer.name,
-                description: "Your account is at risk of disconnection due to unpaid bills.",
-                timestamp: Timestamp.now(),
-              };
-              const noticeCollectionRef = collection(db, "notice");
-              await addDoc(noticeCollectionRef, noticeData);
-    
-              const notificationData = {
-                accountNumber: reading.accountNumber,
-                customerId: customer.id,
-                description: "Your account is at risk of disconnection due to unpaid bills.",
-                type: "disconnection_warning",
-                createdAt: Timestamp.now(),
-              };
-              const notificationRef = collection(db, "notifications", reading.accountNumber, "records");
-              await addDoc(notificationRef, notificationData);
-            }
-    
-            const isSenior = customer.isSenior || false;
-            
-            // Use the tiered billing calculation function instead of flat rate
-            const billCalc = calculateBillAmount(usage, isSenior);
-            
-            // Extract the calculated values from the billCalc object
-            const waterChargeBeforeTax = billCalc.waterCharge;
-            const tax = billCalc.tax;
-            const discount = billCalc.discount;
-            const penalty = billCalc.penalty;
-            const totalAmountDue = billCalc.totalAmountDue;
-    
-            let overpayment = 0;
-            const latestBillQuery = query(
-              billsCollectionRef,
-              orderBy("dueDate", "desc"),
-              limit(1)
-            );
-            const latestBillSnap = await getDocs(latestBillQuery);
-            if (!latestBillSnap.empty) {
-              const latestBillData = latestBillSnap.docs[0].data();
-              overpayment = parseFloat(latestBillData.overPayment || 0);
-              if (overpayment > 0) {
-                await updateDoc(latestBillSnap.docs[0].ref, { overPayment: 0 });
-              }
-            }
-    
-            // Calculate final amounts after any overpayment is applied
-            let finalDiscountedTotal = totalAmountDue - penalty; // Amount without penalty
-            let finalTotalAmountDue = totalAmountDue;
-            let finalOriginalAmount = finalDiscountedTotal;
-            let appliedOverpayment = 0;
-    
-            if (overpayment > 0) {
-              if (overpayment >= finalDiscountedTotal) {
-                appliedOverpayment = finalDiscountedTotal;
-                finalDiscountedTotal = 0;
-                finalTotalAmountDue = 0;
-                finalOriginalAmount = 0;
-                overpayment -= appliedOverpayment;
-              } else {
-                appliedOverpayment = overpayment;
-                finalDiscountedTotal = finalDiscountedTotal - overpayment;
-                finalTotalAmountDue = finalTotalAmountDue - overpayment;
-                finalOriginalAmount = finalOriginalAmount - overpayment;
-                overpayment = 0;
-              }
-            }
-    
-            let arrears = 0;
-            const allBillsSnapshot = await getDocs(billsCollectionRef);
-            allBillsSnapshot.forEach((billDoc) => {
-              const bill = billDoc.data();
-              arrears += bill.amount || 0;
-            });
-    
-            currentGlobalBillNumber++;
-            const billNumber = String(currentGlobalBillNumber).padStart(10, "0");
+        // Calculate how much overpayment to apply to the current bill
+        let appliedOverpayment = 0;
+        let currentAmountDue = totalAmountDue;
+        let overpaymentSourceBill = "";
 
-            const formattedAddress = customer.block && customer.lot 
-              ? `BLK ${customer.block}, LOT ${customer.lot}, ${customer.address || ""}`
-              : customer.address || "";
-            
-            // Create bill data with correct calculations
-            const billData = {
-              customerId: customer.id,
-              customerName: customer.name,
-              customerAddress: formattedAddress,
-              date: Timestamp.now(),
-              amount: finalDiscountedTotal,
-              originalAmount: finalOriginalAmount,
-              status: "pending",
-              dueDate: formatToDDMMYYYY(billingData.dueDate),
-              billingPeriod: billingPeriod,
-              description: billingData.billDescription,
-              waterUsage: usage,
-              meterReading: {
-                current: reading.currentReading,
-                previous: reading.previousReading,
-                consumption: usage,
-              },
-              accountNumber: reading.accountNumber,
-              meterNumber: customer.meterNumber || "Meter-Default",
-              waterCharge: waterChargeBeforeTax, // Use the tiered calculation result
-              waterChargeBeforeTax: waterChargeBeforeTax, // Use the tiered calculation result
-              tax: tax,
-              seniorDiscount: discount,
-              penalty: penalty,
-              amountAfterDue: finalTotalAmountDue,
-              currentAmountDue: finalTotalAmountDue,
-              arrears: arrears,
-              billNumber: billNumber,
-              overPayment: overpayment,
-              appliedOverpayment: appliedOverpayment,
-              rawCalculatedAmount: finalDiscountedTotal + appliedOverpayment, // Original calculated amount before overpayment
-              createdAt: Timestamp.now(),
-            };
-    
-            await addDoc(billsCollectionRef, billData);
-    
-            const customerRef = doc(db, "customers", customer.id);
-            await updateDoc(customerRef, { lastReading: reading.currentReading });
-    
-            const updatedPaymentsRef = doc(db, "updatedPayments", reading.accountNumber);
-            const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
-            const previousAmount = updatedPaymentsSnap.exists() ? updatedPaymentsSnap.data().amount || 0 : 0;
-            await setDoc(
-              updatedPaymentsRef,
-              {
-                accountNumber: reading.accountNumber,
-                customerId: customer.id,
-                amount: previousAmount + finalDiscountedTotal,
-              },
-              { merge: true }
-            );
-    
-            let notificationDescription = `A new bill for the billing period ${billingPeriod} with due date ${formatToDDMMYYYY(billingData.dueDate)} has been created for your account.`;
-            if (appliedOverpayment > 0) {
-              notificationDescription += ` An overpayment of ₱${appliedOverpayment.toFixed(2)} was applied to this bill.`;
-            }
-            await addDoc(collection(db, "notifications", reading.accountNumber, "records"), {
-              type: "bill_created",
-              customerId: customer.id,
-              accountNumber: reading.accountNumber,
-              description: notificationDescription,
-              createdAt: Timestamp.now(),
-            });
-    
-            successCount++;
-          } catch (error) {
-            errorCount++;
-            console.error(`Error creating bill for account ${reading.accountNumber}:`, error);
+        if (availableOverpayment > 0) {
+          overpaymentSourceBill = previousBillNumber;
+          
+          if (availableOverpayment >= totalAmountDue) {
+            // If overpayment covers the entire bill
+            appliedOverpayment = totalAmountDue;
+            currentAmountDue = 0;
+          } else {
+            // If overpayment covers part of the bill
+            appliedOverpayment = availableOverpayment;
+            currentAmountDue = totalAmountDue - availableOverpayment;
           }
+          
+          // Make sure values are rounded properly to avoid floating point issues
+          appliedOverpayment = Number(appliedOverpayment.toFixed(2));
+          currentAmountDue = Number(currentAmountDue.toFixed(2));
         }
-    
-        if (successCount > 0) {
-          showNotification(`Successfully created ${successCount} bills. ${errorCount} errors occurred.`, "success");
-        } else {
-          showNotification("No bills were created. Please check the meter readings.", "error");
+
+        currentGlobalBillNumber++;
+        const billNumber = String(currentGlobalBillNumber).padStart(10, "0");
+
+        const formattedAddress = customer.block && customer.lot
+          ? `BLK ${customer.block}, LOT ${customer.lot}, ${customer.address || ""}`
+          : customer.address || "";
+
+        const billData = {
+          customerId: customer.id,
+          customerName: customer.name,
+          customerAddress: formattedAddress,
+          date: Timestamp.now(),
+          amount: currentAmountDue, // Current amount due after applying overpayment
+          originalAmount: Number(totalAmountDue.toFixed(2)), // Original bill amount before applying overpayment
+          status: currentAmountDue === 0 ? "paid" : "pending",
+          dueDate: formatToDDMMYYYY(billingData.dueDate),
+          billingPeriod: billingPeriod,
+          description: billingData.billDescription,
+          waterUsage: usage,
+          meterReading: {
+            current: reading.currentReading,
+            previous: reading.previousReading,
+            consumption: usage,
+          },
+          accountNumber: reading.accountNumber,
+          meterNumber: customer.meterNumber || "Meter-Default",
+          waterCharge: Number(waterChargeBeforeTax.toFixed(2)),
+          waterChargeBeforeTax: Number(waterChargeBeforeTax.toFixed(2)),
+          tax: Number(tax.toFixed(2)),
+          seniorDiscount: Number(discount.toFixed(2)),
+          penalty: Number(penalty.toFixed(2)),
+          amountAfterDue: Number((currentAmountDue + penalty).toFixed(2)),
+          currentAmountDue: currentAmountDue,
+          arrears: arrears,
+          billNumber: billNumber,
+          overPayment: 0, // No overpayment in this bill
+          appliedOverpayment: appliedOverpayment, // How much overpayment was applied to this bill
+          overpaymentSourceBill: overpaymentSourceBill, // Which bill the overpayment came from
+          rawCalculatedAmount: Number(totalAmountDue.toFixed(2)),
+          createdAt: Timestamp.now(),
+          amountWithArrears: Number((currentAmountDue + 0).toFixed(2)), // Add arrears to amount
+        };
+
+        await addDoc(billsCollectionRef, billData);
+
+        // Update the previous bill to zero out its overpayment if we used it
+        if (availableOverpayment > 0 && !latestBillSnap.empty) {
+          await updateDoc(latestBillSnap.docs[0].ref, { 
+            overPayment: 0 
+          });
         }
+
+        // Update the customer record with the new reading
+        const customerRef = doc(db, "customers", customer.id);
+        await updateDoc(customerRef, { 
+          lastReading: reading.currentReading
+        });
+
+        const updatedPaymentsRef = doc(db, "updatedPayments", reading.accountNumber);
+        const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
+        const previousAmount = updatedPaymentsSnap.exists() ? updatedPaymentsSnap.data().amount || 0 : 0;
+        await setDoc(
+          updatedPaymentsRef,
+          {
+            accountNumber: reading.accountNumber,
+            customerId: customer.id,
+            amount: Number((previousAmount + currentAmountDue).toFixed(2)),
+          },
+          { merge: true }
+        );
+
+        let notificationDescription = `A new bill for the billing period ${billingPeriod} with due date ${formatToDDMMYYYY(
+          billingData.dueDate
+        )} has been created for your account.`;
+        if (appliedOverpayment > 0) {
+          notificationDescription += ` An overpayment of ₱${appliedOverpayment.toFixed(2)} was applied to this bill.`;
+        }
+        await addDoc(collection(db, "notifications", reading.accountNumber, "records"), {
+          type: "bill_created",
+          customerId: customer.id,
+          accountNumber: reading.accountNumber,
+          description: notificationDescription,
+          createdAt: Timestamp.now(),
+        });
+
+        processedReadingIds.push(reading.id!); // Add the processed reading ID to the list
+        successCount++;
       } catch (error) {
-        console.error("Error in bill creation process:", error);
-        showNotification("Failed to create bills. Please try again.", "error");
-      } finally {
-        setIsProcessing(false);
+        errorCount++;
+        console.error(`Error creating bill for account ${reading.accountNumber}:`, error);
       }
-    };
+    }
+
+    // Remove processed readings from the display
+    setMeterReadings((prev) => prev.filter((reading) => !processedReadingIds.includes(reading.id!)));
+    setFilteredReadings((prev) => prev.filter((reading) => !processedReadingIds.includes(reading.id!)));
+
+    if (successCount > 0) {
+      showNotification(`Successfully created ${successCount} bills. ${errorCount} errors occurred.`, "success");
+    } else {
+      showNotification("No bills were created. Please check the meter readings.", "error");
+    }
+  } catch (error) {
+    console.error("Error in bill creation process:", error);
+    showNotification("Failed to create bills. Please try again.", "error");
+  } finally {
+    setIsProcessing(false);
+  }
+};
 
   const handleViewBills = async (accountNumber: string) => {
     setSelectedAccount(accountNumber);
@@ -887,6 +870,7 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
         arrears: doc.data().arrears || 0,
         appliedOverpayment: doc.data().appliedOverpayment || 0,
         amount: doc.data().amount || 0,
+        amountWithArrears: doc.data().amountWithArrears || 0,
         accountNumber: doc.data().accountNumber || "00-00-0000",
         meterNumber: doc.data().meterNumber || "00000000",
         dueDate: doc.data().dueDate || "00/00/0000",
@@ -1030,7 +1014,7 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
         const qrCodeData = {
           billNumber: bill.billNumber,
           customerName: bill.customerName,
-          amount: bill.amount,
+          amount: bill.amountWithArrears,
           dueDate: bill.dueDate,
           accountNumber: bill.accountNumber,
           amountAfterDue: bill.amountAfterDue,
@@ -1239,7 +1223,7 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
         // Amount value in last column
         pdf.setFontSize(12); // Reduced from 14
         pdf.text(
-          formatCurrency(bill.amount || 527.85),
+          formatCurrency(bill.amountWithArrears || 527.85),
           marginX + leftTableWidth - leftColumnWidth / 2,
           amountDueY + amountDueHeight / 2 + 2,
           { align: "center" }
@@ -1986,7 +1970,13 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
                           <TableCell>{bill.name}</TableCell>
                           <TableCell>{bill.email}</TableCell>
                           <TableCell>{formatCurrency(bill.totalAmountDue)}</TableCell>
-                          <TableCell>{bill.status}</TableCell>
+                          <TableCell>
+                            {bill.totalAmountDue > 0 ? (
+                              <Badge className="bg-yellow-100 text-yellow-800">Pending</Badge>
+                            ) : (
+                              <Badge className="bg-green-100 text-green-800">Paid</Badge>
+                            )}
+                          </TableCell>
                           <TableCell>
                             <Button
                               variant="secondary"

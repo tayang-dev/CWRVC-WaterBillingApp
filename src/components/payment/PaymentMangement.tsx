@@ -845,6 +845,8 @@ useEffect(() => {
         where,
         query,
         addDoc,
+        orderBy,
+        limit
       } = await import("firebase/firestore");
       const { db } = await import("../../lib/firebase");
   
@@ -1006,10 +1008,18 @@ useEffect(() => {
   
       // Process pending bills in the bills collection.
       const billsCollectionRef = collection(db, "bills", accountNumber, "records");
-      const billsSnap = await getDocs(billsCollectionRef);
       
-      // Fix the duplicate map with proper type definition
+      // Get all bills sorted by billNumber in ascending order (oldest first)
+      const billsQueryOrderedByNumber = query(
+        billsCollectionRef,
+        orderBy("billNumber", "asc")
+      );
+      
+      const billsSnap = await getDocs(billsQueryOrderedByNumber);
+      
+      // Extract bills with positive amounts (unpaid bills)
       const pendingBills = billsSnap.docs
+        .filter(doc => doc.data().amount > 0)
         .map((doc) => {
           const data = doc.data();
           return {
@@ -1020,46 +1030,41 @@ useEffect(() => {
             currentAmountDue: data.currentAmountDue || 0,
             dueDate: data.dueDate,
             overPayment: data.overPayment || 0,
-            penaltyApplied: data.penaltyApplied || false, // Renamed from taxApplied to penaltyApplied
-            originalAmount: data.originalAmount || 0, // Ensure originalAmount is included
+            penaltyApplied: data.penaltyApplied || false,
+            originalAmount: data.originalAmount || 0,
+            status: data.status || "pending"
           };
-        })
-        .sort((a, b) => parseInt(a.billNumber || "0") - parseInt(b.billNumber || "0"));
+        });
   
       // Save the original payment amount for later calculation.
       let remainingPayment = paymentAmount;
+      let currentBillPaid = null; // Track which bill was just paid (for overpayment)
   
-      // Process each pending bill in order.
+      // Process each pending bill in order of billNumber (oldest first).
       for (const bill of pendingBills) {
+        if (remainingPayment <= 0) break;
+  
         // Check if penalty should be applied
         let billAmount = bill.amount;
         let penaltyApplied = bill.penaltyApplied || false;
         
-        // Only apply penalty if:
-        // 1. Amount is greater than 0
-        // 2. Due date has passed
-        // 3. Penalty hasn't been applied yet
+        // Apply penalty if needed (due date passed and not yet applied)
         if (billAmount > 0 && !penaltyApplied) {
           // Parse the due date correctly
           let dueDate;
           
-          // Handle different date formats that might exist in the database
           if (bill.dueDate && typeof bill.dueDate === 'string') {
-            // Check if the date is in DD/MM/YYYY format
             if (bill.dueDate.includes('/')) {
               const [day, month, year] = bill.dueDate.split('/');
               dueDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
             } 
-            // Check if the date is in YYYY-MM-DD format
             else if (bill.dueDate.includes('-')) {
               dueDate = new Date(bill.dueDate);
             }
-            // Handle ISO string format
             else {
               dueDate = new Date(bill.dueDate);
             }
           } else {
-            // If it's already a Date object or timestamp
             dueDate = new Date(bill.dueDate);
           }
           
@@ -1081,91 +1086,60 @@ useEffect(() => {
               currentAmountDue: billAmount,
               penaltyApplied: true
             });
-          } else {
-            console.log(`❌ No penalty applied to bill ${bill.billNumber} as it's not yet due.`);
           }
-        } else if (penaltyApplied) {
-          console.log(`ℹ️ Penalty already applied to bill ${bill.billNumber}.`);
-        } else if (billAmount <= 0) {
-          console.log(`ℹ️ No penalty needed for bill ${bill.billNumber} as amount is ${billAmount}.`);
         }
         
-        if (remainingPayment <= 0) break;
-  
+        // Process payment for this bill
         if (remainingPayment >= billAmount) {
-          // Payment fully covers this bill.
-          remainingPayment -= billAmount;
+          // Full payment
           await updateDoc(bill.ref, {
             amount: 0,
             currentAmountDue: 0,
             paidAt: new Date().toISOString(),
-            penaltyApplied: penaltyApplied,  // Keep the penaltyApplied status for record
-            status: "paid", // Update status to "paid"
+            penaltyApplied: penaltyApplied,
+            status: "paid"
           });
+          
+          remainingPayment -= billAmount;
+          currentBillPaid = bill; // Track this bill for potential overpayment
+          
+          console.log(`✅ Bill ${bill.billNumber} fully paid. Remaining payment: ${remainingPayment.toFixed(2)}`);
         } else {
-          // Partial payment: update the bill's amount.
+          // Partial payment
           const newRemaining = billAmount - remainingPayment;
           await updateDoc(bill.ref, {
             amount: newRemaining,
             currentAmountDue: newRemaining,
-            penaltyApplied: penaltyApplied,  // Keep the penaltyApplied status
-            status: newRemaining < bill.originalAmount ? "partially paid" : "pending", // Update status to "partially paid" or "pending"
+            penaltyApplied: penaltyApplied,
+            status: newRemaining < bill.originalAmount ? "partially paid" : "pending"
           });
+          
+          console.log(`✅ Bill ${bill.billNumber} partially paid. Remaining bill amount: ${newRemaining.toFixed(2)}`);
           remainingPayment = 0;
         }
       }
   
-      // If there is an overpayment (remainingPayment > 0), update the latest bill record (by dueDate)
-      // with the extra payment.
-      if (remainingPayment > 0) {
-        // Get all bills and sort them by billNumber in descending order
-        const billsQuery = query(
-          billsCollectionRef
-        );
-        const billsSnapshot = await getDocs(billsQuery);
+      // Handle overpayment: apply to the last bill that was fully paid
+      if (remainingPayment > 0 && currentBillPaid) {
+        // Record overpayment on the bill that was just paid
+        await updateDoc(currentBillPaid.ref, {
+          overPayment: remainingPayment,
+          status: "paid" // Ensure status is marked as paid
+        });
         
-        if (!billsSnapshot.empty) {
-          // Extract and sort bills by their numeric billNumber
-          const sortedBills = billsSnapshot.docs
-            .map(doc => ({
-              ref: doc.ref,
-              data: doc.data(),
-              billNumber: doc.data().billNumber || "0"
-            }))
-            .sort((a, b) => {
-              // Convert billNumbers to integers for proper numeric comparison
-              // Remove leading zeros and parse as integers
-              const aNum = parseInt(a.billNumber.replace(/^0+/, '') || "0", 10);
-              const bNum = parseInt(b.billNumber.replace(/^0+/, '') || "0", 10);
-              return bNum - aNum; // Descending order (highest first)
-            });
-          
-          // Get the bill with the highest billNumber (first in the sorted array)
-          const latestBill = sortedBills[0];
-          const previousOverPayment = parseFloat(latestBill.data.overPayment || "0");
-          const newOverPayment = previousOverPayment + remainingPayment;
-          
-          await updateDoc(latestBill.ref, {
-            overPayment: newOverPayment,
-            appliedOverpayment: remainingPayment  // New field update
-          });
-          console.log(
-            `✅ Overpayment of ${remainingPayment} applied to latest bill with billNumber ${latestBill.billNumber}`
-          );
-          // Send a notification about the overpayment
-          await addDoc(collection(db, "notifications", accountNumber, "records"), {
-            type: "payment",
-            verificationId: selectedVerification.id,
-            customerId: customerId,
-            accountNumber: accountNumber,
-            status: "overpayment",
-            paymentAmount: remainingPayment,
-            description: `An overpayment of ₱${remainingPayment.toFixed(
-              2
-            )} has been recorded for your account. The amount will be applied to future bills.`,
-            createdAt: formatNotificationTimestamp(),
-          });
-        }
+        console.log(`✅ Overpayment of ${remainingPayment.toFixed(2)} recorded on bill ${currentBillPaid.billNumber}`);
+        
+        // Send a notification about the overpayment
+        await addDoc(collection(db, "notifications", accountNumber, "records"), {
+          type: "payment",
+          verificationId: selectedVerification.id,
+          customerId: customerId,
+          accountNumber: accountNumber,
+          status: "overpayment",
+          paymentAmount: remainingPayment,
+          description: `An overpayment of ₱${remainingPayment.toFixed(2)} has been recorded for your account. The amount will be applied to future bills.`,
+          createdAt: formatNotificationTimestamp(),
+        });
       }
   
       // Update the payment verification document as verified.
@@ -1196,6 +1170,7 @@ useEffect(() => {
            <p><strong>Reference Number:</strong> ${selectedVerification.referenceNumber}</p>
            <p><strong>Payment Date:</strong> ${new Date().toLocaleDateString("en-GB")}</p>
            <p><strong>Remaining Balance:</strong> ₱${newUpdatedAmount.toFixed(2)}</p>
+           ${remainingPayment > 0 ? `<p><strong>Overpayment:</strong> ₱${remainingPayment.toFixed(2)}</p>` : ''}
            <p>If you have any questions, feel free to contact us.</p>
            <br>
            <p>Best regards,</p>
@@ -1214,33 +1189,32 @@ useEffect(() => {
           verificationId: selectedVerification.id,
           customerId: customerId,
           accountNumber: accountNumber,
-          status: "verified", // Updated status for verified payment
+          status: "verified",
           paymentAmount: paymentAmount,
           description: `Your payment verification has been successfully verified. Payment Amount: ₱${paymentAmount.toFixed(2)}.`,
           createdAt: formatNotificationTimestamp(),
         }
       );
   
-      // ✅ Remove disconnection notice if less than 3 unpaid bills remain
-        const unpaidBillsQuery = query(
-          collection(db, "bills", accountNumber, "records"),
-          where("amount", ">", 0)
+      // Remove disconnection notice if less than 3 unpaid bills remain
+      const unpaidBillsQuery = query(
+        collection(db, "bills", accountNumber, "records"),
+        where("amount", ">", 0)
+      );
+      const unpaidBillsSnapshot = await getDocs(unpaidBillsQuery);
+  
+      if (unpaidBillsSnapshot.size < 3) {
+        const noticeQuery = query(
+          collection(db, "notice"),
+          where("accountNumber", "==", accountNumber)
         );
-        const unpaidBillsSnapshot = await getDocs(unpaidBillsQuery);
-
-        if (unpaidBillsSnapshot.size < 3) {
-          const noticeQuery = query(
-            collection(db, "notice"),
-            where("accountNumber", "==", accountNumber)
-          );
-          const noticeSnapshot = await getDocs(noticeQuery);
-          for (const docSnap of noticeSnapshot.docs) {
-            await deleteDoc(doc(db, "notice", docSnap.id));
-            console.log(`🗑️ Deleted disconnection notice: ${docSnap.id}`);
-          }
+        const noticeSnapshot = await getDocs(noticeQuery);
+        for (const docSnap of noticeSnapshot.docs) {
+          await deleteDoc(doc(db, "notice", docSnap.id));
+          console.log(`🗑️ Deleted disconnection notice: ${docSnap.id}`);
         }
-
-
+      }
+  
       // Reset state and close the dialog.
       setSelectedVerification(null);
       setVerificationStatus("verified");
