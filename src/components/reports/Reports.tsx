@@ -2,7 +2,9 @@ import React, { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Download, Search, Filter, MapPin, BarChart, Calendar } from "lucide-react";
-import * as XLSX from "xlsx";
+// Enhanced exportToExcel function - Converted to ExcelJS
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver'; // For browser environments
 import {
   Card,
   CardContent,
@@ -366,73 +368,145 @@ const performMarkAsRejected = async (remarks: string) => {
   };
 
 
-  const exportToXLSX = () => {
-    if (filteredReports.length === 0) return;
+// Make sure to import ExcelJS at the top of your file:
+// import ExcelJS from 'exceljs';
+
+const exportToXLSX = () => {
+  if (filteredReports.length === 0) return;
+
+  // Create a new workbook and worksheet
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('Leak Reports');
+
+  // Add title
+  const titleRow = worksheet.addRow(['Leak Reports Summary']);
+  titleRow.font = { bold: true, size: 16 };
+  worksheet.mergeCells(1, 1, 1, 8);
+  titleRow.alignment = { horizontal: 'center' };
   
-    // Title and metadata
-    const title = "Leak Reports Summary";
-    const metadata = [
-      [`Generated on: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`],
-      [`Filters Applied:`],
-      [`- Status: ${statusFilter !== "all" ? statusFilter : "All"}`],
-      [`- Date Range: ${dateRange !== "all" ? dateRange : "All Time"}`],
-      [`- Search Term: ${searchTerm || "None"}`],
-    ];
+  // Add empty row
+  worksheet.addRow([]);
   
-    // Enhanced headers with more descriptive fields
-    const headers = [
-      "Account Number",
-      "Address",
-      "Description",
-      "User ID",
-      "Status",
-      "Has Image",
-      "Date Reported",
-      "Time Reported",
-    ];
+  // Add metadata
+  worksheet.addRow([`Generated on: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`]);
+  worksheet.addRow(['Filters Applied:']);
+  worksheet.addRow([`- Status: ${statusFilter !== "all" ? statusFilter : "All"}`]);
+  worksheet.addRow([`- Date Range: ${dateRange !== "all" ? dateRange : "All Time"}`]);
+  worksheet.addRow([`- Search Term: ${searchTerm || "None"}`]);
   
-    // Format the data for XLSX
-    const data = filteredReports.map((report) => {
-      const status = report.rejected ? "Rejected" : report.resolved ? "Resolved" : "Pending";
-      const hasImage = report.imageUrl ? "Yes" : "No";
+  // Add empty row
+  worksheet.addRow([]);
   
-      return [
-        report.accountNumber,
-        report.address,
-        report.leakDescription,
-        report.uniqueUserId,
-        status,
-        hasImage,
-        formatDate(report.timestamp),
-        formatTime(report.timestamp),
-      ];
+  // Add headers
+  const headerRow = worksheet.addRow([
+    "Account Number",
+    "Address",
+    "Description",
+    "User ID",
+    "Status",
+    "Has Image",
+    "Date Reported",
+    "Time Reported"
+  ]);
+  
+  // Style the headers
+  headerRow.eachCell(cell => {
+    cell.font = { bold: true };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFD3D3D3' } // Light gray
+    };
+    cell.border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      bottom: { style: 'thin' },
+      right: { style: 'thin' }
+    };
+    cell.alignment = { horizontal: 'center' };
+  });
+  
+  // Add data rows
+  filteredReports.forEach(report => {
+    const status = report.rejected ? "Rejected" : report.resolved ? "Resolved" : "Pending";
+    const hasImage = report.imageUrl ? "Yes" : "No";
+    
+    const dataRow = worksheet.addRow([
+      report.accountNumber,
+      report.address,
+      report.leakDescription,
+      report.uniqueUserId,
+      status,
+      hasImage,
+      formatDate(report.timestamp),
+      formatTime(report.timestamp)
+    ]);
+    
+    // Add conditional formatting for status
+    const statusCell = dataRow.getCell(5);
+    if (status === 'Resolved') {
+      statusCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFD8F0D8' } // Light green
+      };
+    } else if (status === 'Rejected') {
+      statusCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF2DEDE' } // Light red
+      };
+    } else {
+      statusCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFFFF9E6' } // Light yellow
+      };
+    }
+    
+    // Add border to all cells in the row
+    dataRow.eachCell(cell => {
+      cell.border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' }
+      };
     });
+  });
   
-    // Combine metadata, headers, and data
-    const sheetData = [
-      [title], // Title row
-      [""], // Blank row
-      ...metadata, // Metadata rows
-      [""], // Blank row
-      headers, // Header row
-      ...data, // Data rows
-    ];
+  // Auto-fit columns
+  worksheet.columns.forEach(column => {
+    let maxLength = 0;
+    column.eachCell({ includeEmpty: true }, cell => {
+      const columnWidth = cell.value ? cell.value.toString().length : 10;
+      if (columnWidth > maxLength) {
+        maxLength = columnWidth;
+      }
+    });
+    column.width = Math.min(maxLength + 2, 50); // Cap width at 50
+  });
   
-    // Create a worksheet
-    const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+  // Generate file and trigger download
+  const filename = `leak-reports-${new Date().toISOString().split("T")[0]}.xlsx`;
   
-    // Auto-adjust column widths
-    const columnWidths = headers.map((header) => ({ wch: Math.max(header.length + 5, 20) }));
-    worksheet["!cols"] = columnWidths;
-  
-    // Create a workbook and append the worksheet
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Leak Reports");
-  
-    // Generate and download the XLSX file
-    const filename = `leak-reports-${new Date().toISOString().split("T")[0]}.xlsx`;
-    XLSX.writeFile(workbook, filename);
-  };
+  // In browser environment
+  workbook.xlsx.writeBuffer().then(buffer => {
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = window.URL.createObjectURL(blob);
+    
+    const downloadLink = document.createElement('a');
+    downloadLink.href = url;
+    downloadLink.download = filename;
+    downloadLink.click();
+    
+    window.URL.revokeObjectURL(url);
+  }).catch(err => {
+    console.error('Error generating Excel file:', err);
+  });
+};
+
+
   const resolvedCount = leakReports.filter((report) => report.resolved).length;
 
   const getReportDistributionData = (reports: LeakReport[]) => {

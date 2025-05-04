@@ -48,6 +48,8 @@
     "cors": "^2.8.5",
     "date-fns": "^3.6.0",
     "embla-carousel-react": "^8.1.5",
+    "exceljs": "^4.4.0",
+    "file-saver": "^2.0.5",
     "firebase": "^11.4.0",
     "framer-motion": "^11.18.0",
     "html2canvas": "^1.4.1",
@@ -76,6 +78,7 @@
   },
   "devDependencies": {
     "@swc/core": "1.3.96",
+    "@types/file-saver": "^2.0.7",
     "@types/next": "^8.0.7",
     "@types/node": "^20.14.2",
     "@types/react": "^18.2.66",

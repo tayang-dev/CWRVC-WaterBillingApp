@@ -618,6 +618,9 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           ? `BLK ${customer.block}, LOT ${customer.lot}, ${customer.address || ""}`
           : customer.address || "";
 
+        // Calculate amountWithArrears correctly by adding currentAmountDue and arrears
+        const amountWithArrears = Number((currentAmountDue + arrears).toFixed(2));
+        
         const billData = {
           customerId: customer.id,
           customerName: customer.name,
@@ -651,8 +654,11 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           overpaymentSourceBill: overpaymentSourceBill, // Which bill the overpayment came from
           rawCalculatedAmount: Number(totalAmountDue.toFixed(2)),
           createdAt: Timestamp.now(),
-          amountWithArrears: Number((currentAmountDue + 0).toFixed(2)), // Add arrears to amount
+          amountWithArrears: amountWithArrears, // Explicitly use the calculated value
         };
+
+        // Log to verify calculations
+        console.log(`Bill creation for ${reading.accountNumber}: currentAmountDue=${currentAmountDue}, arrears=${arrears}, amountWithArrears=${amountWithArrears}`);
 
         await addDoc(billsCollectionRef, billData);
 

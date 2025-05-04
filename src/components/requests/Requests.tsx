@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Download, Search, Filter, FileText, BarChart } from "lucide-react";
-  import * as XLSX from "xlsx";
+import ExcelJS from 'exceljs';
 import {
   Card,
   CardContent,
@@ -276,22 +276,47 @@ const updateRequestStatus = async (newStatus: string, remarks?: string) => {
 
 
 
+// Make sure to import ExcelJS at the top of your file:
+// import ExcelJS from 'exceljs';
+
 const exportToXLSX = () => {
   if (filteredRequests.length === 0) return;
 
-  // Title and metadata
-  const title = "Service Requests Report";
-  const metadata = [
-    [`Generated on: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`],
-    [`Filters Applied:`],
-    [`- Status: ${statusFilter !== "all" ? statusFilter : "All"}`],
-    [`- Type: ${typeFilter !== "all" ? typeFilter : "All"}`],
-    [`- Date Range: ${dateRange !== "all" ? dateRange : "All Time"}`],
-    [`- Search Term: ${searchTerm || "None"}`],
-  ];
+  // Create a new workbook and worksheet
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('Service Requests');
 
-  // Enhanced headers with more descriptive fields
-  const headers = [
+  // Add title
+  const titleRow = worksheet.addRow(['Service Requests Report']);
+  titleRow.font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
+  worksheet.mergeCells(1, 1, 1, 9); // Merge cells for the title across all columns
+  titleRow.alignment = { horizontal: 'center', vertical: 'middle' };
+  titleRow.eachCell(cell => {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF4F81BD' } // Blue background
+    };
+    worksheet.getRow(1).height = 24; // Increase height for title row
+  });
+  worksheet.getRow(1).height = 30;
+  
+  // Add empty row
+  worksheet.addRow([]);
+  
+  // Add metadata
+  worksheet.addRow([`Generated on: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`]);
+  worksheet.addRow(['Filters Applied:']);
+  worksheet.addRow([`- Status: ${statusFilter !== "all" ? statusFilter : "All"}`]);
+  worksheet.addRow([`- Type: ${typeFilter !== "all" ? typeFilter : "All"}`]);
+  worksheet.addRow([`- Date Range: ${dateRange !== "all" ? dateRange : "All Time"}`]);
+  worksheet.addRow([`- Search Term: ${searchTerm || "None"}`]);
+  
+  // Add empty row
+  worksheet.addRow([]);
+  
+  // Add headers
+  const headerRow = worksheet.addRow([
     "Service ID",
     "Account Number",
     "Request Type",
@@ -300,12 +325,29 @@ const exportToXLSX = () => {
     "Status",
     "Email",
     "Submission Date",
-    "Attachment",
-  ];
-
-  // Format the data for XLSX
-  const data = filteredRequests.map((req) => {
-    return [
+    "Attachment"
+  ]);
+  
+  // Style the headers
+  headerRow.eachCell(cell => {
+    cell.font = { bold: true };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFD0D8E8' } // Light blue
+    };
+    cell.border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      bottom: { style: 'thin' },
+      right: { style: 'thin' }
+    };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+  });
+  
+  // Add data rows
+  filteredRequests.forEach(req => {
+    const dataRow = worksheet.addRow([
       req.serviceId,
       req.accountNumber,
       req.type,
@@ -314,46 +356,81 @@ const exportToXLSX = () => {
       req.status,
       req.email,
       formatDate(req.timestamp),
-      req.attachmentUri || "None",
-    ];
+      req.attachmentUri || "None"
+    ]);
+    
+    // Add conditional formatting for status
+    const statusCell = dataRow.getCell(6);
+    if (req.status.toLowerCase() === 'completed' || req.status.toLowerCase() === 'resolved') {
+      statusCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFD8F0D8' } // Light green
+      };
+    } else if (req.status.toLowerCase() === 'in progress' || req.status.toLowerCase() === 'assigned') {
+      statusCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFFFF9E6' } // Light yellow
+      };
+    } else if (req.status.toLowerCase() === 'cancelled' || req.status.toLowerCase() === 'rejected') {
+      statusCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF2DEDE' } // Light red
+      };
+    }
+    
+    // Add border to all cells in the row
+    dataRow.eachCell(cell => {
+      cell.border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' }
+      };
+      
+      // Set wrap text for description
+      if (Number(cell.col) === 5) { // Description column
+        cell.alignment = { wrapText: true };
+      }
+    });
   });
-
-  // Combine metadata, headers, and data
-  const sheetData = [
-    [title], // Title row
-    [""], // Blank row
-    ...metadata, // Metadata rows
-    [""], // Blank row
-    headers, // Header row
-    ...data, // Data rows
-  ];
-
-  // Create a worksheet
-  const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
-
-  // Style the title row
-  worksheet["A1"] = {
-    v: title,
-    t: "s",
-    s: {
-      font: { bold: true, sz: 16, color: { rgb: "FFFFFF" } },
-      alignment: { horizontal: "center", vertical: "center" },
-      fill: { fgColor: { rgb: "4F81BD" } }, // Blue background
-    },
-  };
-  worksheet["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } }];
-
-  // Auto-adjust column widths
-  const columnWidths = headers.map((header) => ({ wch: Math.max(header.length + 5, 20) }));
-  worksheet["!cols"] = columnWidths;
-
-  // Create a workbook and append the worksheet
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Service Requests");
-
-  // Generate and download the XLSX file
+  
+  // Auto-fit columns
+  worksheet.columns.forEach(column => {
+    let maxLength = 0;
+    column.eachCell({ includeEmpty: true }, cell => {
+      const columnWidth = cell.value ? cell.value.toString().length : 10;
+      if (columnWidth > maxLength) {
+        maxLength = columnWidth;
+      }
+    });
+    column.width = Math.min(maxLength + 2, 50); // Cap width at 50
+  });
+  
+  // Set specific column widths for better readability
+  worksheet.getColumn(4).width = 35; // Subject
+  worksheet.getColumn(5).width = 50; // Description
+  worksheet.getColumn(7).width = 30; // Email
+  
+  // Generate file and trigger download
   const filename = `service-requests-${new Date().toISOString().split("T")[0]}.xlsx`;
-  XLSX.writeFile(workbook, filename);
+  
+  // In browser environment
+  workbook.xlsx.writeBuffer().then(buffer => {
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = window.URL.createObjectURL(blob);
+    
+    const downloadLink = document.createElement('a');
+    downloadLink.href = url;
+    downloadLink.download = filename;
+    downloadLink.click();
+    
+    window.URL.revokeObjectURL(url);
+  }).catch(err => {
+    console.error('Error generating Excel file:', err);
+  });
 };
 
   // Handle confirmation for status update
