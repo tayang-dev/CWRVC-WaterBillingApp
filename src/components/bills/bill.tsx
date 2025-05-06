@@ -35,7 +35,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"; // Adjusted the import path to match the correct folder structure
-import { ChevronLeft, ChevronRight, Search, Filter as FilterIcon } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, Filter as FilterIcon, FileSpreadsheet } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Checkbox } from "../ui/checkbox";
 import { Badge } from "../ui/badge";
@@ -52,6 +52,8 @@ import jsPDF from "jspdf"; // Import jsPDF for PDF generation
 import "jspdf-autotable"; // Optional for table formatting
 import html2canvas from "html2canvas"; // Import html2canvas for rendering HTML to canvas
 import QRCode from "qrcode";
+import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
 
 // Utility function to format currency
 const formatCurrency = (amount: number) => {
@@ -524,7 +526,7 @@ const handleCreateBills = async (readings: MeterReading[]) => {
         }
 
         const unpaidBillsSnapshot = await getDocs(
-          query(billsCollectionRef, where("amount", ">", 0))
+          query(billsCollectionRef, where("status", "==", "pending"))
         );
         if (unpaidBillsSnapshot.size >= 2) {
           const noticeData = {
@@ -556,17 +558,13 @@ const handleCreateBills = async (readings: MeterReading[]) => {
         const penalty = billCalc.penalty;
         const totalAmountDue = billCalc.totalAmountDue;
 
-        // Fetch unpaid bills for the customer
-        const unpaidBills = await getDocs(
-          query(billsCollectionRef, where("status", "==", "pending"))
-        );
-
+        // Calculate arrears - Sum of all pending bills
         let arrears = 0;
-        unpaidBills.forEach((doc) => {
+        unpaidBillsSnapshot.forEach((doc) => {
           const bill = doc.data();
-          arrears += bill.amount || 0; // Sum up unpaid amounts
+          arrears += parseFloat(bill.amount) || 0;
         });
-
+        
         // Ensure arrears is rounded to two decimal places
         arrears = Number(arrears.toFixed(2));
 
@@ -592,6 +590,7 @@ const handleCreateBills = async (readings: MeterReading[]) => {
         let appliedOverpayment = 0;
         let currentAmountDue = totalAmountDue;
         let overpaymentSourceBill = "";
+        let remainingOverpayment = 0; // Track remaining overpayment
 
         if (availableOverpayment > 0) {
           overpaymentSourceBill = previousBillNumber;
@@ -600,15 +599,20 @@ const handleCreateBills = async (readings: MeterReading[]) => {
             // If overpayment covers the entire bill
             appliedOverpayment = totalAmountDue;
             currentAmountDue = 0;
+            // Calculate remaining overpayment to carry forward
+            remainingOverpayment = availableOverpayment - totalAmountDue;
           } else {
             // If overpayment covers part of the bill
             appliedOverpayment = availableOverpayment;
             currentAmountDue = totalAmountDue - availableOverpayment;
+            // No remaining overpayment
+            remainingOverpayment = 0;
           }
           
           // Make sure values are rounded properly to avoid floating point issues
           appliedOverpayment = Number(appliedOverpayment.toFixed(2));
           currentAmountDue = Number(currentAmountDue.toFixed(2));
+          remainingOverpayment = Number(remainingOverpayment.toFixed(2));
         }
 
         currentGlobalBillNumber++;
@@ -649,23 +653,25 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           currentAmountDue: currentAmountDue,
           arrears: arrears,
           billNumber: billNumber,
-          overPayment: 0, // No overpayment in this bill
+          overPayment: remainingOverpayment, // Store remaining overpayment in current bill
           appliedOverpayment: appliedOverpayment, // How much overpayment was applied to this bill
           overpaymentSourceBill: overpaymentSourceBill, // Which bill the overpayment came from
           rawCalculatedAmount: Number(totalAmountDue.toFixed(2)),
           createdAt: Timestamp.now(),
           amountWithArrears: amountWithArrears, // Explicitly use the calculated value
+          site: customer.site || "", // Include customer site for filtering
         };
 
         // Log to verify calculations
-        console.log(`Bill creation for ${reading.accountNumber}: currentAmountDue=${currentAmountDue}, arrears=${arrears}, amountWithArrears=${amountWithArrears}`);
+        console.log(`Bill creation for ${reading.accountNumber}: currentAmountDue=${currentAmountDue}, arrears=${arrears}, amountWithArrears=${amountWithArrears}, remainingOverpayment=${remainingOverpayment}`);
 
+        // Add bill to database
         await addDoc(billsCollectionRef, billData);
 
-        // Update the previous bill to zero out its overpayment if we used it
+        // Update the previous bill to zero out its overpayment since we've transferred it
         if (availableOverpayment > 0 && !latestBillSnap.empty) {
           await updateDoc(latestBillSnap.docs[0].ref, { 
-            overPayment: 0 
+            overPayment: 0 // This is now fine since we've transferred the remaining overpayment to the new bill
           });
         }
 
@@ -675,6 +681,7 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           lastReading: reading.currentReading
         });
 
+        // Update payment records in updatedPayments collection
         const updatedPaymentsRef = doc(db, "updatedPayments", reading.accountNumber);
         const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
         const previousAmount = updatedPaymentsSnap.exists() ? updatedPaymentsSnap.data().amount || 0 : 0;
@@ -688,12 +695,19 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           { merge: true }
         );
 
+        // Create notification for customer
         let notificationDescription = `A new bill for the billing period ${billingPeriod} with due date ${formatToDDMMYYYY(
           billingData.dueDate
         )} has been created for your account.`;
+        
         if (appliedOverpayment > 0) {
           notificationDescription += ` An overpayment of ₱${appliedOverpayment.toFixed(2)} was applied to this bill.`;
+          
+          if (remainingOverpayment > 0) {
+            notificationDescription += ` You still have a remaining overpayment of ₱${remainingOverpayment.toFixed(2)} that will be applied to future bills.`;
+          }
         }
+        
         await addDoc(collection(db, "notifications", reading.accountNumber, "records"), {
           type: "bill_created",
           customerId: customer.id,
@@ -807,6 +821,8 @@ const handleCreateBills = async (readings: MeterReading[]) => {
             email: customerData?.email || customerData?.phone || "N/A",
             totalAmountDue: paymentData.amount || 0,
             status: paymentData.status || "unknown",
+            site: customerData?.site || "", // <-- Add this line to include site!
+            isSenior: customerData?.isSenior || false, // Optional: for senior filtering
           };
         })
       );
@@ -1613,6 +1629,611 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
     return activeTiers;
   }
 
+// Define TypeScript interfaces for our data
+interface BillData {
+  accountNumber: string;
+  name: string;
+  email: string;
+  totalAmountDue: number;
+  status?: string;
+  site?: string;
+}
+
+const handleExportBillsToExcel = async (exportBills = filteredBills) => {
+  try {
+    showNotification("Preparing Excel export...", "info");
+    
+    // Create a new workbook
+    const workbook = new ExcelJS.Workbook();
+    const currentDate = new Date().toLocaleDateString();
+    
+    // Set workbook properties
+    workbook.creator = "Water Billing System";
+    workbook.lastModifiedBy = "Water Billing System";
+    workbook.created = new Date();
+    workbook.modified = new Date();
+    workbook.properties.date1904 = false;
+    
+    // Set custom properties for title and metadata
+    workbook.title = "Water Bills Report";
+    workbook.subject = "Customer Bills Analysis";
+    workbook.keywords = "water, bills, customers, payments";
+    
+    // Color palette with blue theme
+    const colors = {
+      darkBlue: { argb: 'FF1A5980' },      // Deep blue
+      mediumBlue: { argb: 'FF1E88E5' },    // Medium blue
+      lightBlue: { argb: 'FFB3E0FF' },     // Light blue
+      paleBlue: { argb: 'FFE1F5FE' },      // Very light blue
+      accentTeal: { argb: 'FF00ACC1' },    // Teal accent
+      accentYellow: { argb: 'FFFFAB40' },  // Yellow accent for ratings
+      white: { argb: 'FFFFFFFF' },
+      lightGreen: { argb: 'FFD8F0D8' },    // For paid status
+      lightYellow: { argb: 'FFFFF9E6' },   // For pending status
+      lightRed: { argb: 'FFF2DEDE' },      // For overdue status
+    };
+    
+    // Common styling functions
+    const applyTitleStyle = (row) => {
+      row.font = { bold: true, size: 18, color: { argb: 'FFFFFFFF' } };
+      row.alignment = { horizontal: 'center', vertical: 'middle' };
+      row.height = 36; // Taller row for title
+      
+      row.eachCell((cell) => {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: colors.darkBlue
+        };
+        cell.border = {
+          top: { style: 'thin', color: colors.mediumBlue },
+          left: { style: 'thin', color: colors.mediumBlue },
+          bottom: { style: 'thin', color: colors.mediumBlue },
+          right: { style: 'thin', color: colors.mediumBlue }
+        };
+      });
+    };
+    
+    const applySubtitleStyle = (row) => {
+      row.font = { bold: true, size: 12, color: colors.darkBlue };
+      row.height = 22;
+      row.alignment = { horizontal: 'center', vertical: 'middle' };
+    };
+    
+    const applyHeaderStyle = (row) => {
+      row.height = 24; // Taller header rows
+      row.eachCell(cell => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: colors.mediumBlue
+        };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = {
+          top: { style: 'thin', color: colors.darkBlue },
+          left: { style: 'thin', color: colors.darkBlue },
+          bottom: { style: 'thin', color: colors.darkBlue },
+          right: { style: 'thin', color: colors.darkBlue }
+        };
+      });
+    };
+
+    const applyDataRowStyle = (row, isAlternate = false) => {
+      row.height = 20;
+      row.eachCell(cell => {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: isAlternate ? colors.paleBlue : colors.white
+        };
+        cell.border = {
+          top: { style: 'hair', color: colors.lightBlue },
+          left: { style: 'hair', color: colors.lightBlue },
+          bottom: { style: 'hair', color: colors.lightBlue },
+          right: { style: 'hair', color: colors.lightBlue }
+        };
+        cell.alignment = { 
+          horizontal: 'left', 
+          vertical: 'middle',
+          indent: 1
+        };
+      });
+    };
+    
+    // Add an icon emoji
+    const addIconEmoji = (sheet) => {
+      const iconRow = sheet.addRow(['']);
+      iconRow.getCell(1).value = {
+        richText: [
+          { 
+            text: '💧 ', 
+            font: { size: 16, color: colors.mediumBlue }
+          },
+          { 
+            text: 'Water Bills Management',
+            font: { bold: true, size: 12, color: colors.darkBlue } 
+          }
+        ]
+      };
+    };
+
+    // Add a section header
+    const addSectionHeader = (sheet, title, columnCount) => {
+      // Add a blank row before section
+      sheet.addRow(['']);
+      
+      // Add the section header
+      const sectionRow = sheet.addRow([title]);
+      sheet.mergeCells(sheet.rowCount, 1, sheet.rowCount, columnCount);
+      
+      sectionRow.getCell(1).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: colors.accentTeal
+      };
+      sectionRow.getCell(1).font = { 
+        bold: true, 
+        color: { argb: 'FFFFFFFF' },
+        size: 12
+      };
+      sectionRow.getCell(1).alignment = { 
+        horizontal: 'left',
+        vertical: 'middle',
+        indent: 1
+      };
+      sectionRow.height = 24;
+      
+      // Add blank row after section header
+      sheet.addRow(['']);
+    };
+    
+    // Add a footer to each sheet
+    const addFooter = (sheet, columnCount) => {
+      // Add blank rows for spacing
+      sheet.addRow(['']);
+      sheet.addRow(['']);
+      
+      // Add a footer row with message
+      const footerRow = sheet.addRow(['Timely payments help maintain our water system. Thank you!']);
+      sheet.mergeCells(sheet.rowCount, 1, sheet.rowCount, columnCount);
+      
+      footerRow.getCell(1).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: colors.lightBlue
+      };
+      footerRow.getCell(1).font = { 
+        italic: true, 
+        color: colors.darkBlue,
+        size: 10
+      };
+      footerRow.getCell(1).alignment = { 
+        horizontal: 'center',
+        vertical: 'middle'
+      };
+      
+      // Add the date row
+      const dateRow = sheet.addRow([`Report generated on: ${currentDate}`]);
+      sheet.mergeCells(sheet.rowCount, 1, sheet.rowCount, columnCount);
+      
+      dateRow.getCell(1).font = { 
+        italic: true, 
+        color: colors.darkBlue,
+        size: 8
+      };
+      dateRow.getCell(1).alignment = { horizontal: 'right' };
+    };
+    
+    // Set fixed column widths 
+    const setFixedColumnWidths = (sheet, columnWidths) => {
+      columnWidths.forEach((width, index) => {
+        sheet.getColumn(index + 1).width = width;
+      });
+    };
+    
+    // 1. Cover Sheet
+    const coverSheet = workbook.addWorksheet('Bills Overview');
+    
+    // Set fixed column widths
+    setFixedColumnWidths(coverSheet, [25, 25, 25, 25, 25]);
+    
+    // Add some spacing
+    coverSheet.addRow(['']);
+    coverSheet.addRow(['']);
+    
+    // Add an icon/emoji as a logo placeholder
+    const logoRow = coverSheet.addRow(['💧']);
+    logoRow.height = 40;
+    logoRow.getCell(1).font = { size: 36, color: colors.mediumBlue };
+    logoRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+    coverSheet.mergeCells(logoRow.number, 1, logoRow.number, 5);
+    
+    // Add title row
+    const coverTitle = coverSheet.addRow(['WATER BILLS REPORT']);
+    applyTitleStyle(coverTitle);
+    coverSheet.mergeCells(coverTitle.number, 1, coverTitle.number, 5);
+    
+    // Add subtitle
+    const coverSubtitle = coverSheet.addRow(['Comprehensive Billing Analysis']);
+    applySubtitleStyle(coverSubtitle);
+    coverSheet.mergeCells(coverSubtitle.number, 1, coverSubtitle.number, 5);
+    
+    // Add spacing
+    coverSheet.addRow(['']);
+    coverSheet.addRow(['']);
+    
+    // Add information section
+    addSectionHeader(coverSheet, 'REPORT INFORMATION', 5);
+    
+    // Get total amount and customer counts for report info
+    const totalBills = bills.length;
+    const totalAmount = bills.reduce((sum, bill) => sum + Number((bill as BillData).totalAmountDue || 0), 0);
+    const pendingBills = bills.filter(bill => Number((bill as BillData).totalAmountDue) > 0).length;
+    
+    const infoRows = [
+      ['Generated on:', currentDate],
+      ['Report Type:', 'Water Bills Analysis'],
+      ['Total Customers:', totalBills.toString()],
+      ['Total Amount Due:', `₱${formatCurrency(totalAmount)}`],
+      ['Pending Payments:', pendingBills.toString()],
+      ['Purpose:', 'Analyze customer billing status and outstanding payments'],
+    ];
+    
+    infoRows.forEach((rowData, index) => {
+      const row = coverSheet.addRow(rowData);
+      applyDataRowStyle(row, index % 2 === 0);
+      
+      // Style the labels
+      row.getCell(1).font = { bold: true, color: colors.darkBlue };
+      
+      // Merge cells for the current row
+      coverSheet.mergeCells(row.number, 2, row.number, 5);
+    });
+    
+    // Add content summary section
+    addSectionHeader(coverSheet, 'REPORT CONTENTS', 5);
+    
+    const contentRows = [
+      ['1.', 'Bills Summary', 'Key metrics and summary statistics'],
+      ['2.', 'Bills by Site', 'Analysis of bills grouped by site location'],
+      ['3.', 'Customer List', 'Complete list of all customers with billing status'],
+    ];
+    
+    contentRows.forEach((rowData, index) => {
+      const row = coverSheet.addRow(rowData);
+      applyDataRowStyle(row, index % 2 === 0);
+      
+      // Style the number
+      row.getCell(1).font = { bold: true, color: colors.mediumBlue };
+      row.getCell(1).alignment = { horizontal: 'center' };
+      
+      // Style the sheet name
+      row.getCell(2).font = { bold: true, color: colors.darkBlue };
+      
+      // Merge the description cells
+      coverSheet.mergeCells(row.number, 3, row.number, 5);
+    });
+    
+    // Add a tip
+    addSectionHeader(coverSheet, 'BILLING TIP', 5);
+    
+    const tipRow = coverSheet.addRow(['Water conservation can lower your bill by up to 30%. Consider installing water-efficient appliances.']);
+    tipRow.getCell(1).font = { italic: true, color: colors.accentTeal };
+    coverSheet.mergeCells(tipRow.number, 1, tipRow.number, 5);
+    
+    // Add footer
+    addFooter(coverSheet, 5);
+    
+    // 2. Bills Summary Sheet
+    const summarySheet = workbook.addWorksheet('Bills Summary');
+    
+    // Set fixed column widths
+    setFixedColumnWidths(summarySheet, [30, 20]);
+    
+    // Add title
+    const summaryTitle = summarySheet.addRow(['BILLS SUMMARY STATISTICS']);
+    applyTitleStyle(summaryTitle);
+    summarySheet.mergeCells(1, 1, 1, 2);
+    
+    // Add icon
+    addIconEmoji(summarySheet);
+    
+    summarySheet.addRow(['']); // Blank row
+    
+    // Calculate statistics from bills data
+    const paidBills = bills.filter(bill => Number(bill.totalAmountDue) === 0).length;
+    const paidPercentage = totalBills > 0 ? (paidBills / totalBills * 100).toFixed(1) : 0;
+    
+    // Calculate average bill amount for pending bills
+    const pendingBillsData = bills.filter(bill => Number((bill as BillData).totalAmountDue) > 0);
+    const averageBillAmount = pendingBillsData.length > 0 
+      ? pendingBillsData.reduce((sum, bill) => sum + Number((bill as BillData).totalAmountDue || 0), 0) / pendingBillsData.length 
+      : 0;
+    
+    // Add header row
+    const summaryHeader = summarySheet.addRow(['Metric', 'Value']);
+    applyHeaderStyle(summaryHeader);
+    
+    // Add data rows with alternating colors
+    const summaryData = [
+      ['Total Customers', totalBills.toString()],
+      ['Total Amount Due', `₱${formatCurrency(totalAmount)}`],
+      ['Paid Bills', paidBills.toString()],
+      ['Payment Rate', `${paidPercentage}%`],
+      ['Average Bill Amount', `₱${formatCurrency(averageBillAmount)}`],
+      ['Pending Payments', pendingBills.toString()],
+    ];
+    
+    summaryData.forEach((item, index) => {
+      const row = summarySheet.addRow(item);
+      applyDataRowStyle(row, index % 2 === 0);
+      
+      // Right align value cell
+      row.getCell(2).alignment = { horizontal: 'right' };
+      
+      // Add icons based on metric type
+      if (item[0].includes('Total Customers')) {
+        row.getCell(1).value = {
+          richText: [
+            { text: '👥 ', font: { size: 12 } },
+            { text: item[0], font: { bold: true } }
+          ]
+        };
+      } else if (item[0].includes('Total Amount')) {
+        row.getCell(1).value = {
+          richText: [
+            { text: '💰 ', font: { size: 12 } },
+            { text: item[0], font: { bold: true } }
+          ]
+        };
+      } else if (item[0].includes('Paid Bills')) {
+        row.getCell(1).value = {
+          richText: [
+            { text: '✅ ', font: { size: 12 } },
+            { text: item[0], font: { bold: true } }
+          ]
+        };
+      } else if (item[0].includes('Payment Rate')) {
+        row.getCell(1).value = {
+          richText: [
+            { text: '📊 ', font: { size: 12 } },
+            { text: item[0], font: { bold: true } }
+          ]
+        };
+      } else if (item[0].includes('Average')) {
+        row.getCell(1).value = {
+          richText: [
+            { text: '⚖️ ', font: { size: 12 } },
+            { text: item[0], font: { bold: true } }
+          ]
+        };
+      } else if (item[0].includes('Pending')) {
+        row.getCell(1).value = {
+          richText: [
+            { text: '⏳ ', font: { size: 12 } },
+            { text: item[0], font: { bold: true } }
+          ]
+        };
+      }
+    });
+    
+    // Define the interface for site groups
+    interface SiteGroup {
+      count: number;
+      amount: number;
+    }
+    
+    // Group bills by site with type safety
+    const siteGroups: Record<string, SiteGroup> = {};
+    bills.forEach(bill => {
+      const typedBill = bill as BillData;
+      const site = typedBill.site || 'Unspecified';
+      if (!siteGroups[site]) {
+        siteGroups[site] = {
+          count: 0,
+          amount: 0
+        };
+      }
+      siteGroups[site].count++;
+      siteGroups[site].amount += Number(typedBill.totalAmountDue || 0);
+    });
+    
+    // Add section header for site breakdown
+    addSectionHeader(summarySheet, 'SITE BREAKDOWN', 2);
+    
+    // Sort sites by total amount
+    const sortedSites = Object.entries(siteGroups)
+      .sort((a, b) => b[1].amount - a[1].amount);
+    
+    // Site breakdown header
+    const siteHeader = summarySheet.addRow(['Site', 'Amount Due']);
+    applyHeaderStyle(siteHeader);
+    
+    // Add site data rows
+    sortedSites.forEach((item, index) => {
+      const [site, data] = item;
+      const percentage = (data.amount / totalAmount * 100).toFixed(1);
+      
+      const row = summarySheet.addRow([
+        `${site} (${data.count} customers)`, 
+        `₱${formatCurrency(data.amount)} (${percentage}%)`
+      ]);
+      applyDataRowStyle(row, index % 2 === 0);
+      
+      // Right align value cell
+      row.getCell(2).alignment = { horizontal: 'right' };
+      
+      // Highlight major sites
+      if (data.amount > totalAmount * 0.2) {
+        row.eachCell(cell => {
+          cell.font = { bold: true };
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: colors.lightBlue
+          };
+        });
+      }
+    });
+    
+    // Add footer
+    addFooter(summarySheet, 2);
+    
+    // 3. Customers List Sheet
+    const customersSheet = workbook.addWorksheet('Customer List');
+    
+    // Set fixed column widths
+    setFixedColumnWidths(customersSheet, [18, 25, 25, 20, 15, 15]);
+    
+    // Add title
+    const customersTitle = customersSheet.addRow(['WATER BILLS - CUSTOMER LIST']);
+    applyTitleStyle(customersTitle);
+    customersSheet.mergeCells(1, 1, 1, 6);
+    
+    // Add icon
+    addIconEmoji(customersSheet);
+    
+    customersSheet.addRow(['']); // Blank row
+    
+    // Add header row
+    const customersHeader = customersSheet.addRow([
+      'Account #', 
+      'Customer Name', 
+      'Email/Phone', 
+      'Amount Due', 
+      'Status',
+      'Site'
+    ]);
+    applyHeaderStyle(customersHeader);
+    
+    // Add data rows with alternating colors
+    bills.forEach((bill, index) => {
+      // Ensure type safety by explicitly typing the bill
+      const typedBill = bill as BillData;
+      const status = Number(typedBill.totalAmountDue) > 0 ? 'Pending' : 'Paid';
+      
+      const row = customersSheet.addRow([
+        typedBill.accountNumber,
+        typedBill.name,
+        typedBill.email,
+        `₱${formatCurrency(Number(typedBill.totalAmountDue))}`,
+        status,
+        typedBill.site || 'Unspecified'
+      ]);
+      
+      applyDataRowStyle(row, index % 2 === 0);
+      
+      // Style Amount Due cell - right aligned
+      row.getCell(4).alignment = { horizontal: 'right' };
+      
+      // Style Status cell with color coding
+      if (status === 'Paid') {
+        row.getCell(5).fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: colors.lightGreen
+        };
+        row.getCell(5).font = { color: { argb: 'FF008000' }, bold: true };
+        row.getCell(5).alignment = { horizontal: 'center' };
+      } else {
+        row.getCell(5).fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: colors.lightYellow
+        };
+        row.getCell(5).font = { color: { argb: 'FFCC8400' }, bold: true };
+        row.getCell(5).alignment = { horizontal: 'center' };
+      }
+    });
+    
+    // Add a section for payment analysis
+    addSectionHeader(customersSheet, 'PAYMENT STATUS ANALYSIS', 6);
+    
+    const statusSummary = customersSheet.addRow([
+      `Total Customers: ${totalBills}`, 
+      `Paid: ${paidBills} (${paidPercentage}%)`,
+      `Pending: ${pendingBills} (${(100 - Number(paidPercentage)).toFixed(1)}%)`,
+      `Total Due: ₱${formatCurrency(totalAmount)}`,
+      '', ''
+    ]);
+    customersSheet.mergeCells(statusSummary.number, 4, statusSummary.number, 6);
+    
+    statusSummary.eachCell((cell, colNumber) => {
+      cell.font = { bold: true, color: colors.darkBlue };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: colors.paleBlue
+      };
+    });
+    
+    // Add footer
+    addFooter(customersSheet, 6);
+    
+    // Apply print settings to all worksheets
+    [coverSheet, summarySheet, customersSheet].forEach(sheet => {
+      // Paper size (A4)
+      sheet.pageSetup.paperSize = 9;
+      
+      // Landscape orientation for better fit
+      sheet.pageSetup.orientation = 'landscape';
+      
+      // Fit all columns on one page
+      sheet.pageSetup.fitToPage = true;
+      sheet.pageSetup.fitToWidth = 1;
+      sheet.pageSetup.fitToHeight = 0;
+      
+      // Header and footer margins
+      sheet.pageSetup.margins = {
+        left: 0.7,
+        right: 0.7,
+        top: 0.75,
+        bottom: 0.75,
+        header: 0.3,
+        footer: 0.3
+      };
+    });
+    
+    // Save the Excel file
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveAs(
+      new Blob([buffer], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      }),
+      `Water_Bills_Report_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
+    
+    showNotification("Bills report exported successfully!", "success");
+  } catch (error) {
+    console.error("Error creating Excel file:", error);
+    showNotification("Failed to export bills to Excel. Please try again.", "error");
+  }
+};
+
+const filteredBills = bills.filter((bill) => {
+  // Filter by site
+  if (billingFilterSite && billingFilterSite !== "all" && bill.site !== billingFilterSite) {
+    return false;
+  }
+  // Filter by senior
+  if (billingFilterSenior && !bill.isSenior) {
+    return false;
+  }
+  // Filter by search term (account number, name, or email/phone)
+  if (
+    billingSearchTerm &&
+    !(
+      (bill.accountNumber && bill.accountNumber.toLowerCase().includes(billingSearchTerm.toLowerCase())) ||
+      (bill.name && bill.name.toLowerCase().includes(billingSearchTerm.toLowerCase())) ||
+      (bill.email && bill.email.toLowerCase().includes(billingSearchTerm.toLowerCase()))
+    )
+  ) {
+    return false;
+  }
+  return true;
+});
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -1917,28 +2538,39 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
                     </div>
                   </DialogContent>
                 </Dialog>
-
+                <Button
+  className="bg-blue-600 hover:bg-green-700 text-white"
+  onClick={() => handleExportBillsToExcel(filteredBills)}
+  disabled={filteredBills.length === 0}
+>
+  <FileSpreadsheet className="mr-2 h-4 w-4" />
+  Export to Excel
+</Button>
               </div>
             </CardHeader>
             {billingShowFilters && (
               <div className="px-6 pb-4 flex space-x-2">
-                <Select
-                  value={billingFilterSite}
-                  onValueChange={(value) => {
-                    setBillingFilterSite(value);
-                    setCurrentPage(1); // Reset page on filter change
-                  }}
-                >
-                  <SelectTrigger className="w-[150px]">
-                    <SelectValue placeholder="Filter by Site" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Sites</SelectItem>
-                    <SelectItem value="site1">Site 1</SelectItem>
-                    <SelectItem value="site2">Site 2</SelectItem>
-                    <SelectItem value="site3">Site 3</SelectItem>
-                  </SelectContent>
-                </Select>
+               <Select
+  value={billingFilterSite}
+  onValueChange={(value) => {
+    setBillingFilterSite(value);
+    setCurrentPage(1); // Reset page on filter change
+  }}
+>
+  <SelectTrigger className="w-[150px]">
+    <SelectValue placeholder="Filter by Site" />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem value="all">All Sites</SelectItem>
+    {siteOptions
+      .filter((site) => site && site !== "All")
+      .map((site) => (
+        <SelectItem key={site} value={site}>
+          {site}
+        </SelectItem>
+      ))}
+  </SelectContent>
+</Select>
                 <label className="flex items-center space-x-2">
                   <Checkbox
                     checked={billingFilterSenior}
@@ -1958,50 +2590,52 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
                 <div>{notification?.message}</div>
               ) : (
                 <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Account #</TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email/Phone</TableHead>
-                      <TableHead>Total Amount Due</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {bills.length > 0 ? (
-                      bills.map((bill, index) => (
-                        <TableRow key={index}>
-                          <TableCell>{bill.accountNumber}</TableCell>
-                          <TableCell>{bill.name}</TableCell>
-                          <TableCell>{bill.email}</TableCell>
-                          <TableCell>{formatCurrency(bill.totalAmountDue)}</TableCell>
-                          <TableCell>
-                            {bill.totalAmountDue > 0 ? (
-                              <Badge className="bg-yellow-100 text-yellow-800">Pending</Badge>
-                            ) : (
-                              <Badge className="bg-green-100 text-green-800">Paid</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => handleViewBills(bill.accountNumber)}
-                            >
-                              View Bills
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={5} className="text-center">
-                          No bills found.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
+                 <TableHeader>
+  <TableRow>
+    <TableHead>Account #</TableHead>
+    <TableHead>Name</TableHead>
+    <TableHead>Email/Phone</TableHead>
+    <TableHead>Total Amount Due</TableHead>
+    <TableHead>Status</TableHead>
+    <TableHead>Site</TableHead> {/* Add this line */}
+    <TableHead>Actions</TableHead>
+  </TableRow>
+</TableHeader>
+<TableBody>
+  {filteredBills.length > 0 ? (
+    filteredBills.map((bill, index) => (
+      <TableRow key={index}>
+        <TableCell>{bill.accountNumber}</TableCell>
+        <TableCell>{bill.name}</TableCell>
+        <TableCell>{bill.email}</TableCell>
+        <TableCell>{formatCurrency(bill.totalAmountDue)}</TableCell>
+        <TableCell>
+          {bill.totalAmountDue > 0 ? (
+            <Badge className="bg-yellow-100 text-yellow-800">Pending</Badge>
+          ) : (
+            <Badge className="bg-green-100 text-green-800">Paid</Badge>
+          )}
+        </TableCell>
+        <TableCell>{bill.site || "—"}</TableCell> {/* Add this line */}
+        <TableCell>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => handleViewBills(bill.accountNumber)}
+          >
+            View Bills
+          </Button>
+        </TableCell>
+      </TableRow>
+    ))
+  ) : (
+    <TableRow>
+      <TableCell colSpan={7} className="text-center">
+        No bills found.
+      </TableCell>
+    </TableRow>
+  )}
+</TableBody>
                 </Table>
               )}
             </CardContent>            

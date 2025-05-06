@@ -32,29 +32,44 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { exportFeedbackToExcel } from "./exportFeedbackToExcel"; // Import the export function
+import { FileSpreadsheet } from "lucide-react"; // Import icon
 
+// TypeScript interfaces
 interface Feedback {
   id: string;
   categories: string[];
   feedback: string;
   rating: number;
-  timestamp: any;
+  timestamp: {
+    seconds: number;
+    nanoseconds: number;
+  };
   userId: string;
 }
 
-const Feedbacks = () => {
+interface FeedbackStats {
+  total: number;
+  averageRating: number;
+  paymentProcess: number;
+  otherCategories: number;
+}
+
+const Feedbacks: React.FC = () => {
   const [feedbackList, setFeedbackList] = useState<Feedback[]>([]);
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<FeedbackStats>({
     total: 0,
     averageRating: 0,
     paymentProcess: 0,
     otherCategories: 0,
   });
   const [selectedFeedback, setSelectedFeedback] = useState<Feedback | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<string>("overview");
 
   useEffect(() => {
-    const fetchFeedback = async () => {
+    const fetchFeedback = async (): Promise<void> => {
       try {
         const feedbackCollection = collection(db, "feedback");
         const feedbackSnapshot = await getDocs(feedbackCollection);
@@ -90,7 +105,7 @@ const Feedbacks = () => {
     fetchFeedback();
   }, []);
 
-  const formatDate = (timestamp: any) => {
+  const formatDate = (timestamp: { seconds: number; nanoseconds?: number }): string => {
     return new Date(timestamp.seconds * 1000).toLocaleDateString("en-US", {
       year: "numeric",
       month: "short",
@@ -98,9 +113,26 @@ const Feedbacks = () => {
     });
   };
 
-  const handleViewFeedback = (feedback: Feedback) => {
+  const handleViewFeedback = (feedback: Feedback): void => {
     setSelectedFeedback(feedback);
     setIsModalOpen(true);
+  };
+
+  const handleExportToExcel = async (): Promise<void> => {
+    // First switch to the feedback-list tab
+    setActiveTab("feedback-list");
+    
+    // Then start export process
+    setIsExporting(true);
+    try {
+      await exportFeedbackToExcel(feedbackList);
+      // Success notification could be added here
+    } catch (error) {
+      console.error("Error exporting to Excel:", error);
+      // Error notification could be added here
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -114,10 +146,31 @@ const Feedbacks = () => {
               Analyze and manage user feedback
             </p>
           </div>
+          
+          {/* Single Export Button */}
+          <div className="mt-4 sm:mt-0">
+            <Button 
+              onClick={handleExportToExcel}
+              disabled={isExporting || feedbackList.length === 0}
+             className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {isExporting ? (
+                <>
+                  <span className="animate-spin mr-2">⏳</span>
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <FileSpreadsheet className="mr-2 h-4 w-4" />
+                  Export to Excel
+                </>
+              )}
+            </Button>
+          </div>
         </div>
 
         {/* Tabs */}
-        <Tabs defaultValue="overview" className="space-y-8">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
           <TabsList className="mb-4 border-b">
             <TabsTrigger value="overview" className="px-4 py-2">
               Overview

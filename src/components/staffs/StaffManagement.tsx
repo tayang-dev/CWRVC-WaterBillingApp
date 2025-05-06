@@ -5,11 +5,14 @@ import {
   updateDoc,
   deleteDoc,
   getDocs,
+  query,
+  where,
   doc,
 } from "firebase/firestore";
 import {
   createUserWithEmailAndPassword,
-  deleteUser,
+  fetchSignInMethodsForEmail,
+  getAuth,
 } from "firebase/auth";
 import { db, auth } from "../../lib/firebase";
 
@@ -59,6 +62,9 @@ const StaffManagement = () => {
     role: "staff",
     status: "active",
   });
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     const fetchStaffs = async () => {
@@ -75,56 +81,164 @@ const StaffManagement = () => {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+    // Clear any previous errors when the user types
+    if (error) setError("");
   };
 
   const handleSaveStaff = async () => {
-    if (editingStaff) {
-      const staffRef = doc(db, "staffs", editingStaff.id);
-      await updateDoc(staffRef, { ...formData });
-    } else {
-      try {
-        const userCredential = await createUserWithEmailAndPassword(
-          auth,
-          formData.email,
-          formData.password
-        );
-        const user = userCredential.user;
-        const staffCollection = collection(db, "staffs");
-        await addDoc(staffCollection, {
-          uid: user.uid,
+    try {
+      setIsLoading(true);
+      setError("");
+
+      if (editingStaff) {
+        // Just update the Firestore document for existing staff
+        const staffRef = doc(db, "staffs", editingStaff.id);
+        await updateDoc(staffRef, {
           name: formData.name,
           email: formData.email,
           role: formData.role,
-          status: formData.status,
+          status: formData.status
         });
-      } catch (error) {
-        console.error("Error creating user:", error);
+        
+        // Update local state
+        setStaffs(staffs.map(staff => 
+          staff.id === editingStaff.id 
+            ? { ...staff, name: formData.name, email: formData.email, role: formData.role, status: formData.status } 
+            : staff
+        ));
+      } else {
+        // For new staff, check if the email already exists in Auth
+        try {
+          // Check if email already exists in our staff collection first
+          const emailQuery = query(
+            collection(db, "staffs"), 
+            where("email", "==", formData.email)
+          );
+          const querySnapshot = await getDocs(emailQuery);
+          
+          if (!querySnapshot.empty) {
+            // Email is already assigned to a staff member in our database
+            throw new Error("This email is already used by another staff member in the system");
+          }
+          
+          // Now try to create the user in Authentication
+          if (!formData.password) {
+            throw new Error("Password is required for new users");
+          }
+            
+          try {
+            // Try to create user in Auth
+            const userCredential = await createUserWithEmailAndPassword(
+              auth,
+              formData.email,
+              formData.password
+            );
+            const user = userCredential.user;
+            
+            // Successfully created Auth user, now create in Firestore
+            const staffCollection = collection(db, "staffs");
+            const docRef = await addDoc(staffCollection, {
+              uid: user.uid,
+              name: formData.name,
+              email: formData.email,
+              role: formData.role,
+              status: formData.status,
+            });
+            
+            // Add the new staff to local state
+            setStaffs([...staffs, {
+              id: docRef.id,
+              uid: user.uid,
+              name: formData.name,
+              email: formData.email,
+              role: formData.role,
+              status: formData.status,
+            }]);
+            
+          } catch (authError: any) {
+            // Handle auth errors specifically
+            if (authError.code === "auth/email-already-in-use") {
+              // Email exists in Auth but not as a staff, add them as staff with a placeholder UID
+              const staffCollection = collection(db, "staffs");
+              const docRef = await addDoc(staffCollection, {
+                uid: "existing-auth-user", // Placeholder UID
+                name: formData.name,
+                email: formData.email,
+                role: formData.role,
+                status: formData.status,
+              });
+              
+              // Add the new staff to local state
+              setStaffs([...staffs, {
+                id: docRef.id,
+                uid: "existing-auth-user",
+                name: formData.name,
+                email: formData.email,
+                role: formData.role,
+                status: formData.status,
+              }]);
+              
+              alert("User already exists in the system. Added to staff with current details.");
+            } else if (authError.code === "auth/invalid-email") {
+              throw new Error("Please enter a valid email address.");
+            } else if (authError.code === "auth/weak-password") {
+              throw new Error("Password is too weak. Please use at least 6 characters.");
+            } else {
+              throw authError; // Rethrow any other auth errors
+            }
+          }
+        } catch (error: any) {
+          console.error("Error checking or creating user:", error);
+          // Provide a meaningful error message
+          if (error.message) {
+            throw error; // Use the already formatted error
+          } else {
+            throw new Error("An unexpected error occurred. Please try again.");
+          }
+        }
       }
+      
+      // Reset form
+      setIsDialogOpen(false);
+      setEditingStaff(null);
+      setFormData({ name: "", email: "", password: "", role: "staff", status: "active" });
+      
+    } catch (error: any) {
+      console.error("Error saving staff:", error);
+      setError(error.message || "An error occurred while saving the staff member");
+    } finally {
+      setIsLoading(false);
     }
-    setIsDialogOpen(false);
-    setEditingStaff(null);
-    setFormData({ name: "", email: "", password: "", role: "staff", status: "active" });
   };
 
-const handleDeleteStaff = async (id: string, uid: string) => {
-  try {
-    // Show a confirmation prompt
-    const confirmDelete = window.confirm("Are you sure you want to delete this staff member?");
-    if (!confirmDelete) return; // Exit if the user cancels
+  const handleDeleteStaff = async (id: string, uid: string, email: string) => {
+    try {
+      // Prevent multiple deletion attempts
+      if (isDeleting) return;
+      setIsDeleting(true);
+      
+      // Show a confirmation prompt
+      const confirmDelete = window.confirm("Are you sure you want to delete this staff member?");
+      if (!confirmDelete) {
+        setIsDeleting(false);
+        return; // Exit if the user cancels
+      }
 
-    // Remove the `deleteUser` call since the admin is not deleting their own account
-    const staffRef = doc(db, "staffs", id);
-    await deleteDoc(staffRef);
+      // Only delete the document from Firestore - don't attempt to delete Auth user
+      const staffRef = doc(db, "staffs", id);
+      await deleteDoc(staffRef);
 
-    // Update the state to remove the deleted staff from the list
-    setStaffs((prev) => prev.filter((staff) => staff.id !== id));
-
-    alert("Staff member deleted successfully.");
-  } catch (error) {
-    console.error("Error deleting staff member:", error);
-    alert("An error occurred while deleting the staff member. Please try again.");
-  }
-};
+      // Update the state to remove the deleted staff from the list
+      setStaffs((prev) => prev.filter((staff) => staff.id !== id));
+      alert("Staff member deleted successfully from the system.");
+      
+    } catch (error) {
+      console.error("Error deleting staff member:", error);
+      alert("An error occurred while deleting the staff member. Please try again.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const filteredStaffs = staffs.filter(
     (staff) =>
@@ -151,6 +265,7 @@ const handleDeleteStaff = async (id: string, uid: string) => {
             onClick={() => {
               setEditingStaff(null); // Reset editingStaff to null
               setFormData({ name: "", email: "", password: "", role: "staff", status: "active" }); // Reset form data
+              setError(""); // Clear any previous errors
               setIsDialogOpen(true); // Open the dialog
             }}
           >
@@ -203,6 +318,7 @@ const handleDeleteStaff = async (id: string, uid: string) => {
                           onClick={() => {
                             setEditingStaff(staff);
                             setFormData({ ...staff, password: "" });
+                            setError(""); // Clear any previous errors
                             setIsDialogOpen(true);
                           }}
                         >
@@ -210,8 +326,9 @@ const handleDeleteStaff = async (id: string, uid: string) => {
                           Edit
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          onClick={() => handleDeleteStaff(staff.id, staff.uid)}
+                          onClick={() => handleDeleteStaff(staff.id, staff.uid, staff.email)}
                           className="text-red-600 focus:text-red-600"
+                          disabled={isDeleting}
                         >
                           <Trash className="mr-2 h-4 w-4" />
                           Delete
@@ -281,6 +398,12 @@ const handleDeleteStaff = async (id: string, uid: string) => {
                 <option value="inactive">Inactive</option>
               </select>
             </div>
+            
+            {error && (
+              <div className="text-red-500 text-sm py-2">
+                {error}
+              </div>
+            )}
           </div>
           <div className="mt-6 flex justify-end space-x-2">
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
@@ -289,8 +412,9 @@ const handleDeleteStaff = async (id: string, uid: string) => {
             <Button
               className="bg-blue-600 text-white hover:bg-blue-700"
               onClick={handleSaveStaff}
+              disabled={isLoading}
             >
-              {editingStaff ? "Update" : "Save"}
+              {isLoading ? "Processing..." : (editingStaff ? "Update" : "Save")}
             </Button>
           </div>
         </DialogContent>

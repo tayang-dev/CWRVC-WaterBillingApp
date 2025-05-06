@@ -282,41 +282,275 @@ const updateRequestStatus = async (newStatus: string, remarks?: string) => {
 const exportToXLSX = () => {
   if (filteredRequests.length === 0) return;
 
-  // Create a new workbook and worksheet
+  // Create a new workbook
   const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet('Service Requests');
-
-  // Add title
-  const titleRow = worksheet.addRow(['Service Requests Report']);
-  titleRow.font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
-  worksheet.mergeCells(1, 1, 1, 9); // Merge cells for the title across all columns
-  titleRow.alignment = { horizontal: 'center', vertical: 'middle' };
-  titleRow.eachCell(cell => {
-    cell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF4F81BD' } // Blue background
-    };
-    worksheet.getRow(1).height = 24; // Increase height for title row
+  
+  // Set workbook properties
+  workbook.creator = "Water Management System";
+  workbook.lastModifiedBy = "Water Management System";
+  workbook.created = new Date();
+  workbook.modified = new Date();
+  workbook.properties.date1904 = false;
+  
+  // Custom properties
+  workbook.title = "Service Requests Report";
+  workbook.subject = "Customer Service Requests Analysis";
+  workbook.keywords = "service, requests, water, management";
+  
+  // Color palette
+  const colors = {
+    primary: { argb: 'FF1A5980' },       // Deep blue
+    primaryLight: { argb: 'FF4F81BD' },  // Medium blue
+    accent: { argb: 'FF00ACC1' },        // Teal accent
+    headerBg: { argb: 'FFD0E0F2' },      // Light blue for headers
+    white: { argb: 'FFFFFFFF' },
+    altRow: { argb: 'FFF5F9FC' },        // Very light blue for alternating rows
+    success: { argb: 'FFD8F0D8' },       // Light green for completed
+    warning: { argb: 'FFFFF9E6' },       // Light yellow for in-progress
+    error: { argb: 'FFF2DEDE' },         // Light red for rejected
+    neutral: { argb: 'FFE6E6E6' },       // Light gray for pending
+  };
+  
+  // Styling functions
+  const applyTitleStyle = (row) => {
+    row.font = { bold: true, size: 18, color: { argb: 'FFFFFFFF' } };
+    row.alignment = { horizontal: 'center', vertical: 'middle' };
+    row.height = 36;
+    
+    row.eachCell((cell) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: colors.primary
+      };
+      cell.border = {
+        bottom: { style: 'medium', color: colors.primaryLight }
+      };
+    });
+  };
+  
+  const applySubtitleStyle = (row) => {
+    row.font = { bold: true, size: 14, color: colors.primary };
+    row.height = 24;
+    row.alignment = { horizontal: 'center', vertical: 'middle' };
+  };
+  
+  const applyHeaderStyle = (row) => {
+    row.height = 26;
+    row.eachCell(cell => {
+      cell.font = { bold: true, color: colors.primary, size: 11 };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: colors.headerBg
+      };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = {
+        top: { style: 'thin', color: colors.primaryLight },
+        left: { style: 'thin', color: colors.primaryLight },
+        bottom: { style: 'thin', color: colors.primaryLight },
+        right: { style: 'thin', color: colors.primaryLight }
+      };
+    });
+  };
+  
+  // For section headers
+  const applySectionHeaderStyle = (row) => {
+    row.height = 22;
+    row.eachCell(cell => {
+      cell.font = { bold: true, color: colors.white, size: 11 };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: colors.accent
+      };
+      cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+      cell.border = {
+        bottom: { style: 'thin', color: colors.primaryLight }
+      };
+    });
+  };
+  
+  // For normal data cells
+  const applyDataRowStyle = (row, isAlternate = false) => {
+    row.height = 20;
+    row.eachCell(cell => {
+      if (isAlternate) {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: colors.altRow
+        };
+      }
+      cell.border = {
+        top: { style: 'hair', color: colors.primaryLight },
+        left: { style: 'hair', color: colors.primaryLight },
+        bottom: { style: 'hair', color: colors.primaryLight },
+        right: { style: 'hair', color: colors.primaryLight }
+      };
+      cell.alignment = { vertical: 'middle' };
+    });
+  };
+  
+  // Create Overview worksheet
+  const overview = workbook.addWorksheet('Overview');
+  
+  // Set column widths
+  overview.getColumn(1).width = 24;
+  overview.getColumn(2).width = 50;
+  
+  // Add logo and title
+  overview.addRow([]);
+  const logoRow = overview.addRow(['💧']);
+  logoRow.height = 40;
+  logoRow.getCell(1).font = { size: 36, color: colors.primaryLight };
+  logoRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+  overview.mergeCells(logoRow.number, 1, logoRow.number, 2);
+  
+  const titleRow = overview.addRow(['SERVICE REQUESTS REPORT']);
+  applyTitleStyle(titleRow);
+  overview.mergeCells(titleRow.number, 1, titleRow.number, 2);
+  
+  const subtitleRow = overview.addRow(['Comprehensive Analysis of Customer Service Requests']);
+  applySubtitleStyle(subtitleRow);
+  overview.mergeCells(subtitleRow.number, 1, subtitleRow.number, 2);
+  
+  overview.addRow([]);
+  
+  // Add report information
+  const reportInfoRow = overview.addRow(['REPORT INFORMATION']);
+  applySectionHeaderStyle(reportInfoRow);
+  overview.mergeCells(reportInfoRow.number, 1, reportInfoRow.number, 2);
+  
+  const generateDate = new Date().toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
   });
-  worksheet.getRow(1).height = 30;
   
-  // Add empty row
-  worksheet.addRow([]);
+  // Build the info rows
+  const infoRows = [
+    ['Generated On', generateDate],
+    ['Total Requests', filteredRequests.length.toString()],
+    ['Status Filter', statusFilter !== "all" ? statusFilter : "All"],
+    ['Type Filter', typeFilter !== "all" ? typeFilter : "All"],
+    ['Date Range', dateRange !== "all" ? dateRange : "All Time"]
+  ];
   
-  // Add metadata
-  worksheet.addRow([`Generated on: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`]);
-  worksheet.addRow(['Filters Applied:']);
-  worksheet.addRow([`- Status: ${statusFilter !== "all" ? statusFilter : "All"}`]);
-  worksheet.addRow([`- Type: ${typeFilter !== "all" ? typeFilter : "All"}`]);
-  worksheet.addRow([`- Date Range: ${dateRange !== "all" ? dateRange : "All Time"}`]);
-  worksheet.addRow([`- Search Term: ${searchTerm || "None"}`]);
+  // Add the info rows with alternating background
+  infoRows.forEach((rowData, index) => {
+    const row = overview.addRow(rowData);
+    row.getCell(1).font = { bold: true };
+    row.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
+    row.getCell(2).alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    
+    if (index % 2 === 0) {
+      row.eachCell(cell => {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: colors.altRow
+        };
+      });
+    }
+    
+    row.eachCell(cell => {
+      cell.border = {
+        bottom: { style: 'hair', color: colors.primaryLight }
+      };
+    });
+  });
   
-  // Add empty row
-  worksheet.addRow([]);
+  overview.addRow([]);
+  
+  // Add status summary
+  const statusSummaryRow = overview.addRow(['STATUS SUMMARY']);
+  applySectionHeaderStyle(statusSummaryRow);
+  overview.mergeCells(statusSummaryRow.number, 1, statusSummaryRow.number, 2);
+  
+  // Calculate status count
+  const pendingCount = filteredRequests.filter(req => req.status === "pending").length;
+  const inProgressCount = filteredRequests.filter(req => req.status === "in-progress").length;
+  const completedCount = filteredRequests.filter(req => req.status === "completed").length;
+  const rejectedCount = filteredRequests.filter(req => req.status === "rejected").length;
+  
+  const statusCountRows = [
+    ['Pending', pendingCount.toString()],
+    ['In Progress', inProgressCount.toString()],
+    ['Completed', completedCount.toString()],
+    ['Rejected', rejectedCount.toString()],
+    ['Total', filteredRequests.length.toString()]
+  ];
+  
+  // Add status counts with special formatting
+  statusCountRows.forEach((rowData, index) => {
+    const row = overview.addRow(rowData);
+    row.getCell(1).font = { bold: true };
+    row.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
+    row.getCell(2).alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    
+    // Apply special background for each status
+    if (index < 4) { // Skip the total row
+      let bgColor;
+      switch (rowData[0]) {
+        case 'Pending': bgColor = colors.neutral; break;
+        case 'In Progress': bgColor = colors.warning; break;
+        case 'Completed': bgColor = colors.success; break;
+        case 'Rejected': bgColor = colors.error; break;
+      }
+      
+      row.eachCell(cell => {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: bgColor
+        };
+      });
+    } else {
+      // Make the total row bold
+      row.eachCell(cell => {
+        cell.font = { bold: true };
+        cell.border = {
+          top: { style: 'thin', color: colors.primaryLight },
+          bottom: { style: 'thin', color: colors.primaryLight }
+        };
+      });
+    }
+  });
+  
+  overview.addRow([]);
+  
+  // Add footer
+  const footerRow = overview.addRow(['Report generated by Water Management System']);
+  footerRow.getCell(1).font = { italic: true, color: colors.primary, size: 10 };
+  footerRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+  overview.mergeCells(footerRow.number, 1, footerRow.number, 2);
+  
+  // Create main data worksheet
+  const requests = workbook.addWorksheet('Service Requests');
+  
+  // Set column widths for better readability
+  requests.getColumn(1).width = 15;  // Service ID
+  requests.getColumn(2).width = 15;  // Account Number
+  requests.getColumn(3).width = 18;  // Type
+  requests.getColumn(4).width = 35;  // Subject
+  requests.getColumn(5).width = 50;  // Description
+  requests.getColumn(6).width = 15;  // Status
+  requests.getColumn(7).width = 25;  // Email
+  requests.getColumn(8).width = 15;  // Date
+  requests.getColumn(9).width = 20;  // Attachment
+  
+  // Add the title
+  const mainTitleRow = requests.addRow(['SERVICE REQUESTS DATA']);
+  applyTitleStyle(mainTitleRow);
+  requests.mergeCells(mainTitleRow.number, 1, mainTitleRow.number, 9);
+  
+  requests.addRow([]);
   
   // Add headers
-  const headerRow = worksheet.addRow([
+  const headerRow = requests.addRow([
     "Service ID",
     "Account Number",
     "Request Type",
@@ -327,27 +561,11 @@ const exportToXLSX = () => {
     "Submission Date",
     "Attachment"
   ]);
+  applyHeaderStyle(headerRow);
   
-  // Style the headers
-  headerRow.eachCell(cell => {
-    cell.font = { bold: true };
-    cell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFD0D8E8' } // Light blue
-    };
-    cell.border = {
-      top: { style: 'thin' },
-      left: { style: 'thin' },
-      bottom: { style: 'thin' },
-      right: { style: 'thin' }
-    };
-    cell.alignment = { horizontal: 'center', vertical: 'middle' };
-  });
-  
-  // Add data rows
-  filteredRequests.forEach(req => {
-    const dataRow = worksheet.addRow([
+  // Add data rows with alternating background and status-based formatting
+  filteredRequests.forEach((req, index) => {
+    const dataRow = requests.addRow([
       req.serviceId,
       req.accountNumber,
       req.type,
@@ -356,68 +574,223 @@ const exportToXLSX = () => {
       req.status,
       req.email,
       formatDate(req.timestamp),
-      req.attachmentUri || "None"
+      req.attachmentUri ? "Yes" : "No"
     ]);
     
-    // Add conditional formatting for status
+    // Apply alternating row styling
+    applyDataRowStyle(dataRow, index % 2 === 0);
+    
+    // Custom alignment for specific columns
+    dataRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' }; // Service ID
+    dataRow.getCell(2).alignment = { horizontal: 'center', vertical: 'middle' }; // Account Number
+    dataRow.getCell(3).alignment = { horizontal: 'left', vertical: 'middle', indent: 1 }; // Type
+    dataRow.getCell(4).alignment = { horizontal: 'left', vertical: 'middle', indent: 1 }; // Subject
+    dataRow.getCell(5).alignment = { horizontal: 'left', vertical: 'middle', indent: 1, wrapText: true }; // Description
+    dataRow.getCell(6).alignment = { horizontal: 'center', vertical: 'middle' }; // Status
+    dataRow.getCell(7).alignment = { horizontal: 'left', vertical: 'middle', indent: 1 }; // Email
+    dataRow.getCell(8).alignment = { horizontal: 'center', vertical: 'middle' }; // Date
+    dataRow.getCell(9).alignment = { horizontal: 'center', vertical: 'middle' }; // Attachment
+    
+    // Status-based styling
     const statusCell = dataRow.getCell(6);
-    if (req.status.toLowerCase() === 'completed' || req.status.toLowerCase() === 'resolved') {
-      statusCell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFD8F0D8' } // Light green
-      };
-    } else if (req.status.toLowerCase() === 'in progress' || req.status.toLowerCase() === 'assigned') {
-      statusCell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFFFF9E6' } // Light yellow
-      };
-    } else if (req.status.toLowerCase() === 'cancelled' || req.status.toLowerCase() === 'rejected') {
-      statusCell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFF2DEDE' } // Light red
-      };
+    let statusColor;
+    let textColor = { argb: '00000000' }; // Default black
+    
+    switch (req.status.toLowerCase()) {
+      case 'completed':
+        statusColor = colors.success;
+        statusCell.font = { bold: true, color: { argb: 'FF008000' } }; // Dark green
+        break;
+      case 'in-progress':
+        statusColor = colors.warning;
+        statusCell.font = { bold: true, color: { argb: 'FF8B6508' } }; // Dark amber
+        break;
+      case 'rejected':
+        statusColor = colors.error;
+        statusCell.font = { bold: true, color: { argb: 'FF8B0000' } }; // Dark red
+        break;
+      default: // pending
+        statusColor = colors.neutral;
+        statusCell.font = { bold: true, color: { argb: 'FF808080' } }; // Gray
     }
     
-    // Add border to all cells in the row
-    dataRow.eachCell(cell => {
-      cell.border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        bottom: { style: 'thin' },
-        right: { style: 'thin' }
+    statusCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: statusColor
+    };
+    
+    // Set row height based on description length
+    if (req.description && req.description.length > 100) {
+      dataRow.height = Math.min(120, Math.max(20, Math.ceil(req.description.length / 50) * 15));
+    }
+    
+    // Style attachment cell
+    const attachmentCell = dataRow.getCell(9);
+    if (req.attachmentUri) {
+      attachmentCell.font = { bold: true, color: { argb: 'FF4F81BD' } }; // Blue
+    }
+  });
+  
+  // Add a summary footer row
+  requests.addRow([]);
+  const summaryRow = requests.addRow([
+    `Total: ${filteredRequests.length} request(s)`, '', '', '', '', '', '', '', ''
+  ]);
+  summaryRow.getCell(1).font = { bold: true, color: colors.primary };
+  requests.mergeCells(summaryRow.number, 1, summaryRow.number, 9);
+  summaryRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+  
+  // Add a note about attachment
+  requests.addRow([]);
+  const noteRow = requests.addRow([
+    'Note: For security reasons, attachments are only indicated as "Yes" or "No". Please view attachments in the application.', 
+    '', '', '', '', '', '', '', ''
+  ]);
+  noteRow.getCell(1).font = { italic: true, size: 10, color: colors.primary };
+  requests.mergeCells(noteRow.number, 1, noteRow.number, 9);
+  noteRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+  
+  // Create a Type Distribution worksheet
+  const typesDist = workbook.addWorksheet('Type Distribution');
+  typesDist.getColumn(1).width = 25;
+  typesDist.getColumn(2).width = 15;
+  typesDist.getColumn(3).width = 15;
+  
+  // Add title
+  const typesTitleRow = typesDist.addRow(['SERVICE REQUEST TYPES']);
+  applyTitleStyle(typesTitleRow);
+  typesDist.mergeCells(typesTitleRow.number, 1, typesTitleRow.number, 3);
+  
+  typesDist.addRow([]);
+  
+  // Add headers
+  const typesHeaderRow = typesDist.addRow(['Request Type', 'Count', 'Percentage']);
+  applyHeaderStyle(typesHeaderRow);
+  
+  // Calculate type distribution
+  const typeDistribution = {};
+  filteredRequests.forEach(req => {
+    typeDistribution[req.type] = (typeDistribution[req.type] || 0) + 1;
+  });
+  
+  // Add type data rows
+  Object.entries(typeDistribution).forEach(([type, count], index) => {
+    const percentage = ((count as number) / filteredRequests.length * 100).toFixed(2) + '%';
+    const row = typesDist.addRow([type, count.toString(), percentage]);
+    
+    applyDataRowStyle(row, index % 2 === 0);
+    
+    // Align numbers to right
+    row.getCell(2).alignment = { horizontal: 'right', vertical: 'middle' };
+    row.getCell(3).alignment = { horizontal: 'right', vertical: 'middle' };
+  });
+  
+  // Add a total row
+  const typeTotalRow = typesDist.addRow(['Total', filteredRequests.length.toString(), '100.00%']);
+  typeTotalRow.eachCell(cell => {
+    cell.font = { bold: true };
+    cell.border = {
+      top: { style: 'thin', color: colors.primaryLight },
+      bottom: { style: 'thin', color: colors.primaryLight }
+    };
+  });
+  typeTotalRow.getCell(2).alignment = { horizontal: 'right', vertical: 'middle' };
+  typeTotalRow.getCell(3).alignment = { horizontal: 'right', vertical: 'middle' };
+  
+  // Create a Status Distribution worksheet
+  const statusDist = workbook.addWorksheet('Status Distribution');
+  statusDist.getColumn(1).width = 25;
+  statusDist.getColumn(2).width = 15;
+  statusDist.getColumn(3).width = 15;
+  
+  // Add title
+  const statusTitleRow = statusDist.addRow(['SERVICE REQUEST STATUSES']);
+  applyTitleStyle(statusTitleRow);
+  statusDist.mergeCells(statusTitleRow.number, 1, statusTitleRow.number, 3);
+  
+  statusDist.addRow([]);
+  
+  // Add headers
+  const statusHeaderRow = statusDist.addRow(['Status', 'Count', 'Percentage']);
+  applyHeaderStyle(statusHeaderRow);
+  
+  // Add status data rows with color coding
+  const statusRows = [
+    ['Pending', pendingCount, colors.neutral],
+    ['In Progress', inProgressCount, colors.warning],
+    ['Completed', completedCount, colors.success],
+    ['Rejected', rejectedCount, colors.error]
+  ];
+  
+  statusRows.forEach(([status, count, color], index) => {
+    const percentage = (count as number) > 0 
+      ? ((count as number) / filteredRequests.length * 100).toFixed(2) + '%' 
+      : '0.00%';
+    
+    const row = statusDist.addRow([status, count.toString(), percentage]);
+    
+    // Style the row
+    row.eachCell(cell => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: color as any
       };
-      
-      // Set wrap text for description
-      if (Number(cell.col) === 5) { // Description column
-        cell.alignment = { wrapText: true };
-      }
+      cell.border = {
+        top: { style: 'hair', color: colors.primaryLight },
+        left: { style: 'hair', color: colors.primaryLight },
+        bottom: { style: 'hair', color: colors.primaryLight },
+        right: { style: 'hair', color: colors.primaryLight }
+      };
     });
+    
+    // Align numbers to right
+    row.getCell(2).alignment = { horizontal: 'right', vertical: 'middle' };
+    row.getCell(3).alignment = { horizontal: 'right', vertical: 'middle' };
   });
   
-  // Auto-fit columns
-  worksheet.columns.forEach(column => {
-    let maxLength = 0;
-    column.eachCell({ includeEmpty: true }, cell => {
-      const columnWidth = cell.value ? cell.value.toString().length : 10;
-      if (columnWidth > maxLength) {
-        maxLength = columnWidth;
-      }
-    });
-    column.width = Math.min(maxLength + 2, 50); // Cap width at 50
+  // Add a total row
+  const statusTotalRow = statusDist.addRow(['Total', filteredRequests.length.toString(), '100.00%']);
+  statusTotalRow.eachCell(cell => {
+    cell.font = { bold: true };
+    cell.border = {
+      top: { style: 'thin', color: colors.primaryLight },
+      bottom: { style: 'thin', color: colors.primaryLight }
+    };
   });
+  statusTotalRow.getCell(2).alignment = { horizontal: 'right', vertical: 'middle' };
+  statusTotalRow.getCell(3).alignment = { horizontal: 'right', vertical: 'middle' };
   
-  // Set specific column widths for better readability
-  worksheet.getColumn(4).width = 35; // Subject
-  worksheet.getColumn(5).width = 50; // Description
-  worksheet.getColumn(7).width = 30; // Email
+  // Apply print settings for all worksheets
+  [overview, requests, typesDist, statusDist].forEach(sheet => {
+    // Freeze the header rows
+    sheet.views = [
+      { state: 'frozen', xSplit: 0, ySplit: sheet === requests ? 3 : 4, activeCell: 'A1' }
+    ];
+    
+    // Set print properties
+    sheet.pageSetup.paperSize = 9; // A4
+    sheet.pageSetup.orientation = 'landscape';
+    sheet.pageSetup.fitToPage = true;
+    sheet.pageSetup.fitToWidth = 1;
+    sheet.pageSetup.fitToHeight = 0;
+    sheet.pageSetup.margins = {
+      left: 0.7,
+      right: 0.7,
+      top: 0.75,
+      bottom: 0.75,
+      header: 0.3,
+      footer: 0.3
+    };
+    
+    // Add page numbers in footer
+    sheet.headerFooter.oddFooter = '&CPage &P of &N';
+  });
   
   // Generate file and trigger download
-  const filename = `service-requests-${new Date().toISOString().split("T")[0]}.xlsx`;
+  const filename = `service-requests-${new Date().toISOString().split('T')[0]}.xlsx`;
   
-  // In browser environment
   workbook.xlsx.writeBuffer().then(buffer => {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = window.URL.createObjectURL(blob);

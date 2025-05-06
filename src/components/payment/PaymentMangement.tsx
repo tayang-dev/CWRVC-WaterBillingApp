@@ -1,4 +1,7 @@
 import React, { useState, useEffect } from "react";
+import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
+import { FileSpreadsheet } from "lucide-react";
 
 import {
   Card,
@@ -1416,6 +1419,380 @@ const formatCurrency = (value) => {
   return (parseFloat(value) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 };
 
+const handleExportPaymentHistory = async () => {
+  // Create a new workbook
+  const workbook = new ExcelJS.Workbook();
+  
+  // Set document properties
+  workbook.creator = "Centennial Water Resource";
+  workbook.lastModifiedBy = "Water Billing System";
+  workbook.created = new Date();
+  workbook.modified = new Date();
+  workbook.properties.date1904 = false;
+  
+  // Custom properties
+  workbook.creator = "Water Billing System";
+  workbook.created = new Date();
+  workbook.modified = new Date();
+  
+  // Color definitions (water themed)
+  const colors = {
+    darkBlue: { argb: 'FF0070C0' },      // Primary blue
+    mediumBlue: { argb: 'FF1E88E5' },    // Medium blue
+    lightBlue: { argb: 'FFB3E0FF' },     // Light blue
+    paleBlue: { argb: 'FFE1F5FE' },      // Very light blue
+    white: { argb: 'FFFFFFFF' },         // White
+    gray: { argb: 'FFF5F5F5' }           // Light gray
+  };
+  
+  // Add the main worksheet
+  const sheet = workbook.addWorksheet('Payment Records', {
+    properties: { tabColor: { argb: 'FF0070C0' } }
+  });
+  
+  // ========== TITLE SECTION ==========
+  
+  // Add company header row (Row 1)
+  sheet.mergeCells('A1:G1');
+  const titleCell = sheet.getCell('A1');
+  titleCell.value = "CENTENNIAL WATER RESOURCE VENTURE CORPORATION";
+  titleCell.font = {
+    name: 'Arial',
+    size: 16,
+    bold: true,
+    color: colors.darkBlue
+  };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  titleCell.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: colors.white
+  };
+  sheet.getRow(1).height = 30;
+  
+  // Add report name row (Row 2)
+  sheet.mergeCells('A2:G2');
+  const reportCell = sheet.getCell('A2');
+  reportCell.value = "Water Billing Payment History Report";
+  reportCell.font = {
+    name: 'Arial',
+    size: 12,
+    bold: true,
+    color: colors.darkBlue
+  };
+  reportCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  sheet.getRow(2).height = 24;
+  
+  // Add date row (Row 3)
+  sheet.mergeCells('A3:G3');
+  const dateCell = sheet.getCell('A3');
+  dateCell.value = `Report Generated: ${new Date().toLocaleString('en-US', {
+    year: 'numeric', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: true
+  })}`;
+  dateCell.font = {
+    name: 'Arial',
+    size: 10,
+    italic: true,
+    color: { argb: 'FF666666' }
+  };
+  dateCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  
+  // Add filters information row (Row 4)
+  sheet.mergeCells('A4:G4');
+  const filterCell = sheet.getCell('A4');
+  
+  // Get filter information
+  const siteFilter = filterSite !== 'all' ? `Site: ${filterSite}` : 'All Sites';
+  const monthFilter = filterMonth !== 'all' 
+    ? `Month: ${new Date(0, parseInt(filterMonth) - 1).toLocaleString('en-US', { month: 'long' })}` 
+    : 'All Months';
+  const yearFilter = filterYear !== 'all' ? `Year: ${filterYear}` : 'All Years';
+  
+  filterCell.value = `Filters Applied: ${siteFilter} | ${monthFilter} | ${yearFilter}`;
+  filterCell.font = {
+    name: 'Arial',
+    size: 10,
+    italic: true,
+    color: { argb: 'FF666666' }
+  };
+  filterCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  
+  // Add spacing (Row 5-6)
+  sheet.addRow([]);
+  sheet.addRow([]);
+  
+  // ========== TABLE HEADER ==========
+  
+  // First, set column widths without adding headers
+  [
+    { key: 'accountNumber', width: 18 },
+    { key: 'customerName', width: 25 },
+    { key: 'amount', width: 15 },
+    { key: 'referenceNumber', width: 24 },
+    { key: 'paymentDate', width: 18 },
+    { key: 'paymentMethod', width: 15 },
+    { key: 'verifiedAt', width: 24 }
+  ].forEach((col, index) => {
+    sheet.getColumn(index + 1).width = col.width;
+    sheet.getColumn(index + 1).key = col.key;
+  });
+  
+  // Add header row (Row 7)
+  const headerRow = sheet.addRow([
+    "Account #", "Customer", "Amount", "Reference #", 
+    "Payment Date", "Method", "Verified At"
+  ]);
+  
+  // Style the header row
+  headerRow.height = 30;
+  headerRow.eachCell((cell) => {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: colors.darkBlue
+    };
+    cell.font = {
+      name: 'Arial',
+      bold: true,
+      color: colors.white,
+      size: 12
+    };
+    cell.alignment = {
+      horizontal: 'center',
+      vertical: 'middle'
+    };
+    cell.border = {
+      top: { style: 'thin', color: colors.darkBlue },
+      left: { style: 'thin', color: colors.darkBlue },
+      bottom: { style: 'medium', color: colors.darkBlue },
+      right: { style: 'thin', color: colors.darkBlue }
+    };
+  });
+  
+  // ========== DATA ROWS ==========
+  
+  // Collect and count verified payments
+  const verifiedPayments = filteredHistory.filter(payment => payment.status === "verified");
+  let totalAmount = 0;
+  let totalCount = 0;
+  
+  // Add data rows
+  verifiedPayments.forEach((payment, idx) => {
+    // Calculate running total
+    const paymentAmount = typeof payment.amount === 'string' ? 
+      parseFloat(payment.amount) : payment.amount;
+    
+    totalAmount += paymentAmount;
+    totalCount++;
+    
+    // Format payment data
+    const rowData = [
+      payment.accountNumber,
+      payment.customerName,
+      `₱${formatCurrency(paymentAmount)}`,
+      payment.referenceNumber,
+      formatDate(payment.paymentDate),
+      payment.paymentMethod,
+      payment.verifiedAt ? new Date(payment.verifiedAt).toLocaleString("en-US", {
+        year: "numeric", month: "long", day: "numeric",
+        hour: "2-digit", minute: "2-digit", hour12: true,
+      }) : ""
+    ];
+    
+    const row = sheet.addRow(rowData);
+    
+    // Apply alternating row colors
+    row.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: idx % 2 === 0 ? 'FFF5F9FF' : 'FFFFFFFF' }
+    };
+    
+    // Set row height
+    row.height = 22;
+    
+    // Apply cell styling
+    row.eachCell((cell, colNumber) => {
+      // Apply borders to all cells
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+        left: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+        bottom: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+        right: { style: 'thin', color: { argb: 'FFE0E0E0' } }
+      };
+      
+      // Apply specific styling based on column
+      if (colNumber === 1) { // Account Number
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else if (colNumber === 3) { // Amount
+        cell.alignment = { horizontal: 'right', vertical: 'middle' };
+      } else if (colNumber === 4) { // Reference Number
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else {
+        cell.alignment = { horizontal: 'left', vertical: 'middle' };
+      }
+    });
+  });
+  
+  // ========== SUMMARY SECTION ==========
+  
+  // Add spacing row
+  sheet.addRow([]);
+  
+  // Add summary header row
+  const summaryHeaderRow = sheet.addRow(['PAYMENT SUMMARY']);
+  sheet.mergeCells(`A${summaryHeaderRow.number}:G${summaryHeaderRow.number}`);
+  const summaryHeaderCell = summaryHeaderRow.getCell(1);
+  summaryHeaderCell.font = {
+    name: 'Arial',
+    size: 14,
+    bold: true,
+    color: colors.darkBlue
+  };
+  summaryHeaderCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  summaryHeaderCell.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFE6F2FF' }
+  };
+  summaryHeaderRow.height = 28;
+  
+  // Add transaction count row
+  const countRow = sheet.addRow(['**Total Transactions:', '', totalCount.toString(), '', '', '', '']);
+  countRow.font = { bold: true, size: 11 };
+  countRow.height = 24;
+  
+  // Format cells
+  countRow.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
+  countRow.getCell(3).alignment = { horizontal: 'left', vertical: 'middle' };
+  countRow.getCell(3).font = { bold: true, size: 11 };
+  
+  // Add total amount row
+  const amountRow = sheet.addRow([
+    '**Total Amount Collected:', '', `₱${formatCurrency(totalAmount)}`, '', '', '', ''
+  ]);
+  amountRow.font = { bold: true, size: 12 };
+  amountRow.height = 24;
+  
+  // Format cells  
+  amountRow.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
+  amountRow.getCell(3).alignment = { horizontal: 'left', vertical: 'middle' };
+  amountRow.getCell(3).font = { 
+    bold: true, 
+    size: 12,
+    color: colors.darkBlue
+  };
+  
+  // Add background to total amount row
+  amountRow.eachCell((cell) => {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE6F2FF' }
+    };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+      left: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+      bottom: { style: 'thin', color: { argb: 'FFE0E0E0' } },
+      right: { style: 'thin', color: { argb: 'FFE0E0E0' } }
+    };
+  });
+  
+  // ========== FOOTER SECTION ==========
+  
+  // Add spacing rows
+  sheet.addRow([]);
+  sheet.addRow([]);
+  
+  // Add footer row
+  const footerRow = sheet.addRow(['Centennial Water Resource Venture Corporation - Official Payment Records']);
+  sheet.mergeCells(`A${footerRow.number}:G${footerRow.number}`);
+  footerRow.getCell(1).font = {
+    name: 'Arial',
+    size: 10,
+    italic: true,
+    color: colors.darkBlue
+  };
+  footerRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+  
+  // Add contact row
+  const contactRow = sheet.addRow(['For inquiries: centennialwaterresourceventure@gmail.com']);
+  sheet.mergeCells(`A${contactRow.number}:G${contactRow.number}`);
+  contactRow.getCell(1).font = {
+    name: 'Arial',
+    size: 10,
+    italic: true,
+    color: { argb: 'FF666666' }
+  };
+  contactRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+  
+  // Add generated info row
+  const generatedRow = sheet.addRow(['This report is generated automatically from the Centennial Water Billing System']);
+  sheet.mergeCells(`A${generatedRow.number}:G${generatedRow.number}`);
+  generatedRow.getCell(1).font = {
+    name: 'Arial',
+    size: 9,
+    italic: true,
+    color: { argb: 'FF999999' }
+  };
+  generatedRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+  
+  // ========== EXCEL SETTINGS ==========
+  
+  // Add filter to the table
+  sheet.autoFilter = {
+    from: { row: headerRow.number, column: 1 },
+    to: { row: headerRow.number + verifiedPayments.length, column: 7 }
+  };
+  
+  // Freeze panes at the header row
+  sheet.views = [{
+    state: 'frozen',
+    xSplit: 0,
+    ySplit: headerRow.number,
+    activeCell: 'A' + (headerRow.number + 1),
+    zoomScale: 100
+  }];
+  
+  // Set print settings
+  sheet.pageSetup = {
+    paperSize: 9, // A4
+    orientation: 'landscape',
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+    printArea: `A1:G${sheet.rowCount}`,
+    margins: {
+      left: 0.7,
+      right: 0.7,
+      top: 0.75,
+      bottom: 0.75,
+      header: 0.3,
+      footer: 0.3
+    }
+  };
+  
+  // Add page numbers in footer
+  sheet.headerFooter.oddFooter = "&CPage &P of &N";
+  
+  // ========== EXPORT FILE ==========
+  
+  // Generate the file buffer
+  const buffer = await workbook.xlsx.writeBuffer();
+  
+  // Create filename with date
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const fileName = `Centennial_Water_Billing_Payment_Report_${dateStr}.xlsx`;
+  
+  // Save file
+  saveAs(
+    new Blob([buffer], { 
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" 
+    }),
+    fileName
+  );
+};
   return (
     <div className="w-full h-full bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
@@ -1973,79 +2350,88 @@ const formatCurrency = (value) => {
                       View the payment history of customers
                     </CardDescription>
                   </div>
-                  
-                  <Dialog open={isPrintDialogOpen} onOpenChange={setIsPrintDialogOpen}>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" className="mt-4 md:mt-0">
-                        <FileText className="mr-2 h-4 w-4" />
-                        Print All Receipts
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="sm:max-w-[400px]">
-                      <DialogHeader>
-                        <DialogTitle>Filter Receipts</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        <div>
-                          <Label>Month</Label>
-                          <Select value={printMonth} onValueChange={setPrintMonth}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select month" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {Array.from({ length: 12 }, (_, i) => {
-                                const month = String(i + 1).padStart(2, "0");
-                                return (
-                                  <SelectItem key={month} value={month}>
-                                    {month}
-                                  </SelectItem>
-                                );
-                              })}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label>Year</Label>
-                          <Select value={printYear} onValueChange={setPrintYear}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select year" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {["2024", "2025", "2026"].map((year) => (
-                                <SelectItem key={year} value={year}>
-                                  {year}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label>Site</Label>
-                          <Select value={printSite} onValueChange={setPrintSite}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select site" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All</SelectItem>
-                              <SelectItem value="site1">Site 1</SelectItem>
-                              <SelectItem value="site2">Site 2</SelectItem>
-                              <SelectItem value="site3">Site 3</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <Button
-                          onClick={() => {
-                            setIsPrintDialogOpen(false);
-                            handlePrintReceipts( printMonth, printYear, printSite);
-                          }}
-                          className="w-full"
-                        >
-                          Print
+                  <div className="flex gap-2">
+                    <Button
+                      className="bg-blue-600 hover:bg-green-700 text-white"
+                      onClick={handleExportPaymentHistory}
+                      disabled={filteredHistory.length === 0}
+                    >
+                      <FileSpreadsheet className="mr-2 h-4 w-4" />
+                      Export to Excel
+                    </Button>
+                    <Dialog open={isPrintDialogOpen} onOpenChange={setIsPrintDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button variant="outline" className="mt-4 md:mt-0">
+                          <FileText className="mr-2 h-4 w-4" />
+                          Print All Receipts
                         </Button>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
+                      </DialogTrigger>
+                      <DialogContent className="sm:max-w-[400px]">
+                        <DialogHeader>
+                          <DialogTitle>Filter Receipts</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div>
+                            <Label>Month</Label>
+                            <Select value={printMonth} onValueChange={setPrintMonth}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select month" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Array.from({ length: 12 }, (_, i) => {
+                                  const month = String(i + 1).padStart(2, "0");
+                                  return (
+                                    <SelectItem key={month} value={month}>
+                                      {month}
+                                    </SelectItem>
+                                  );
+                                })}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label>Year</Label>
+                            <Select value={printYear} onValueChange={setPrintYear}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select year" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {["2024", "2025", "2026"].map((year) => (
+                                  <SelectItem key={year} value={year}>
+                                    {year}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label>Site</Label>
+                            <Select value={printSite} onValueChange={setPrintSite}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select site" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All</SelectItem>
+                                <SelectItem value="site1">Site 1</SelectItem>
+                                <SelectItem value="site2">Site 2</SelectItem>
+                                <SelectItem value="site3">Site 3</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          
+                          <Button
+                            onClick={() => {
+                              setIsPrintDialogOpen(false);
+                              handlePrintReceipts( printMonth, printYear, printSite);
+                            }}
+                            className="w-full"
+                          >
+                            Print
+                          </Button>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>

@@ -26,6 +26,29 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills }) => 
     );
   }
 
+  // Sort bills by creation date (newest first) - FIXED the TypeScript error here
+  const sortedBills = [...selectedBills].sort((a, b) => {
+    // Handle Firestore Timestamp objects, string dates, or fallback to 0
+    let dateA = 0;
+    let dateB = 0;
+    
+    if (a.createdAt) {
+      // Check if it's a Firestore Timestamp (has seconds and nanoseconds)
+      dateA = a.createdAt.seconds ? 
+        a.createdAt.seconds * 1000 + a.createdAt.nanoseconds / 1000000 : 
+        new Date(a.createdAt).getTime();
+    }
+    
+    if (b.createdAt) {
+      // Check if it's a Firestore Timestamp (has seconds and nanoseconds)
+      dateB = b.createdAt.seconds ? 
+        b.createdAt.seconds * 1000 + b.createdAt.nanoseconds / 1000000 : 
+        new Date(b.createdAt).getTime();
+    }
+    
+    return dateB - dateA; // Sort in descending order (newest first)
+  });
+
   // Calculate tiered billing for display purposes
   const calculateTieredUsage = (totalUsage) => {
     const tiers = [
@@ -72,11 +95,27 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills }) => 
           <DialogTitle>Bills for {selectedAccount}</DialogTitle>
         </DialogHeader>
         <div className="space-y-8">
-          {selectedBills.map((bill, index) => {
+          {sortedBills.map((bill, index) => {
             const { tiers, totalAmount } = calculateTieredUsage(bill.waterUsage || 0);
+            
+            // Calculate the total amount after due date (including arrears)
+            const totalAmountAfterDue = parseFloat(bill.amountAfterDue || 0) + parseFloat(bill.arrears || 0);
+            
+            // Calculate the regular amount with arrears for QR code
+            const regularAmount = parseFloat(bill.amountWithArrears || 0);
+            const arrears = parseFloat(bill.arrears || 0);
             
             return (
               <div key={index} className="border-2 border-black p-4 print:p-0">
+                {/* Display creation date for debugging/reference */}
+                <div className="text-right text-sm text-gray-500 mb-2">
+                  {bill.createdAt ? 
+                    (bill.createdAt.seconds ? 
+                      new Date(bill.createdAt.seconds * 1000 + bill.createdAt.nanoseconds / 1000000).toLocaleString() : 
+                      new Date(bill.createdAt).toLocaleString()
+                    ) : 'Date not available'}
+                </div>
+                
                 {/* Header */}
                 <div className="flex justify-between items-center border-b-2 border-black pb-2">
                   <div className="flex items-center gap-3">
@@ -249,7 +288,7 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills }) => 
                         <td className="px-2 py-1 border-r border-black">{bill.meterNumber || "00000000"}</td>
                         <td className="px-2 py-1 border-r border-black">{bill.dueDate || "01/01/2025"}</td>
                         <td className="px-2 py-1 border-r border-black">{bill.penalty?.toFixed(2) || "0.00"}</td>
-                        <td className="px-2 py-1 font-bold">{bill.amountAfterDue?.toFixed(2) || "0.00"}</td>
+                        <td className="px-2 py-1 font-bold">{totalAmountAfterDue.toFixed(2) || "0.00"}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -268,17 +307,18 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills }) => 
                   </p>
                 </div>
 
-                {/* Replace the Print Button with QR Code */}
+                {/* QR Code with updated data - now includes arrears explicitly */}
                 <div className="mt-4 flex justify-end">
                   <div className="flex flex-col items-center">
-                  <QRCodeCanvas
+                    <QRCodeCanvas
                       value={JSON.stringify({
                         billNumber: bill.billNumber || "0000000000",
                         customerName: bill.customerName || "CUSTOMER NAME",
-                        amount: bill.originalAmount?.toFixed(2) || "0.00",
+                        amount: regularAmount.toFixed(2) || "0.00",
+                        arrears: arrears.toFixed(2) || "0.00",
                         dueDate: bill.dueDate || "01/01/2025",
                         accountNumber: bill.accountNumber || "00-00-0000",
-                        amountAfterDue: bill.amountAfterDue?.toFixed(2) || "0.00",
+                        amountAfterDue: totalAmountAfterDue.toFixed(2) || "0.00",
                       })}
                       size={128} // Size of the QR code
                       level="H" // Error correction level
