@@ -813,24 +813,13 @@ const handlePrintLoginCredentials = () => {
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-          <Tabs defaultValue="accounts" className="w-full">
-            <div className="border-b px-6 py-3">
-              <TabsList className="grid w-full max-w-md grid-cols-1">
-                <TabsTrigger
-                  value="accounts"
-                  className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700"
-                >
-                  <Users className="h-4 w-4 mr-2" />
-                  Customer Accounts
-                </TabsTrigger>
-              </TabsList>
-            </div>
 
-            <TabsContent value="accounts" className="p-0">
+
+          <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+            {/* Removed Tabs since there's only one tab */}
+            <div>
               {view === "list" ? (
                 <div className="space-y-6 p-6">
-              
                   {loading ? (
                     <div className="flex justify-center items-center h-64">
                       <p>Loading customers...</p>
@@ -839,8 +828,7 @@ const handlePrintLoginCredentials = () => {
                     <CustomerList
                       customers={customers}
                       onViewCustomer={handleViewCustomer}
-                      onFilteredDataChange={handleFilteredDataChange} // Add this prop
-                      
+                      onFilteredDataChange={handleFilteredDataChange}
                     />
                   )}
                 </div>
@@ -914,9 +902,9 @@ const handlePrintLoginCredentials = () => {
                   />
                 </div>
               )}
-            </TabsContent>
-          </Tabs>
-        </div>
+            </div>
+          </div>
+
 
         <div className="mt-6 text-center text-sm text-gray-500">
           <p>Water Billing App - Admin Portal v1.0</p>

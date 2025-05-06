@@ -11,10 +11,7 @@ interface KpiProps {
   totalRevenue: string;
   pendingPayments: string;
   waterConsumption: string;
-  customerGrowth: string;
-  revenueGrowth: string;
-  pendingChange: string;
-  consumptionChange: string;
+  // Growth percentages removed from interface
 }
 
 const KpiCards: React.FC<KpiProps> = ({
@@ -22,10 +19,6 @@ const KpiCards: React.FC<KpiProps> = ({
   totalRevenue,
   pendingPayments,
   waterConsumption,
-  customerGrowth,
-  revenueGrowth,
-  pendingChange,
-  consumptionChange,
 }) => {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -35,7 +28,7 @@ const KpiCards: React.FC<KpiProps> = ({
           <div>
             <p className="text-sm font-medium text-gray-500 mb-1">Total Customers</p>
             <h3 className="text-2xl font-bold text-gray-900">{totalCustomers}</h3>
-            <p className="text-sm text-green-500">{customerGrowth}</p>
+            {/* Growth percentage removed */}
           </div>
           <div className="p-2 bg-blue-50 rounded-full">
             <Users className="h-6 w-6 text-blue-500" />
@@ -49,7 +42,7 @@ const KpiCards: React.FC<KpiProps> = ({
           <div>
             <p className="text-sm font-medium text-gray-500 mb-1">Total Revenue</p>
             <h3 className="text-2xl font-bold text-gray-900">{totalRevenue}</h3>
-            <p className="text-sm text-green-500">{revenueGrowth}</p>
+            {/* Growth percentage removed */}
           </div>
           <div className="p-2 bg-green-50 rounded-full">
             <CreditCard className="h-6 w-6 text-green-500" />
@@ -63,9 +56,7 @@ const KpiCards: React.FC<KpiProps> = ({
           <div>
             <p className="text-sm font-medium text-gray-500 mb-1">Pending Payments</p>
             <h3 className="text-2xl font-bold text-gray-900">{pendingPayments}</h3>
-            <p className={`text-sm ${parseFloat(pendingChange) >= 0 ? "text-green-500" : "text-red-500"}`}>
-              {pendingChange}
-            </p>
+            {/* Growth percentage removed */}
           </div>
           <div className="p-2 bg-yellow-50 rounded-full">
             <Clock className="h-6 w-6 text-yellow-500" />
@@ -79,9 +70,7 @@ const KpiCards: React.FC<KpiProps> = ({
           <div>
             <p className="text-sm font-medium text-gray-500 mb-1">Water Consumption</p>
             <h3 className="text-2xl font-bold text-gray-900">{waterConsumption}</h3>
-            <p className={`text-sm ${parseFloat(consumptionChange) >= 0 ? "text-green-500" : "text-red-500"}`}>
-              {consumptionChange}
-            </p>
+            {/* Growth percentage removed */}
           </div>
           <div className="p-2 bg-blue-50 rounded-full">
             <Droplet className="h-6 w-6 text-blue-500" />

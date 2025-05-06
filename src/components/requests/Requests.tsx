@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Download, Search, Filter, FileText, BarChart } from "lucide-react";
@@ -63,6 +65,9 @@ const Requests = ({}: RequestsProps) => {
   // New state for confirmation of status update; holds the new status to be set.
   const [confirmStatus, setConfirmStatus] = useState<string | null>(null);
   const [remarks, setRemarks] = useState("");
+
+  const location = useLocation();
+
 
   // Updated Stats: now including Maintenance, Billing Issue, Complaint, Service Inquiry and Other
   const [stats, setStats] = useState({
@@ -135,6 +140,33 @@ const Requests = ({}: RequestsProps) => {
 
     fetchServiceRequests();
   }, []);
+
+    // Handle tab and request selection from URL (for notification redirection)
+    useEffect(() => {
+      const searchParams = new URLSearchParams(location.search);
+      const tab = searchParams.get("tab");
+      const id = searchParams.get("id");
+  
+      // Set the active tab if present
+      if (tab) {
+        // If using shadcn Tabs, you may need to control the value via state:
+        // setActiveTab(tab);
+        // If using uncontrolled Tabs, you can use defaultValue, but for notification, use controlled:
+        // See below for how to add this state if not present
+        document.querySelector(`[data-state="active"][data-value="${tab}"]`)?.scrollIntoView();
+        // Or, if you have a state for the tab, set it here
+      }
+  
+      // Open the details dialog if an ID is present and data is loaded
+      if (id && serviceRequests.length > 0) {
+        const target = serviceRequests.find((req) => req.id === id);
+        if (target) {
+          setSelectedRequest(target);
+          setShowDetails(true);
+        }
+      }
+    }, [location.search, serviceRequests]);
+  
 
   // Filter function
   useEffect(() => {

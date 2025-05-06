@@ -170,6 +170,8 @@ const CustomerList: React.FC<CustomerListProps> = ({
   const [filterSite, setFilterSite] = useState("all");
   const [filterSenior, setFilterSenior] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [filterStatus, setFilterStatus] = useState("all"); // <-- Add this line
+
 
   const itemsPerPage = 10;
 
@@ -254,8 +256,11 @@ const CustomerList: React.FC<CustomerListProps> = ({
         })
       );
   
-    // Sort customers alphabetically by name
-    customersList.sort((a, b) => a.name.localeCompare(b.name));
+      customersList.sort((a, b) => {
+        const nameA = a.name || "";
+        const nameB = b.name || "";
+        return nameA.localeCompare(nameB);
+      });
 
       setCustomers(customersList);
     } catch (error) {
@@ -661,16 +666,19 @@ const handleDeleteCustomer = async () => {
   const filteredCustomers = useMemo(() => {
     return customers.filter((customer) => {
       const matchesSearchTerm =
-        customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        customer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        customer.accountNumber.toLowerCase().includes(searchTerm.toLowerCase());
-  
+      (customer.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (customer.email || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (customer.accountNumber || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
+      (customer.lastBillingDate || "").toLowerCase().includes(searchTerm.toLowerCase());
+
       const matchesSite = filterSite === "all" || customer.site === filterSite;
       const matchesSenior = !filterSenior || customer.isSenior === true;
-  
-      return matchesSearchTerm && matchesSite && matchesSenior;
+      const matchesStatus = filterStatus === "all" || customer.status === filterStatus; // <-- Add this line
+
+
+      return matchesSearchTerm && matchesSite && matchesSenior && matchesStatus;
     });
-  }, [customers, searchTerm, filterSite, filterSenior]);
+  }, [customers, searchTerm, filterSite, filterSenior, filterStatus]);
   
   useEffect(() => {
     if (onFilteredDataChange) {
@@ -739,6 +747,18 @@ const handleDeleteCustomer = async () => {
                 <SelectItem value="site1">Site 1</SelectItem>
                 <SelectItem value="site2">Site 2</SelectItem>
                 <SelectItem value="site3">Site 3</SelectItem>
+              </SelectContent>
+            </Select>
+                {/* Filter by Status */}
+            <Select value={filterStatus} onValueChange={(value) => setFilterStatus(value)}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Filter by Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="inactive">Inactive</SelectItem>
+                <SelectItem value="delinquent">Delinquent</SelectItem>
               </SelectContent>
             </Select>
             {/* Filter for Senior Citizens */}

@@ -461,6 +461,7 @@ const calculateBillingPeriodFromDueDate = (dueDateStr: string): string => {
     };
 };
 
+
 const handleCreateSelectedBills = async () => {
   if (selectedReadings.length === 0) {
     showNotification("Please select at least one meter reading", "info");
@@ -483,6 +484,8 @@ const handleCreateAllBills = async () => {
   await handleCreateBills(filteredReadings);
 };
 
+// Modify the handleCreateBills function
+
 const handleCreateBills = async (readings: MeterReading[]) => {
   setIsProcessing(true);
 
@@ -498,31 +501,140 @@ const handleCreateBills = async (readings: MeterReading[]) => {
 
     const processedReadingIds: string[] = []; // To track successfully processed readings
 
-    for (const reading of readings) {
+    // Sort readings by due date (oldest first) to process in chronological order
+    const sortedReadings = [...readings].sort((a, b) => {
+      const [dayA, monthA, yearA] = a.dueDate.split("/").map(Number);
+      const [dayB, monthB, yearB] = b.dueDate.split("/").map(Number);
+      const dateA = new Date(yearA, monthA - 1, dayA);
+      const dateB = new Date(yearB, monthB - 1, dayB);
+      return dateA.getTime() - dateB.getTime();
+    });
+
+    // First, check for missing previous bills for all accounts in the selected readings
+    const accountsWithMissingPreviousBills = new Map<string, MeterReading[]>();
+    
+    for (const reading of sortedReadings) {
+      const customer = customers.find((c) => c.accountNumber === reading.accountNumber);
+      if (!customer) continue;
+      
+      // Find all meter readings for this account sorted by due date
+      const accountReadingsQuery = query(
+        collectionGroup(db, "records"),
+        where("accountNumber", "==", reading.accountNumber),
+        // Add this condition to filter for meter readings only
+        where("currentReading", "!=", null)
+      );
+      
+      const accountReadingsSnapshot = await getDocs(accountReadingsQuery);
+      const accountReadings = accountReadingsSnapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as MeterReading))
+        .filter(r => r.currentReading !== undefined && r.previousReading !== undefined)
+        .sort((a, b) => {
+          const [dayA, monthA, yearA] = a.dueDate.split("/").map(Number);
+          const [dayB, monthB, yearB] = b.dueDate.split("/").map(Number);
+          const dateA = new Date(yearA, monthA - 1, dayA);
+          const dateB = new Date(yearB, monthB - 1, dayB);
+          return dateA.getTime() - dateB.getTime();
+        });
+      
+      // For each reading, check if there are previous readings without bills
+      const currentReadingIndex = accountReadings.findIndex(r => r.id === reading.id);
+      if (currentReadingIndex > 0) {
+        const missingBillReadings: MeterReading[] = [];
+        
+        // Check all previous readings
+        for (let i = 0; i < currentReadingIndex; i++) {
+          const prevReading = accountReadings[i];
+          const prevBillingPeriod = calculateBillingPeriodFromDueDate(prevReading.dueDate);
+          
+          // Check if bill exists for this billing period
+          const billQuery = query(
+            collection(db, "bills", reading.accountNumber, "records"),
+            where("billingPeriod", "==", prevBillingPeriod)
+          );
+          
+          const billSnapshot = await getDocs(billQuery);
+          
+          // If no bill exists for this previous reading, add it to missing bills
+          if (billSnapshot.empty) {
+            missingBillReadings.push(prevReading);
+          }
+        }
+        
+        if (missingBillReadings.length > 0) {
+          accountsWithMissingPreviousBills.set(reading.accountNumber, missingBillReadings);
+        }
+      }
+    }
+    
+    // Check if there are any accounts with missing previous bills
+    if (accountsWithMissingPreviousBills.size > 0) {
+      // Create alert message with all accounts that have missing bills
+      let alertMessage = "Cannot proceed. The following accounts have previous meter readings without bills that must be created first:\n\n";
+      
+      for (const [accountNumber, missingReadings] of accountsWithMissingPreviousBills.entries()) {
+        // Get the customer name if available
+        const customer = customers.find(c => c.accountNumber === accountNumber);
+        const customerName = customer ? customer.name : "Unknown";
+        
+        // Sort missing readings by date (oldest first)
+        const sortedMissingReadings = [...missingReadings].sort((a, b) => {
+          const [dayA, monthA, yearA] = a.dueDate.split("/").map(Number);
+          const [dayB, monthB, yearB] = b.dueDate.split("/").map(Number);
+          const dateA = new Date(yearA, monthA - 1, dayA);
+          const dateB = new Date(yearB, monthB - 1, dayB);
+          return dateA.getTime() - dateB.getTime();
+        });
+        
+        // Add this account's missing readings to the message
+        alertMessage += `Account ${accountNumber} (${customerName}) - Missing bills for due dates: ${sortedMissingReadings.map(r => r.dueDate).join(", ")}\n`;
+      }
+      
+      alertMessage += "\nPlease create bills for the earlier meter readings first.";
+      
+      // Show alert to user
+      alert(alertMessage);
+      showNotification("Cannot proceed. Please create bills for previous meter readings first.", "error");
+      setIsProcessing(false);
+      return;
+    }
+
+    // If no missing bills, proceed with normal bill creation
+    for (const reading of sortedReadings) {
+      const result = await processSingleBill(reading, currentGlobalBillNumber);
+      if (result) {
+        currentGlobalBillNumber++;
+        successCount++;
+        processedReadingIds.push(reading.id!);
+      } else {
+        errorCount++;
+      }
+    }
+
+    // Helper function to process a single bill
+    async function processSingleBill(reading: MeterReading, billNumberCounter: number): Promise<boolean> {
       try {
         const customer = customers.find((c) => c.accountNumber === reading.accountNumber);
         if (!customer) {
-          errorCount++;
           console.error(`Customer not found for account ${reading.accountNumber}`);
-          continue;
+          return false;
         }
 
         const usage = reading.currentReading - reading.previousReading;
         if (usage <= 0) {
-          errorCount++;
           console.error(`Invalid usage for account ${reading.accountNumber}`);
-          continue;
+          return false;
         }
 
-        const billingPeriod = calculateBillingPeriod(billingData.dueDate);
+        const billingPeriod = calculateBillingPeriodFromDueDate(reading.dueDate);
         const billsCollectionRef = collection(db, "bills", reading.accountNumber, "records");
         const existingBillsSnapshot = await getDocs(
           query(billsCollectionRef, where("billingPeriod", "==", billingPeriod))
         );
+        
         if (!existingBillsSnapshot.empty) {
-          errorCount++;
           console.error(`Duplicate billing period for account ${reading.accountNumber}`);
-          continue;
+          return false;
         }
 
         const unpaidBillsSnapshot = await getDocs(
@@ -615,8 +727,7 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           remainingOverpayment = Number(remainingOverpayment.toFixed(2));
         }
 
-        currentGlobalBillNumber++;
-        const billNumber = String(currentGlobalBillNumber).padStart(10, "0");
+        const billNumber = String(billNumberCounter + 1).padStart(10, "0");
 
         const formattedAddress = customer.block && customer.lot
           ? `BLK ${customer.block}, LOT ${customer.lot}, ${customer.address || ""}`
@@ -633,7 +744,7 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           amount: currentAmountDue, // Current amount due after applying overpayment
           originalAmount: Number(totalAmountDue.toFixed(2)), // Original bill amount before applying overpayment
           status: currentAmountDue === 0 ? "paid" : "pending",
-          dueDate: formatToDDMMYYYY(billingData.dueDate),
+          dueDate: reading.dueDate,
           billingPeriod: billingPeriod,
           description: billingData.billDescription,
           waterUsage: usage,
@@ -696,9 +807,7 @@ const handleCreateBills = async (readings: MeterReading[]) => {
         );
 
         // Create notification for customer
-        let notificationDescription = `A new bill for the billing period ${billingPeriod} with due date ${formatToDDMMYYYY(
-          billingData.dueDate
-        )} has been created for your account.`;
+        let notificationDescription = `A new bill for the billing period ${billingPeriod} with due date ${reading.dueDate} has been created for your account.`;
         
         if (appliedOverpayment > 0) {
           notificationDescription += ` An overpayment of ₱${appliedOverpayment.toFixed(2)} was applied to this bill.`;
@@ -716,11 +825,10 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           createdAt: Timestamp.now(),
         });
 
-        processedReadingIds.push(reading.id!); // Add the processed reading ID to the list
-        successCount++;
+        return true;
       } catch (error) {
-        errorCount++;
         console.error(`Error creating bill for account ${reading.accountNumber}:`, error);
+        return false;
       }
     }
 
@@ -755,7 +863,7 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           id: doc.id,
           ...billData,
           customerName: billData.customerName || "Unknown Customer",
-          customerAddress: billData.customerAddress || "Unknown Address",
+          customerAddress: billData.customerAddress || "Unknown Address", 
         };
       });
   

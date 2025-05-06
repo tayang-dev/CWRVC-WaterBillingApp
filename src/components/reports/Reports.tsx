@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Download, Search, Filter, MapPin, BarChart, Calendar } from "lucide-react";
@@ -75,6 +77,9 @@ const Reports = ({}: ReportsProps) => {
   const [confirmAction, setConfirmAction] = useState<"resolved" | "rejected" | null>(null);
   const [remarks, setRemarks] = useState("");
 
+  const location = useLocation();
+
+
   // Stats
   const [stats, setStats] = useState({
     total: 0,
@@ -146,6 +151,26 @@ const Reports = ({}: ReportsProps) => {
       unsubscribe();
     };
   }, []);
+  
+   // Handle tab and report selection from URL (for notification redirection)
+   useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const tab = searchParams.get("tab");
+    const id = searchParams.get("id");
+
+    // If you want to control the active tab, add a state and set it here:
+    // setActiveTab(tab);
+
+    // Open the details dialog if an ID is present and data is loaded
+    if (id && leakReports.length > 0) {
+      const target = leakReports.find((report) => report.id === id);
+      if (target) {
+        setSelectedReport(target);
+        setShowDetails(true);
+      }
+    }
+  }, [location.search, leakReports]);
+
 
   // Filter function
   useEffect(() => {

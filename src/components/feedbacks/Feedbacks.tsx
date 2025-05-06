@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { db } from "../../lib/firebase";
+import { useLocation } from "react-router-dom";
+
 import { collection, getDocs } from "firebase/firestore";
 import {
   Tabs,
@@ -32,8 +34,25 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { exportFeedbackToExcel } from "./exportFeedbackToExcel"; // Import the export function
-import { FileSpreadsheet } from "lucide-react"; // Import icon
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { CalendarIcon, ChevronLeft, ChevronRight, FileSpreadsheet, FilterIcon } from "lucide-react";
+import { format } from "date-fns";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import { exportFeedbackToExcel } from "./exportFeedbackToExcel";
 
 // TypeScript interfaces
 interface Feedback {
@@ -55,8 +74,17 @@ interface FeedbackStats {
   otherCategories: number;
 }
 
+// Filtering interfaces
+interface FeedbackFilters {
+  category: string;
+  rating: string;
+  dateFrom: Date | null;
+  dateTo: Date | null;
+}
+
 const Feedbacks: React.FC = () => {
   const [feedbackList, setFeedbackList] = useState<Feedback[]>([]);
+  const [filteredFeedback, setFilteredFeedback] = useState<Feedback[]>([]);
   const [stats, setStats] = useState<FeedbackStats>({
     total: 0,
     averageRating: 0,
@@ -67,7 +95,26 @@ const Feedbacks: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>("overview");
+  
+  const location = useLocation();
 
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10);
+  
+  // Filter states
+  const [filters, setFilters] = useState<FeedbackFilters>({
+    category: "all",
+    rating: "all",
+    dateFrom: null,
+    dateTo: null,
+  });
+  
+  // For category filter dropdown
+  const [uniqueCategories, setUniqueCategories] = useState<string[]>([]);
+
+  // Load feedback data
   useEffect(() => {
     const fetchFeedback = async (): Promise<void> => {
       try {
@@ -79,6 +126,16 @@ const Feedbacks: React.FC = () => {
         })) as Feedback[];
 
         setFeedbackList(feedbackData);
+        setFilteredFeedback(feedbackData);
+
+        // Extract unique categories for filter dropdown
+        const allCategories = new Set<string>();
+        feedbackData.forEach(feedback => {
+          feedback.categories.forEach(category => {
+            allCategories.add(category);
+          });
+        });
+        setUniqueCategories(Array.from(allCategories));
 
         // Calculate stats
         const total = feedbackData.length;
@@ -105,6 +162,69 @@ const Feedbacks: React.FC = () => {
     fetchFeedback();
   }, []);
 
+    // Handle tab and feedback selection from URL (for notification redirection)
+    useEffect(() => {
+      const searchParams = new URLSearchParams(location.search);
+      const tab = searchParams.get("tab");
+      const id = searchParams.get("id");
+  
+      if (tab) {
+        setActiveTab(tab);
+      }
+  
+      if (id && feedbackList.length > 0) {
+        const target = feedbackList.find((f) => f.id === id);
+        if (target) {
+          setSelectedFeedback(target);
+          setIsModalOpen(true);
+        }
+      }
+    }, [location.search, feedbackList]);
+  
+
+  // Apply filters
+  useEffect(() => {
+    let result = [...feedbackList];
+    
+    // Filter by category
+    if (filters.category && filters.category !== "all") {
+      result = result.filter((feedback) =>
+        feedback.categories.includes(filters.category)
+      );
+    }
+    
+    // Filter by rating
+    if (filters.rating && filters.rating !== "all") {
+      result = result.filter(
+        (feedback) => feedback.rating === parseInt(filters.rating)
+      );
+    }
+    
+    // Filter by date range
+    if (filters.dateFrom) {
+      const fromTimestamp = filters.dateFrom.getTime() / 1000;
+      result = result.filter(
+        (feedback) => feedback.timestamp.seconds >= fromTimestamp
+      );
+    }
+    
+    if (filters.dateTo) {
+      // Set time to end of day
+      const toDate = new Date(filters.dateTo);
+      toDate.setHours(23, 59, 59, 999);
+      const toTimestamp = toDate.getTime() / 1000;
+      
+      result = result.filter(
+        (feedback) => feedback.timestamp.seconds <= toTimestamp
+      );
+    }
+    
+    setFilteredFeedback(result);
+    // Reset to first page when filters change
+    setCurrentPage(1);
+  }, [feedbackList, filters]);
+
+  // Date formatting helper
   const formatDate = (timestamp: { seconds: number; nanoseconds?: number }): string => {
     return new Date(timestamp.seconds * 1000).toLocaleDateString("en-US", {
       year: "numeric",
@@ -113,26 +233,58 @@ const Feedbacks: React.FC = () => {
     });
   };
 
+  // Handle feedback detail view
   const handleViewFeedback = (feedback: Feedback): void => {
     setSelectedFeedback(feedback);
     setIsModalOpen(true);
   };
 
+  // Export to Excel
   const handleExportToExcel = async (): Promise<void> => {
-    // First switch to the feedback-list tab
     setActiveTab("feedback-list");
-    
-    // Then start export process
     setIsExporting(true);
     try {
-      await exportFeedbackToExcel(feedbackList);
-      // Success notification could be added here
+      // Export filtered feedback instead of all feedback
+      await exportFeedbackToExcel(filteredFeedback);
     } catch (error) {
       console.error("Error exporting to Excel:", error);
-      // Error notification could be added here
     } finally {
       setIsExporting(false);
     }
+  };
+
+  // Reset all filters
+  const handleResetFilters = (): void => {
+    setFilters({
+      category: "all",
+      rating: "all",
+      dateFrom: null,
+      dateTo: null,
+    });
+  };
+  
+  // Pagination calculation
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredFeedback.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(filteredFeedback.length / itemsPerPage);
+  
+  // Pagination controls
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
+  
+  const handlePrevPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
+  
+  const handlePageSizeChange = (value: string) => {
+    setItemsPerPage(parseInt(value));
+    setCurrentPage(1); // Reset to first page when changing items per page
   };
 
   return (
@@ -147,12 +299,12 @@ const Feedbacks: React.FC = () => {
             </p>
           </div>
           
-          {/* Single Export Button */}
+          {/* Export Button */}
           <div className="mt-4 sm:mt-0">
             <Button 
               onClick={handleExportToExcel}
-              disabled={isExporting || feedbackList.length === 0}
-             className="bg-blue-600 hover:bg-blue-700 text-white"
+              disabled={isExporting || filteredFeedback.length === 0}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
             >
               {isExporting ? (
                 <>
@@ -259,56 +411,242 @@ const Feedbacks: React.FC = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {feedbackList.length === 0 ? (
+                {/* Filters Section */}
+                <div className="bg-gray-50 p-4 rounded-md border mb-6">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4">
+                    <h3 className="text-lg font-medium flex items-center">
+                      <FilterIcon className="h-4 w-4 mr-2" />
+                      Filter Feedback
+                    </h3>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={handleResetFilters}
+                      className="mt-2 md:mt-0"
+                    >
+                      Reset Filters
+                    </Button>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {/* Category Filter */}
+                    <div className="space-y-2">
+                      <Label htmlFor="category-filter">Category</Label>
+                      <Select
+                        value={filters.category}
+                        onValueChange={(value) =>
+                          setFilters({ ...filters, category: value })
+                        }
+                      >
+                        <SelectTrigger id="category-filter" className="w-full">
+                          <SelectValue placeholder="All Categories" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Categories</SelectItem>
+                          {uniqueCategories.map((category) => (
+                            <SelectItem key={category} value={category}>
+                              {category}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    {/* Rating Filter */}
+                    <div className="space-y-2">
+                      <Label htmlFor="rating-filter">Rating</Label>
+                      <Select
+                        value={filters.rating}
+                        onValueChange={(value) =>
+                          setFilters({ ...filters, rating: value })
+                        }
+                      >
+                        <SelectTrigger id="rating-filter" className="w-full">
+                          <SelectValue placeholder="All Ratings" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Ratings</SelectItem>
+                          {[1, 2, 3, 4, 5].map((rating) => (
+                            <SelectItem key={rating} value={rating.toString()}>
+                              {rating}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    {/* Date From Filter */}
+                    <div className="space-y-2">
+                      <Label htmlFor="date-from">From Date</Label>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            id="date-from"
+                            variant="outline"
+                            className="w-full justify-start text-left font-normal"
+                          >
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {filters.dateFrom ? (
+                              format(filters.dateFrom, "PPP")
+                            ) : (
+                              <span>Pick a date</span>
+                            )}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0">
+                          <Calendar
+                            mode="single"
+                            selected={filters.dateFrom || undefined}
+                            onSelect={(date) =>
+                              setFilters({ ...filters, dateFrom: date })
+                            }
+                            initialFocus
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                    
+                    {/* Date To Filter */}
+                    <div className="space-y-2">
+                      <Label htmlFor="date-to">To Date</Label>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            id="date-to"
+                            variant="outline"
+                            className="w-full justify-start text-left font-normal"
+                          >
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {filters.dateTo ? (
+                              format(filters.dateTo, "PPP")
+                            ) : (
+                              <span>Pick a date</span>
+                            )}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0">
+                          <Calendar
+                            mode="single"
+                            selected={filters.dateTo || undefined}
+                            onSelect={(date) =>
+                              setFilters({ ...filters, dateTo: date })
+                            }
+                            initialFocus
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                  </div>
+                </div>
+                
+                {filteredFeedback.length === 0 ? (
                   <div className="text-center py-12">
                     <p className="text-gray-500 mt-1">
-                      No feedback available at the moment.
+                      No feedback found matching your filters.
                     </p>
                   </div>
                 ) : (
-                  <div className="rounded-md border shadow-md overflow-hidden">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Category</TableHead>
-                          <TableHead>Feedback</TableHead>
-                          <TableHead>Rating</TableHead>
-                          <TableHead>Date</TableHead>
-                          <TableHead>User ID</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {feedbackList.map((feedback) => (
-                          <TableRow key={feedback.id}>
-                            <TableCell>
-                              {feedback.categories.join(", ")}
-                            </TableCell>
-                            <TableCell className="max-w-xs truncate">
-                              {feedback.feedback}
-                            </TableCell>
-                            <TableCell>
-                              <Badge className="bg-yellow-500">
-                                {feedback.rating}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>{formatDate(feedback.timestamp)}</TableCell>
-                            <TableCell className="max-w-xs truncate">{feedback.userId}</TableCell>
-                            <TableCell>
-                              <Button 
-                                variant="outline" 
-                                size="sm"
-                                onClick={() => handleViewFeedback(feedback)}
-                                className="text-blue-600 hover:text-blue-800"
-                              >
-                                View
-                              </Button>
-                            </TableCell>
+                  <>
+                    {/* Table with data */}
+                    <div className="rounded-md border shadow-md overflow-hidden">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Category</TableHead>
+                            <TableHead>Feedback</TableHead>
+                            <TableHead>Rating</TableHead>
+                            <TableHead>Date</TableHead>
+                            <TableHead>User ID</TableHead>
+                            <TableHead>Actions</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        </TableHeader>
+                        <TableBody>
+                          {currentItems.map((feedback) => (
+                            <TableRow key={feedback.id}>
+                              <TableCell>
+                                {feedback.categories.join(", ")}
+                              </TableCell>
+                              <TableCell className="max-w-xs truncate">
+                                {feedback.feedback}
+                              </TableCell>
+                              <TableCell>
+                                <Badge className="bg-yellow-500">
+                                  {feedback.rating}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>{formatDate(feedback.timestamp)}</TableCell>
+                              <TableCell className="max-w-xs truncate">{feedback.userId}</TableCell>
+                              <TableCell>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  onClick={() => handleViewFeedback(feedback)}
+                                  className="text-blue-600 hover:text-blue-800"
+                                >
+                                  View
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    
+                    {/* Pagination Controls */}
+                    <div className="flex justify-between items-center mt-4 pt-4 border-t">
+                      <div className="flex items-center space-x-2">
+                        <Label htmlFor="page-size" className="text-sm">Items per page:</Label>
+                        <Select
+                          value={itemsPerPage.toString()}
+                          onValueChange={handlePageSizeChange}
+                        >
+                          <SelectTrigger id="page-size" className="w-20">
+                            <SelectValue placeholder={itemsPerPage.toString()} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {[5, 10, 20, 50].map((size) => (
+                              <SelectItem key={size} value={size.toString()}>
+                                {size}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <span className="text-sm text-gray-500">
+                          Showing {indexOfFirstItem + 1}-{Math.min(indexOfLastItem, filteredFeedback.length)} of {filteredFeedback.length}
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-center space-x-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handlePrevPage}
+                          disabled={currentPage === 1}
+                          className={cn(
+                            "h-8 w-8 p-0",
+                            currentPage === 1 && "opacity-50 cursor-not-allowed"
+                          )}
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <span className="text-sm">
+                          Page {currentPage} of {totalPages || 1}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleNextPage}
+                          disabled={currentPage === totalPages || totalPages === 0}
+                          className={cn(
+                            "h-8 w-8 p-0",
+                            (currentPage === totalPages || totalPages === 0) && "opacity-50 cursor-not-allowed"
+                          )}
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </>
                 )}
               </CardContent>
             </Card>

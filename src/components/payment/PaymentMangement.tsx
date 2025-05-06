@@ -1853,7 +1853,6 @@ const handleExportPaymentHistory = async () => {
                             <SelectItem value="GCash">GCash</SelectItem>
                             <SelectItem value="PayMaya">PayMaya</SelectItem>
                             <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
-                            <SelectItem value="Cash">Cash</SelectItem>
                             <SelectItem value="QR Code">QR Code</SelectItem>
                           </SelectContent>
                         </Select>

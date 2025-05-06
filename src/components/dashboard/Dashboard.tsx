@@ -14,10 +14,7 @@ const Dashboard = () => {
     totalRevenue: "₱0",
     pendingPayments: "₱0",
     waterConsumption: "0 m³",
-    customerGrowth: "+0%",
-    revenueGrowth: "+0%",
-    pendingChange: "+0%",
-    consumptionChange: "+4%",
+    // Growth percentages removed
   });
 
   const [leakageData, setLeakageData] = useState([]);
@@ -46,126 +43,153 @@ const Dashboard = () => {
     setSelectedYear(e.target.value);
   };
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      const debug: string[] = [];
-      setLoading(true);
+// Update the fetchDashboardData function to handle the new read field
+useEffect(() => {
+  const fetchDashboardData = async () => {
+    const debug: string[] = [];
+    setLoading(true);
 
+    try {
+      let totalConsumption = 0;
+      let totalRevenue = 0;
+      let pendingAmount = 0;
+
+      debug.push("🚀 Starting optimized dashboard data fetch");
+
+      // Fetch customers filtered by site in one query
+      const customerQuery =
+        selectedSite === "All"
+          ? collection(db, "customers")
+          : query(collection(db, "customers"), where("site", "==", selectedSite));
+      const customerSnapshot = await getDocs(customerQuery);
+
+      if (customerSnapshot.empty) {
+        debug.push("⚠️ No customers found in Firestore!");
+        setError("No customer data available.");
+        setLoading(false);
+        setDebugInfo(debug);
+        return;
+      }
+
+      const customers = customerSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        accountNumber: doc.data().accountNumber,
+        ...doc.data(),
+      }));
+
+      debug.push(`📊 Found ${customers.length} customers for site: ${selectedSite}`);
+
+      // Fetch all bills and payments in parallel - Handle potential errors for each promise
       try {
-        let totalConsumption = 0;
-        let totalRevenue = 0;
-        let pendingAmount = 0;
-
-        debug.push("🚀 Starting optimized dashboard data fetch");
-
-        // Fetch customers filtered by site in one query
-        const customerQuery =
-          selectedSite === "All"
-            ? collection(db, "customers")
-            : query(collection(db, "customers"), where("site", "==", selectedSite));
-        const customerSnapshot = await getDocs(customerQuery);
-
-        if (customerSnapshot.empty) {
-          debug.push("⚠️ No customers found in Firestore!");
-          setError("No customer data available.");
-          setLoading(false);
-          setDebugInfo(debug);
-          return;
-        }
-
-        const customers = customerSnapshot.docs.map((doc) => ({
-          id: doc.id,
-          accountNumber: doc.data().accountNumber,
-          ...doc.data(),
-        }));
-
-        debug.push(`📊 Found ${customers.length} customers for site: ${selectedSite}`);
-
-        // Fetch all bills and payments in parallel
         const [billsSnapshots, paymentSnapshot] = await Promise.all([
           Promise.all(
             customers.map((customer) =>
-              getDocs(collection(db, "bills", customer.accountNumber, "records"))
+              customer.accountNumber 
+                ? getDocs(collection(db, "bills", customer.accountNumber, "records"))
+                  .catch(err => {
+                    debug.push(`⚠️ Error fetching bills for customer ${customer.accountNumber}: ${err.message}`);
+                    return { docs: [] }; // Return empty docs if there's an error
+                  })
+                : { docs: [] } // Handle missing accountNumber
             )
           ),
           getDocs(collection(db, "paymentVerifications")),
         ]);
 
-        // Process bills
+        // Process bills with better error handling
         billsSnapshots.forEach((billsSnapshot) => {
-          billsSnapshot.forEach((billDoc) => {
-            const billData = billDoc.data();
-            const billDate = new Date(billData.date);
-            const billMonth = billDate.getMonth() + 1;
-            const billYear = billDate.getFullYear();
+          if (!billsSnapshot.docs) return; // Skip if no docs property
+          
+          if (Array.isArray(billsSnapshot.docs)) {
+            billsSnapshot.docs.forEach((billDoc) => {
+              try {
+                const billData = billDoc.data();
+                if (!billData.date) return; // Skip if no date
+                
+                const billDate = new Date(billData.date);
+                const billMonth = billDate.getMonth() + 1;
+                const billYear = billDate.getFullYear();
 
-            const matchesMonth =
-              selectedMonth === "All" || parseInt(selectedMonth) === billMonth;
-            const matchesYear =
-              selectedYear === "All" || parseInt(selectedYear) === billYear;
+                const matchesMonth =
+                  selectedMonth === "All" || parseInt(selectedMonth) === billMonth;
+                const matchesYear =
+                  selectedYear === "All" || parseInt(selectedYear) === billYear;
 
-            if (matchesMonth && matchesYear) {
-              if (typeof billData.waterUsage === "number") {
-                totalConsumption += billData.waterUsage;
+                if (matchesMonth && matchesYear) {
+                  if (typeof billData.waterUsage === "number") {
+                    totalConsumption += billData.waterUsage;
+                  }
+                  if (
+                    typeof billData.amount === "number" &&
+                    (billData.status === "pending" || billData.status === "overdue")
+                  ) {
+                    pendingAmount += billData.amount;
+                  }
+                }
+              } catch (err) {
+                debug.push(`⚠️ Error processing bill data: ${err.message}`);
               }
-              if (
-                typeof billData.amount === "number" &&
-                (billData.status === "pending" || billData.status === "overdue")
-              ) {
-                pendingAmount += billData.amount;
-              }
-            }
-          });
+            });
+          }
         });
 
         debug.push(`💧 Filtered Total Water Usage: ${totalConsumption} m³`);
         debug.push(`⏳ Filtered Pending Payments: ${pendingAmount}`);
 
-        // Process payments
+        // Process payments with better error handling
         paymentSnapshot.forEach((doc) => {
-          const data = doc.data();
-          const paymentDate = new Date(data.date);
-          const month = paymentDate.getMonth() + 1;
-          const year = paymentDate.getFullYear();
-
-          const matchesMonth =
-            selectedMonth === "All" || parseInt(selectedMonth) === month;
-          const matchesYear =
-            selectedYear === "All" || parseInt(selectedYear) === year;
-
-          if (matchesMonth && matchesYear) {
-            const amount = parseFloat(data.amount);
-            if (!isNaN(amount)) {
-              totalRevenue += amount;
+          try {
+            const data = doc.data();
+            // Use paymentDate and filter by status: "verified"
+            if (!data.paymentDate || data.status !== "verified") return;
+        
+            // Parse paymentDate (format: MM/DD/YYYY)
+            const [monthStr, dayStr, yearStr] = data.paymentDate.split("/");
+            const paymentMonth = parseInt(monthStr, 10);
+            const paymentYear = parseInt(yearStr, 10);
+        
+            const matchesMonth =
+              selectedMonth === "All" || parseInt(selectedMonth) === paymentMonth;
+            const matchesYear =
+              selectedYear === "All" || parseInt(selectedYear) === paymentYear;
+        
+            if (matchesMonth && matchesYear) {
+              const amount = parseFloat(data.amount);
+              if (!isNaN(amount)) {
+                totalRevenue += amount;
+              }
             }
+          } catch (err) {
+            debug.push(`⚠️ Error processing payment data: ${err.message}`);
           }
         });
 
         debug.push(`💸 Filtered Total Revenue: ${totalRevenue}`);
-
-        setDashboardData({
-          totalCustomers: customers.length.toString(),
-          totalRevenue: `₱${totalRevenue.toFixed(2)}`,
-          pendingPayments: `₱${pendingAmount.toFixed(2)}`,
-          waterConsumption: `${totalConsumption} m³`,
-          customerGrowth: "+5%",
-          revenueGrowth: "+8%",
-          pendingChange: "+3%",
-          consumptionChange: "+4%",
-        });
-
-        setError(null);
-      } catch (err: any) {
-        debug.push(`❌ Error: ${err.message}`);
-        setError("Failed to fetch dashboard data.");
-      } finally {
-        setLoading(false);
-        setDebugInfo(debug);
+      } catch (err) {
+        debug.push(`❌ Error in Promise.all: ${err.message}`);
+        throw err;
       }
-    };
 
-    fetchDashboardData();
-  }, [selectedSite, selectedMonth, selectedYear]);
+      setDashboardData({
+        totalCustomers: customers.length.toString(),
+        totalRevenue: `₱${totalRevenue.toFixed(2)}`,
+        pendingPayments: `₱${pendingAmount.toFixed(2)}`,
+        waterConsumption: `${totalConsumption} m³`,
+        // Growth percentages removed
+      });
+
+      setError(null);
+    } catch (err: any) {
+      debug.push(`❌ Error: ${err.message}`);
+      setError("Failed to fetch dashboard data.");
+    } finally {
+      setLoading(false);
+      setDebugInfo(debug);
+    }
+  };
+
+  fetchDashboardData();
+}, [selectedSite, selectedMonth, selectedYear]);
 
   return (
     <div className="w-full h-full p-6 bg-gray-50">

@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import ChatList from "./ChatList";
 import CustomerChat from "./CostumerChat";
+import { useLocation } from "react-router-dom";
 
 interface CustomerSupportProps {
   userRole?: "admin" | "staff";
@@ -11,6 +12,19 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({ userRole = "admin" })
   const [selectedCustomerName, setSelectedCustomerName] = useState<string>("");
   const [selectedCustomerAvatar, setSelectedCustomerAvatar] = useState<string>("");
   const [selectedAccount, setSelectedAccount] = useState<string>("");
+
+  const location = useLocation();
+
+    // Handle chat selection from URL (for notification redirection)
+    useEffect(() => {
+      const searchParams = new URLSearchParams(location.search);
+      const chatId = searchParams.get("chat");
+      if (chatId) {
+        setSelectedCustomerId(chatId);
+        setSelectedAccount(chatId); // If accountNumber is same as chatId, otherwise adjust as needed
+        // Optionally set name/avatar if you have a lookup or fetch logic
+      }
+    }, [location.search]);
 
   const handleSelectCustomer = (customerId: string, accountNumber: string) => {
     setSelectedCustomerId(customerId);
