@@ -31,6 +31,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "../ui/dialog";
@@ -60,7 +61,9 @@ const StaffManagement = () => {
   const [showPassword, setShowPassword] = useState(false); 
 
   const [formData, setFormData] = useState({
-    name: "",
+    firstname: "",
+    lastname: "",
+    middleInitial: "",
     email: "",
     password: "",
     role: "staff",
@@ -91,10 +94,21 @@ const StaffManagement = () => {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-    // Clear any previous errors when the user types
+    if (["firstname", "lastname"].includes(name)) {
+      // Only letters, spaces, hyphens, and dots, max 30
+      const filtered = value.replace(/[^A-Za-z\s\-.]/g, "").slice(0, 30);
+      setFormData((prev) => ({ ...prev, [name]: filtered }));
+    } else if (name === "middleInitial") {
+      // Only 1 letter, optional dot
+      const filtered = value.replace(/[^A-Za-z.]/g, "").slice(0, 2);
+      setFormData((prev) => ({ ...prev, [name]: filtered }));
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    }
     if (error) setError("");
   };
+  const fullName = `${formData.firstname.trim()}${formData.middleInitial ? ' ' + formData.middleInitial.trim() + '.' : ''} ${formData.lastname.trim()}`.replace(/\s+/g, ' ').trim();
+
 
   const handleSaveStaff = async () => {
     try {
@@ -105,7 +119,7 @@ const StaffManagement = () => {
         // Just update the Firestore document for existing staff
         const staffRef = doc(db, "staffs", editingStaff.id);
         await updateDoc(staffRef, {
-          name: formData.name,
+          name: fullName,
           email: formData.email,
           role: formData.role,
           status: formData.status
@@ -114,7 +128,7 @@ const StaffManagement = () => {
         // Update local state
         setStaffs(staffs.map(staff => 
           staff.id === editingStaff.id 
-            ? { ...staff, name: formData.name, email: formData.email, role: formData.role, status: formData.status } 
+            ? { ...staff, name: fullName, email: formData.email, role: formData.role, status: formData.status } 
             : staff
         ));
       } else {
@@ -157,7 +171,7 @@ const StaffManagement = () => {
             const staffCollection = collection(db, "staffs");
             const docRef = await addDoc(staffCollection, {
               uid: user.uid,
-              name: formData.name,
+              name: fullName,
               email: formData.email,
               role: formData.role,
               status: formData.status,
@@ -167,7 +181,7 @@ const StaffManagement = () => {
             setStaffs([...staffs, {
               id: docRef.id,
               uid: user.uid,
-              name: formData.name,
+              name: fullName,
               email: formData.email,
               role: formData.role,
               status: formData.status,
@@ -180,7 +194,7 @@ const StaffManagement = () => {
               const staffCollection = collection(db, "staffs");
               const docRef = await addDoc(staffCollection, {
                 uid: "existing-auth-user", // Placeholder UID
-                name: formData.name,
+                name: fullName,
                 email: formData.email,
                 role: formData.role,
                 status: formData.status,
@@ -190,7 +204,7 @@ const StaffManagement = () => {
               setStaffs([...staffs, {
                 id: docRef.id,
                 uid: "existing-auth-user",
-                name: formData.name,
+                name: fullName,
                 email: formData.email,
                 role: formData.role,
                 status: formData.status,
@@ -219,8 +233,16 @@ const StaffManagement = () => {
       // Reset form
       setIsDialogOpen(false);
       setEditingStaff(null);
-      setFormData({ name: "", email: "", password: "", role: "staff", status: "active" });
-      
+      setFormData({
+        firstname: "",
+        lastname: "",
+        middleInitial: "",
+        email: "",
+        password: "",
+        role: "staff",
+        status: "active",
+      });
+
     } catch (error: any) {
       console.error("Error saving staff:", error);
       setError(error.message || "An error occurred while saving the staff member");
@@ -264,6 +286,9 @@ const StaffManagement = () => {
     if (role === "staff") {
       return "Cashier";
     }
+      if (role === "meter_reader") {
+    return "Meter Reader";
+  }
     // Keep other roles as is, with formatting
     return role.replace("_", " ");
   };
@@ -292,13 +317,21 @@ const StaffManagement = () => {
             />
           </div>
           <Button
-            className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all duration-200 flex items-center gap-2"
-            onClick={() => {
-              setEditingStaff(null);
-              setFormData({ name: "", email: "", password: "", role: "staff", status: "active" });
-              setError("");
-              setIsDialogOpen(true);
-            }}
+  className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all duration-200 flex items-center gap-2"
+  onClick={() => {
+    setEditingStaff(null);
+    setFormData({
+      firstname: "",
+      lastname: "",
+      middleInitial: "",
+      email: "",
+      password: "",
+      role: "staff",
+      status: "active",
+    });
+    setError("");
+    setIsDialogOpen(true);
+  }}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
@@ -411,14 +444,48 @@ const StaffManagement = () => {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="rounded-lg shadow-lg border-blue-100">
                           <DropdownMenuItem
+                            // ...inside <DropdownMenuItem> for Edit...
                             onClick={() => {
                               setEditingStaff(staff);
-                              setFormData({ ...staff, password: "" });
+
+                              // Split staff.name into firstname, middleInitial, lastname
+                              // Example: "Juan D. Dela Cruz" or "Juan Dela Cruz"
+                              const nameParts = staff.name.trim().split(" ");
+                              let firstname = "";
+                              let middleInitial = "";
+                              let lastname = "";
+
+                              if (nameParts.length === 2) {
+                                // No middle initial
+                                firstname = nameParts[0];
+                                lastname = nameParts[1];
+                              } else if (nameParts.length >= 3) {
+                                firstname = nameParts[0];
+                                // Middle initial is second part if it ends with a dot and is 1-2 chars
+                                if (/^[A-Za-z]\.?$/.test(nameParts[1])) {
+                                  middleInitial = nameParts[1].replace(".", "");
+                                  lastname = nameParts.slice(2).join(" ");
+                                } else {
+                                  lastname = nameParts.slice(1).join(" ");
+                                }
+                              } else {
+                                firstname = staff.name;
+                              }
+
+                              setFormData({
+                                firstname,
+                                middleInitial,
+                                lastname,
+                                email: staff.email,
+                                password: "",
+                                role: staff.role,
+                                status: staff.status,
+                              });
                               setError("");
                               setIsDialogOpen(true);
                             }}
-                            className="flex items-center p-3 hover:bg-blue-50 cursor-pointer"
-                          >
+                                                        className="flex items-center p-3 hover:bg-blue-50 cursor-pointer"
+                             >
                             <Edit className="mr-2 h-5 w-5 text-blue-600" />
                             <span className="font-medium">Edit</span>
                           </DropdownMenuItem>
@@ -453,141 +520,225 @@ const StaffManagement = () => {
         </div>
       </div>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-[600px] p-0 overflow-hidden rounded-2xl">
-          <div className={`${isBlueHeader ? 'bg-blue-900' : 'bg-white border-b border-gray-200'} p-6 transition-colors duration-300`}>
-            <DialogHeader>
-              <DialogTitle className={`text-xl font-bold ${isBlueHeader ? 'text-white' : 'text-blue-900'}`}>
-                {editingStaff ? "Edit Staff Member" : "Add New Staff Member"}
-              </DialogTitle>
-              <p className={`${isBlueHeader ? 'text-blue-100' : 'text-gray-500'} mt-1`}>
-                {editingStaff ? "Update information for this team member" : "Enter details to create a new team member"}
-              </p>
-            </DialogHeader>
-          </div>
-          
-          <div className="p-6 space-y-6">
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                <Input
-                  id="name"
-                  name="name"
-                  placeholder="Enter full name"
-                  value={formData.name}
-                  onChange={handleInputChange}
-                  className="w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
-                />
-              </div>
-              
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder="Enter email address"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  className="w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
-                />
-              </div>
-              
-              {!editingStaff && (
-                <div>
-                  <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                  <div className="relative">
-                    <Input
-                      id="password"
-                      name="password"
-                      type={showPassword ? "text" : "password"}
-                      placeholder="Create a secure password"
-                      value={formData.password}
-                      onChange={handleInputChange}
-                      className="w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((prev) => !prev)}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-blue-600 focus:outline-none"
-                      tabIndex={-1}
-                    >
-                      {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">Password must be at least 8 characters and include uppercase, lowercase, number, and special character.</p>
-                </div>
-              )}
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                  <select
-                    id="role"
-                    name="role"
-                    value={formData.role}
-                    onChange={handleInputChange}
-                    className="w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
-                  >
-                    <option value="staff">Cashier</option>
-                    <option value="meter_reader">Meter Reader</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                  <select
-                    id="status"
-                    name="status"
-                    value={formData.status}
-                    onChange={handleInputChange}
-                    className="w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
-                  >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-            
-            {error && (
-              <div className="text-red-500 text-sm py-2 px-3 bg-red-50 border border-red-100 rounded-lg flex items-start">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-                {error}
-              </div>
-            )}
+{/* Staff Dialog */}
+<Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+  <DialogContent className="sm:max-w-[600px] p-0 overflow-hidden rounded-2xl">
+    <div className="bg-blue-900 p-6">
+      <DialogHeader>
+        <DialogTitle className="text-xl font-bold text-white">
+          {editingStaff ? "Edit Staff Member" : "Add New Staff Member"}
+        </DialogTitle>
+        <p className="text-blue-100 mt-1">
+          {editingStaff ? "Update information for this team member" : "Enter details to create a new team member"}
+        </p>
+      </DialogHeader>
+    </div>
 
-            <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-100">
-              <Button 
-                variant="outline" 
-                onClick={() => setIsDialogOpen(false)}
-                className="rounded-lg border-gray-300 text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </Button>
-              <Button
-                className={`${isBlueHeader ? 'bg-blue-600' : 'bg-blue-500'} hover:opacity-90 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all duration-200`}
-                onClick={handleSaveStaff}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <div className="flex items-center">
-                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Processing...
-                  </div>
-                ) : (
-                  editingStaff ? "Update Staff" : "Add Staff"
-                )}
-              </Button>
-            </div>
+    <div className="p-6 space-y-5">
+      {/* Name Fields */}
+      <div>
+        <h3 className="text-sm font-medium text-gray-700 mb-2">Staff Information</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label htmlFor="firstname" className="block text-sm font-medium text-gray-700 mb-1">
+              First Name <span className="text-red-500">*</span>
+            </label>
+            <Input
+              id="firstname"
+              name="firstname"
+              placeholder="First name"
+              value={formData.firstname}
+              onChange={handleInputChange}
+              maxLength={30}
+              className="w-full rounded-lg border-gray-300"
+              required
+            />
           </div>
-        </DialogContent>
-      </Dialog>
+          <div>
+            <label htmlFor="middleInitial" className="block text-sm font-medium text-gray-700 mb-1">
+              Middle Initial
+            </label>
+            <Input
+              id="middleInitial"
+              name="middleInitial"
+              placeholder="M"
+              value={formData.middleInitial}
+              onChange={handleInputChange}
+              maxLength={2}
+              className="w-full rounded-lg border-gray-300"
+            />
+          </div>
+          <div>
+            <label htmlFor="lastname" className="block text-sm font-medium text-gray-700 mb-1">
+              Last Name <span className="text-red-500">*</span>
+            </label>
+            <Input
+              id="lastname"
+              name="lastname"
+              placeholder="Last name"
+              value={formData.lastname}
+              onChange={handleInputChange}
+              maxLength={30}
+              className="w-full rounded-lg border-gray-300"
+              required
+            />
+          </div>
+        </div>
+        <p className="text-xs text-gray-500 mt-1.5">
+          Names must be letters only (no numbers/special characters except "-" and "."), max 30 characters.
+        </p>
+      </div>
+
+      {/* Email */}
+      <div className="mt-1">
+        <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+          Email Address <span className="text-red-500">*</span>
+        </label>
+        <Input
+          id="email"
+          name="email"
+          type="email"
+          placeholder="Enter email address"
+          value={formData.email}
+          onChange={handleInputChange}
+          className="w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+          required
+        />
+      </div>
+
+      {/* Password - Only show for new staff */}
+      {!editingStaff && (
+        <div className="mt-1">
+          <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+            Password <span className="text-red-500">*</span>
+          </label>
+          <div className="relative">
+            <Input
+              id="password"
+              name="password"
+              type={showPassword ? "text" : "password"}
+              placeholder="Create a secure password"
+              value={formData.password}
+              onChange={handleInputChange}
+              className="w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 pr-10"
+              required
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-blue-600 focus:outline-none"
+              tabIndex={-1}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+            >
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mt-1.5">
+            Password must be at least 8 characters and include uppercase, lowercase, number, and special character.
+          </p>
+        </div>
+      )}
+
+      {/* Role and Status */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-1">
+        <div>
+          <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-1">
+            Role
+          </label>
+          <select
+            id="role"
+            name="role"
+            value={formData.role}
+            onChange={handleInputChange}
+            className="w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
+          >
+            <option value="staff">Cashier</option>
+            <option value="meter_reader">Meter Reader</option>
+          </select>
+        </div>
+
+        <div>
+          <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-1">
+            Status
+          </label>
+          <select
+            id="status"
+            name="status"
+            value={formData.status}
+            onChange={handleInputChange}
+            className="w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
+          >
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Error display */}
+      {error && (
+        <div className="text-red-500 text-sm py-2.5 px-3.5 bg-red-50 border border-red-100 rounded-lg flex items-start mt-2">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+          >
+            <path
+              fillRule="evenodd"
+              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+              clipRule="evenodd"
+            />
+          </svg>
+          {error}
+        </div>
+      )}
+
+      {/* Dialog Footer */}
+      <DialogFooter className="flex items-center justify-end space-x-3 pt-4 mt-2 border-t border-gray-100">
+        <Button
+          variant="outline"
+          onClick={() => setIsDialogOpen(false)}
+          className="rounded-lg border-gray-300 text-gray-700 hover:bg-gray-50"
+        >
+          Cancel
+        </Button>
+        <Button
+          className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all duration-200"
+          onClick={handleSaveStaff}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <div className="flex items-center">
+              <svg
+                className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                ></circle>
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+              Processing...
+            </div>
+          ) : (
+            editingStaff ? "Update Staff" : "Add Staff"
+          )}
+        </Button>
+      </DialogFooter>
+    </div>
+  </DialogContent>
+</Dialog>
     </div>
   );
 };

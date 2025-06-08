@@ -37,12 +37,14 @@ const formSchema = z.object({
   firstName: z.string()
     .trim()
     .min(2, { message: "First name must be at least 2 characters." })
+    .max(15, { message: "First name cannot exceed 15 characters." }) // Added max length validation
     .regex(/^[A-Za-zÑñ.\- ]+$/, "Only letters (including Ñ, ñ), dot (.), dash (-), and spaces are allowed")
     .refine((val) => val.trim().length > 0, { message: "First name cannot be empty or spaces only." }),
 
   lastName: z.string()
     .trim()
     .min(2, { message: "Last name must be at least 2 characters." })
+    .max(15, { message: "Last name cannot exceed 15 characters." }) // Added max length validation
     .regex(/^[A-Za-zÑñ.\- ]+$/, "Only letters (including Ñ, ñ), dot (.), dash (-), and spaces are allowed")
     .refine((val) => val.trim().length > 0, { message: "Last name cannot be empty or spaces only." }),
 
@@ -69,6 +71,7 @@ const formSchema = z.object({
 
   meterNumber: z.string()
     .min(1, { message: "Meter number is required" })
+    .max(15, { message: "Meter number cannot exceed 15 characters." })
     .regex(/^[A-Za-z0-9\-]+$/, "Meter number can only contain letters, numbers, and dash (-)"),
 
   block: z.string()
@@ -80,7 +83,11 @@ const formSchema = z.object({
     .min(2, { message: "Lot must be at least 2 characters." })
     .max(3, { message: "Lot cannot exceed 3 characters." })
     .regex(/^[A-Za-z0-9]+$/, "Lot can only contain letters and numbers"),
-});
+})
+.refine((data) => data.email || data.phone, {
+    message: "At least one of Email or Phone is required.",
+    path: ["email"], // Highlight the email field by default
+  });
 
 interface AddCustomerFormProps {
   defaultValues?: Partial<z.infer<typeof formSchema>>;
@@ -293,7 +300,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
 
             <FormField control={form.control} name="firstName" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>First Name</FormLabel>
+                  <FormLabel>First Name <span className="text-red-500">*</span></FormLabel>
                   <FormControl><Input placeholder="Juan" {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
@@ -301,7 +308,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
 
               <FormField control={form.control} name="lastName" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Last Name</FormLabel>
+                  <FormLabel>Last Name <span className="text-red-500">*</span></FormLabel>
                   <FormControl><Input placeholder="Dela Cruz" {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
@@ -323,21 +330,33 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
                 </FormItem>
               )} />
 
-              <FormField control={form.control} name="phone" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Phone Number</FormLabel>
-                  <FormControl>
-                    <Input 
-                      placeholder="09123456789" 
-                      maxLength={11} 
-                      inputMode="numeric" 
-                      {...field}
-                      onKeyDown={handleNumberOnly}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
+              <FormField
+                control={form.control}
+                name="phone"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Phone Number</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="09123456789"
+                        maxLength={11}
+                        inputMode="numeric"
+                        {...field}
+                        value={field.value || "09"} // Ensure the value always starts with "09"
+                        onChange={(e) => {
+                          const input = e.target.value;
+                          // Prevent removing "09" and ensure only numeric input
+                          if (input.startsWith("09") && /^[0-9]*$/.test(input)) {
+                            field.onChange(input);
+                          }
+                        }}
+                        onKeyDown={handleNumberOnly} // Restrict non-numeric input
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               <FormField control={form.control} name="accountNumber" render={({ field }) => (
                 <FormItem>
@@ -349,7 +368,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
 
               <FormField control={form.control} name="site" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Site Location</FormLabel>
+                  <FormLabel>Site Location <span className="text-red-500">*</span></FormLabel>
                   <Select onValueChange={(value) => field.onChange(value)} defaultValue={field.value}>
                     <FormControl><SelectTrigger><SelectValue placeholder="Select site location" /></SelectTrigger></FormControl>
                     <SelectContent>
@@ -364,7 +383,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
 
               <FormField control={form.control} name="meterNumber" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Meter Number</FormLabel>
+                  <FormLabel>Meter Number <span className="text-red-500">*</span></FormLabel>
                   <FormControl><Input placeholder="Enter meter number" {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
@@ -372,7 +391,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
 
               <FormField control={form.control} name="block" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Block</FormLabel>
+                  <FormLabel>Block <span className="text-red-500">*</span></FormLabel>
                   <FormControl><Input placeholder="Block" {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
@@ -380,7 +399,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
 
               <FormField control={form.control} name="lot" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Lot</FormLabel>
+                  <FormLabel>Lot <span className="text-red-500">*</span></FormLabel>
                   <FormControl><Input placeholder="Lot" {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>

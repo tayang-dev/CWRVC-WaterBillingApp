@@ -1014,7 +1014,22 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
         showNotification("No valid bills found to print.", "info");
         return;
       }
-  
+  // Fetch all customers for login credentials lookup
+    const customersSnapshot = await getDocs(collection(db, "customers"));
+    const customersList = customersSnapshot.docs.map(doc => ({
+      accountNumber: doc.data().accountNumber,
+      email: doc.data().email,
+      phone: doc.data().phone,
+    }));
+
+    // Helper to get login credentials for a bill
+    const getLoginCredentials = (accountNumber: string) => {
+      const customer = customersList.find(c => c.accountNumber === accountNumber);
+      return {
+        username: customer?.email || customer?.phone || "N/A",
+        password: accountNumber || "N/A",
+      };
+    };
       // Helper function to calculate default rates if not available
       function calculateDefaultRates(usage) {
         const rates = [];
@@ -1556,66 +1571,85 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
           );
         });
         
-        // --- FOOTER NOTES ---
-        // Calculate available space for footer
-        const availableFooterSpace = contentHeight - (accountRowY + accountRowHeight - marginY);
-        
-        // Adjust footer position to ensure it fits
-        const footerY = accountRowY + accountRowHeight + 5; // Reduced from 10
-        
-        // Add QR code to the right side of the footer
-          const qrCodeSize = 20; // You can adjust the size as needed
-          const qrCodeY = footerY;
-          const qrCodeX = marginX + contentWidth - qrCodeSize - 8; // Position it on the right with a 10mm margin
+        // --- FOOTER AND LOGIN/QR SECTION ---
 
-          // Add QR code to the PDF
-          pdf.addImage(
-            qrCodeBase64, 
-            "PNG", 
-            qrCodeX, 
-            qrCodeY, 
-            qrCodeSize, 
-            qrCodeSize
-          );
+        const login = getLoginCredentials(bill.accountNumber);
+        const qrCodeSize = 20;
+        const sectionTopY = accountRowY + accountRowHeight + 5;
 
-        // Notes with adaptive font size based on available space
-        const footerFontSize = availableFooterSpace < 40 ? 7 : 8; // Smaller font if space is limited
-        
+        // Column widths
+        const colGap = 10;
+        const rightColWidth = 70;
+        const leftColWidth = contentWidth - rightColWidth - colGap;
+
+        // --- LEFT COLUMN (Footer Notes) ---
+        const leftX = marginX;
+        const leftY = sectionTopY;
+
         pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(footerFontSize + 1);
-        pdf.text("MAHALAGANG PAALALA TUNGKOL SA INYONG WATER BILL:", marginX + 5, footerY);
-        
-        // Notes with optimized spacing
+        pdf.setFontSize(9);
+        pdf.text("MAHALAGANG PAALALA TUNGKOL SA INYONG WATER BILL:", leftX, leftY);
+
         pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(footerFontSize);
-        
+        pdf.setFontSize(8);
+
         const notes = [
           "HUWAG PONG KALILIMUTAN DALHIN ANG INYONG BILLING STATEMENT KAPAG KAYO AY MAGBABAYAD",
           "PARA MAIWASAN ANG PAGBABAYAD NG MULTA, MAGBAYAD PO NG INYONG BILLING STATEMENT NG MAS MAAGA O DI LALAGPAS SA INYONG DUE DATE.",
           "ANG SERBISYO PO NG INYONG TUBIG AY PUPUTULIN NG WALANG PAALALA KUNG DI KAYO MAKAPAGBAYAD SA LOOB NG LIMANG(5) ARAW PAGKATAPOS NG DUE DATE."
         ];
-        
-        // Calculate line spacing based on available space
-        const lineSpacing = Math.min(5, (availableFooterSpace - 15) / notes.length);
-        
+
         notes.forEach((note, idx) => {
-          // Split long notes into multiple lines if necessary
-          const wrappedNotes = pdf.splitTextToSize(`${idx + 1}. ${note}`, contentWidth - 20);
-          pdf.text(wrappedNotes, marginX + 10, footerY + 8 + (idx * (lineSpacing + wrappedNotes.length * 4)));
+          const noteY = leftY + 8 + (idx * 6);
+          pdf.text(`${idx + 1}. ${note}`, leftX + 5, noteY, {
+            maxWidth: leftColWidth - 10
+          });
         });
-        
-        // Machine validation note at bottom - ensure it's always visible
-        const validationY = marginY + contentHeight - 8;
-        pdf.line(marginX, validationY, marginX + contentWidth, validationY);
-        
+
+        // --- RIGHT COLUMN (Login + QR Code) ---
+        const rightX = marginX + leftColWidth + colGap;
+        const rightY = sectionTopY;
+
+        // Set sizes
+        // const qrCodeSize = 20; // Removed redeclaration to avoid block-scoped variable error
+        const credentialsBoxWidth = rightColWidth;
+        const credentialsBoxHeight = 32;
+
+        // Draw background block for credentials + QR code
+        pdf.setFillColor(245, 245, 245);
+        pdf.rect(rightX - 3, rightY, credentialsBoxWidth, credentialsBoxHeight, 'F');
+
+        // --- Draw login credentials (left side of box) ---
+        const credentialsPadding = 4;
+        const credentialsTextX = rightX + credentialsPadding;
+        const credentialsTextY = rightY + 6;
+        const qrCodeMargin = 6;
+
+        // Text
         pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(9); // Reduced from 10
-        pdf.text(
-          "\"THIS WILL SERVE AS YOUR OFFICIAL RECEIPT WHEN MACHINE VALIDATED\"",
-          marginX + contentWidth / 2,
-          validationY + 5,
-          { align: "center" }
-        );
+        pdf.setFontSize(9);
+        pdf.text("INITIAL LOGIN CREDENTIALS", credentialsTextX, credentialsTextY);
+
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+        pdf.text(`username: ${login.username}`, credentialsTextX, credentialsTextY + 6);
+        pdf.text(`password: ${login.password}`, credentialsTextX, credentialsTextY + 11);
+
+        pdf.setFontSize(7);
+        pdf.setTextColor(120);
+        pdf.text("Please change your password after \nyour first login.", credentialsTextX, credentialsTextY + 16);
+
+        // --- Draw QR code (right side of box, vertically centered) ---
+        pdf.setTextColor(0, 0, 0); // Reset text color
+
+        const qrCodeX = rightX + credentialsBoxWidth - qrCodeSize - qrCodeMargin;
+        const qrCodeY = rightY + (credentialsBoxHeight - qrCodeSize) / 2;
+
+        pdf.addImage(qrCodeBase64, "PNG", qrCodeX, qrCodeY, qrCodeSize, qrCodeSize);
+
+
+
+
       }
       console.log("Saving PDF with", filteredBills.length, "bills");
 
@@ -2754,8 +2788,7 @@ const filteredBills = bills.filter((bill) => {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         selectedAccount={selectedAccount}
-        selectedBills={selectedBills}
-      />
+        selectedBills={selectedBills} customersCollection={customers}      />
     </div>
   );
 };

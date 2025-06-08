@@ -140,7 +140,11 @@ const Header = ({
           let rawTime: number;
           let date: string;
 
-          if (data.timestamp instanceof Timestamp) {
+          // Use lastMessageTime for chats, otherwise use timestamp
+          if (name === "chats" && data.lastMessageTime instanceof Timestamp) {
+            rawTime = data.lastMessageTime.toMillis();
+            date = format(data.lastMessageTime.toDate(), "MMM dd, yyyy hh:mm a");
+          } else if (data.timestamp instanceof Timestamp) {
             rawTime = data.timestamp.toMillis();
             date = format(data.timestamp.toDate(), "MMM dd, yyyy hh:mm a");
           } else if (typeof data.timestamp === "string") {

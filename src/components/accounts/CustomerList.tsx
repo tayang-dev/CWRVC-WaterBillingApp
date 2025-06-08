@@ -80,12 +80,14 @@ const formSchema = z.object({
   firstName: z.string()
     .trim()
     .min(2, { message: "First name must be at least 2 characters." })
+    .max(15, { message: "First name cannot exceed 15 characters." }) // Added max length validation
     .regex(/^[A-Za-zÑñ.\- ]+$/, "Only letters (including Ñ, ñ), dot (.), dash (-), and spaces are allowed")
     .refine((val) => val.trim().length > 0, { message: "First name cannot be empty or spaces only." }),
 
   lastName: z.string()
     .trim()
     .min(2, { message: "Last name must be at least 2 characters." })
+    .max(15, { message: "Last name cannot exceed 15 characters." }) // Added max length validation
     .regex(/^[A-Za-zÑñ.\- ]+$/, "Only letters (including Ñ, ñ), dot (.), dash (-), and spaces are allowed")
     .refine((val) => val.trim().length > 0, { message: "Last name cannot be empty or spaces only." }),
 
@@ -112,6 +114,7 @@ const formSchema = z.object({
 
   meterNumber: z.string()
     .min(1, { message: "Meter number is required" })
+    .max(15, { message: "Meter number cannot exceed 15 characters" })
     .regex(/^[A-Za-z0-9\-]+$/, "Meter number can only contain letters, numbers, and dash (-)"), // Allow letters
 
   block: z.string()
@@ -124,10 +127,14 @@ const formSchema = z.object({
     .max(3, { message: "Lot cannot exceed 3 characters." })
     .regex(/^[A-Za-z0-9]+$/, "Lot can only contain letters and numbers"),
 
-  status: z.enum(["active", "inactive", "delinquent"], {
+  status: z.enum(["active", "inactive"], {
     required_error: "Status is required.",
   }),
-});
+})
+.refine((data) => data.email || data.phone, {
+    message: "At least one of Email or Phone is required.",
+    path: ["email"], // Highlight the email field by default
+  });
 
 
 interface Customer {
@@ -142,7 +149,7 @@ interface Customer {
   meterNumber: string;
   block: string;
   lot: string;
-  status: "active" | "inactive" | "pending" | "delinquent";
+  status: "active" | "inactive" | "pending" ;
   lastBillingDate: string;
   amountDue: number;
   site?: string;
@@ -155,6 +162,11 @@ interface CustomerListProps {
   onViewCustomer?: (customerId: string) => void;
   onFilteredDataChange?: (filteredData: Customer[]) => void;
 }
+const handleNumberOnly = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (!/^[0-9]$/.test(e.key) && e.key !== "Backspace" && e.key !== "Tab") {
+    e.preventDefault();
+  }
+};
 
 const CustomerList: React.FC<CustomerListProps> = ({
   onViewCustomer = (id) => console.log(`View customer ${id}`),
@@ -240,7 +252,7 @@ const CustomerList: React.FC<CustomerListProps> = ({
             firstName: customerData.firstName || "", // Add this line
             lastName: customerData.lastName || "",   // Add this line
             middleInitial: customerData.middleInitial || "", // Add this line
-            email: customerData.email || customerData.phone, // Use phone if email is missing
+            email: customerData.email || "",
             address: customerData.address,
             accountNumber: accountNumber,
             status: customerData.status,
@@ -248,7 +260,7 @@ const CustomerList: React.FC<CustomerListProps> = ({
             amountDue: latestAmountDue,
             site: customerData.site,
             isSenior: customerData.isSenior,
-            phone: customerData.phone,
+            phone: customerData.phone || "",
             meterNumber: customerData.meterNumber || "",   // <-- added
             block: customerData.block || "",               // <-- added
             lot: customerData.lot || "",    
@@ -483,7 +495,9 @@ const handleDeleteCustomer = async () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <FormField control={form.control} name="firstName" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>First Name</FormLabel>
+                    <FormLabel>
+                      First Name <span className="text-red-500">*</span>
+                    </FormLabel>
                     <FormControl><Input {...field} /></FormControl>
                     <FormMessage />
                   </FormItem>
@@ -491,7 +505,9 @@ const handleDeleteCustomer = async () => {
 
                 <FormField control={form.control} name="lastName" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Last Name</FormLabel>
+                    <FormLabel>
+                      Last Name <span className="text-red-500">*</span>
+                    </FormLabel>
                     <FormControl><Input {...field} /></FormControl>
                     <FormMessage />
                   </FormItem>
@@ -513,13 +529,38 @@ const handleDeleteCustomer = async () => {
                   </FormItem>
                 )} />
 
-                <FormField control={form.control} name="phone" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Phone Number</FormLabel>
-                    <FormControl><Input {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
+                <FormField
+                  control={form.control}
+                  name="phone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Phone Number</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="09123456789"
+                          maxLength={11}
+                          inputMode="numeric"
+                          {...field}
+                          value={field.value === "09" ? "" : field.value} // Treat "09" as empty
+                          onChange={(e) => {
+                            const input = e.target.value;
+                            // Allow only numeric input and ensure it starts with "09" or is empty
+                            if (input === "" || input.startsWith("09") && /^[0-9]*$/.test(input)) {
+                              field.onChange(input);
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            // Allow only numeric input, backspace, and tab
+                            if (!/^[0-9]$/.test(e.key) && e.key !== "Backspace" && e.key !== "Tab") {
+                              e.preventDefault();
+                            }
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
                 <FormField control={form.control} name="accountNumber" render={() => (
                   <FormItem>
@@ -535,8 +576,10 @@ const handleDeleteCustomer = async () => {
 
                 <FormField control={form.control} name="site" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Site Location</FormLabel>
-                    <Select 
+                    <FormLabel>
+                      Site Location <span className="text-red-500">*</span>
+                    </FormLabel>      
+                  <Select 
                       onValueChange={field.onChange} 
                       defaultValue={field.value}
                     >
@@ -557,7 +600,9 @@ const handleDeleteCustomer = async () => {
 
                 <FormField control={form.control} name="meterNumber" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Meter Number</FormLabel>
+                    <FormLabel>
+                      Meter Number <span className="text-red-500">*</span>
+                    </FormLabel>
                     <FormControl><Input {...field} /></FormControl>
                     <FormMessage />
                   </FormItem>
@@ -565,7 +610,9 @@ const handleDeleteCustomer = async () => {
 
                 <FormField control={form.control} name="block" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Block</FormLabel>
+                    <FormLabel>
+                      Block <span className="text-red-500">*</span>
+                    </FormLabel>
                     <FormControl><Input {...field} /></FormControl>
                     <FormMessage />
                   </FormItem>
@@ -573,7 +620,9 @@ const handleDeleteCustomer = async () => {
 
                 <FormField control={form.control} name="lot" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Lot</FormLabel>
+                    <FormLabel>
+                      Lot <span className="text-red-500">*</span>
+                    </FormLabel>
                     <FormControl><Input {...field} /></FormControl>
                     <FormMessage />
                   </FormItem>
@@ -606,7 +655,6 @@ const handleDeleteCustomer = async () => {
                       <SelectContent>
                         <SelectItem value="active">Active</SelectItem>
                         <SelectItem value="inactive">Inactive</SelectItem>
-                        <SelectItem value="delinquent">Delinquent</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -706,8 +754,7 @@ const handleDeleteCustomer = async () => {
         return "bg-green-100 text-green-800"; // Green for active
       case "inactive":
         return "bg-gray-100 text-gray-800"; // Gray for inactive
-      case "delinquent":
-        return "bg-red-100 text-red-800"; // Red for delinquent
+
       default:
         return "bg-gray-100 text-gray-800"; // Default gray
     }
@@ -791,7 +838,7 @@ const handleDeleteCustomer = async () => {
                     {customer.accountNumber}
                   </TableCell>
                   <TableCell>{customer.name}</TableCell>
-                  <TableCell>{customer.email}</TableCell>
+                  <TableCell>{customer.email || customer.phone}</TableCell>
                   <TableCell>
                     <Badge 
                       variant="outline" 

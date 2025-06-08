@@ -7,6 +7,9 @@ import PaymentStatusChart from "./PaymentStatusChart";
 import WaterLeakagePerSite from "./WaterLeakagePerSite";
 import CustomerWaterUsageRanking from "./CustomerWaterUsageRanking";
 import { exportDashboardData } from "./exportDashboardData";
+import { useNavigate } from "react-router-dom"; // Add this import at the top
+import { CreditCard, Download, Wallet } from "lucide-react";
+
 
 const Dashboard = () => {
   const [dashboardData, setDashboardData] = useState({
@@ -30,6 +33,9 @@ const Dashboard = () => {
   const [selectedSite, setSelectedSite] = useState("All");
   const [selectedMonth, setSelectedMonth] = useState("All");
   const [selectedYear, setSelectedYear] = useState("All");
+
+  const navigate = useNavigate();
+
 
   const handleSiteChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedSite(e.target.value);
@@ -247,23 +253,32 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* Export Button */}
-      <div className="mb-6 flex justify-end">
-        <button
-          className="px-6 py-2 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 transition"
-          onClick={() =>
-            exportDashboardData({
-              dashboardStats: dashboardData,
-              leakageData,
-              billingTrends: billingData,
-              paymentStatus: paymentStatusData,
-              customerUsage: filteredCustomers,
-            })
-          }
-        >
-          Export Dashboard Data
-        </button>
-      </div>
+        {/* Pay in Cash and Export Buttons in the same row */}
+        <div className="mb-6 flex justify-end gap-3">
+              <button
+                className="px-5 py-2.5 bg-sky-600 text-white font-medium rounded-md shadow hover:bg-sky-700 transition-colors duration-200 flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-opacity-50"
+                onClick={() => navigate("/payments?tab=cash-payment")}
+              >
+                <Wallet size={18} />
+                <span>Pay in Cash</span>
+              </button>
+              
+              <button
+                className="px-5 py-2.5 bg-blue-600 text-white font-medium rounded-md shadow hover:bg-blue-700 transition-colors duration-200 flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+                onClick={() =>
+                  exportDashboardData({
+                    dashboardStats: dashboardData,
+                    leakageData,
+                    billingTrends: billingData,
+                    paymentStatus: paymentStatusData,
+                    customerUsage: filteredCustomers,
+                  })
+                }
+              >
+                <Download size={18} />
+                <span>Export Dashboard Data</span>
+              </button>
+            </div>
 
       {/* Loader / Error / Content */}
       {loading ? (

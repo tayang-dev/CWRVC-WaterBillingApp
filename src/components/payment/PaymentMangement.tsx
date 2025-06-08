@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { FileSpreadsheet } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 
 import {
   Card,
@@ -160,6 +161,8 @@ const PaymentManagement = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
 
+
+  
   // Payment Method form states
   const [methodType, setMethodType] = useState("");
   const [accountName, setAccountName] = useState("");
@@ -265,6 +268,24 @@ const [filterYear, setFilterYear] = useState<string>("all");
     return `${timestamp}-${randomString}`; // Combine timestamp and random string
   };
 
+// Add these state variables near your other state declarations:
+const [cashCurrentPage, setCashCurrentPage] = useState(1);
+const cashItemsPerPage = 8; // Adjust as needed
+
+// Pagination logic for cash payments
+const paginatedCashCustomers = customers.slice(
+  (cashCurrentPage - 1) * cashItemsPerPage,
+  cashCurrentPage * cashItemsPerPage
+);
+const cashTotalPages = Math.ceil(customers.length / cashItemsPerPage);
+
+
+// Add these state variables for search and filtering:
+const [cashSearchTerm, setCashSearchTerm] = useState("");
+const [cashFilterSite, setCashFilterSite] = useState("all");
+const [cashFilterStatus, setCashFilterStatus] = useState("all");
+
+
 const [isCreateReceiptDialogOpen, setIsCreateReceiptDialogOpen] = useState(false);
 const [formData, setFormData] = useState({
   accountNumber: "",
@@ -282,22 +303,77 @@ const [formData, setFormData] = useState({
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleCreateReceipt = async () => {
-    setIsProcessing(true);
-    try {
-      const { collection, addDoc } = await import("firebase/firestore");
-      const { db } = await import("../../lib/firebase");
+  // Cash Payment Handler (immediate verification)
+const handleCreateCashReceipt = async () => {
+  if (!selectedCashCustomer) return;
+  setCashProcessing(true);
+  setCashError("");
+  try {
+    const { collection, addDoc, doc, updateDoc, getDoc } = await import("firebase/firestore");
+    const { db } = await import("../../lib/firebase");
 
-      await addDoc(collection(db, "paymentVerifications"), formData);
-      alert("Cash receipt created successfully!");
-      setIsCreateReceiptDialogOpen(false);
-    } catch (error) {
-      console.error("Error creating cash receipt:", error);
-      alert("Failed to create cash receipt. Please try again.");
-    } finally {
-      setIsProcessing(false); // Reset processing state
-    }
-  };
+    // Prepare payment verification data
+    const paymentData = {
+      accountNumber: selectedCashCustomer.accountNumber,
+      customerId: selectedCashCustomer.id,
+      customerName: selectedCashCustomer.name,
+      amount: parseFloat(cashAmount),
+      paymentDate: cashPaymentDate,
+      paymentMethod: "Cash",
+      referenceNumber: cashReferenceNumber,
+      status: "verified",
+      submissionDateTime: formatSubmissionDateTime(new Date()),
+      verifiedAt: new Date().toISOString(),
+    };
+// Add to paymentVerifications as verified
+await addDoc(collection(db, "paymentVerifications"), paymentData);
+
+// Update updatedPayments
+const updatedPaymentsRef = doc(db, "updatedPayments", selectedCashCustomer.accountNumber);
+const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
+const prevPaymentsAmount = parseFloat(updatedPaymentsSnap?.data()?.amount ?? 0);
+const newUpdatedAmount = Math.max(0, prevPaymentsAmount - parseFloat(cashAmount));
+await updateDoc(updatedPaymentsRef, { amount: newUpdatedAmount, customerId: selectedCashCustomer.id });
+
+// Optionally, update bills as in handleVerifyPayment if needed
+
+setIsCashReceiptDialogOpen(false);
+setSelectedCashCustomer(null);
+setCashAmount("");
+setCashPaymentDate(formatPaymentDate(new Date()));
+setCashReferenceNumber(generateReferenceNumber());
+alert("Cash receipt created and verified successfully!");
+} catch (error: any) {
+setCashError(error.message || "Failed to create cash receipt.");
+} finally {
+setCashProcessing(false);
+}
+};
+
+// Filter and sort customers for Cash Payment tab
+const filteredCashCustomers = customers
+  .filter((customer) => {
+    // Search by name, email, account number, or phone
+    const searchLower = cashSearchTerm.toLowerCase();
+    const matchesSearch =
+      customer.name.toLowerCase().includes(searchLower) ||
+      (customer.email && customer.email.toLowerCase().includes(searchLower)) ||
+      customer.accountNumber.toLowerCase().includes(searchLower) ||
+      (customer.phone && customer.phone.toLowerCase().includes(searchLower));
+
+    // Filter by site
+    const matchesSite = cashFilterSite === "all" || customer.site === cashFilterSite;
+
+    // Filter by status
+    const matchesStatus =
+      cashFilterStatus === "all" ||
+      (cashFilterStatus === "paid" && customer.amountDue <= 0) ||
+      (cashFilterStatus === "pending" && customer.amountDue > 0);
+
+    return matchesSearch && matchesSite && matchesStatus;
+  })
+  .sort((a, b) => a.name.localeCompare(b.name)); // Alphabetical by name
+
 // Add these state variables near your other state declarations:
 const [currentPage, setCurrentPage] = useState(1);
 // Removed duplicate declaration of itemsPerPage
@@ -325,6 +401,17 @@ const [searchTerm, setSearchTerm] = useState("");
 const [filterSite, setFilterSite] = useState("all");
 const [filterDate, setFilterDate] = useState("");
 const itemsPerPage = 10; // Number of items per page
+
+
+  // Add state for cash payment dialog
+  const [isCashReceiptDialogOpen, setIsCashReceiptDialogOpen] = useState(false);
+  const [selectedCashCustomer, setSelectedCashCustomer] = useState<Customer | null>(null);
+  const [cashAmount, setCashAmount] = useState("");
+  const [cashPaymentDate, setCashPaymentDate] = useState(formatPaymentDate(new Date()));
+  const [cashReferenceNumber, setCashReferenceNumber] = useState(generateReferenceNumber());
+  const [cashProcessing, setCashProcessing] = useState(false);
+  const [cashError, setCashError] = useState("");
+
 
 useEffect(() => {
   const fetchPaymentHistory = async () => {
@@ -1817,7 +1904,9 @@ const handleExportPaymentHistory = async () => {
           <TabsList className="mb-6">
             <TabsTrigger value="payment-methods">Payment Methods</TabsTrigger>
             <TabsTrigger value="payment-verification">Payment Verification</TabsTrigger>
+            <TabsTrigger value="cash-payment">Cash Payment</TabsTrigger> 
             <TabsTrigger value="payment-history">Payment History</TabsTrigger> {/* New Tab */}
+            
           </TabsList>
 
           {/* Payment Methods Tab */}
@@ -2013,164 +2102,6 @@ const handleExportPaymentHistory = async () => {
                 <CardDescription>Review and verify customer payment submissions</CardDescription>
               </CardHeader>
               <CardContent>
-                {/* Add the button for creating a cash receipt */}
-                <div className="flex justify-end mb-4">
-                <Dialog open={isCreateReceiptDialogOpen} onOpenChange={setIsCreateReceiptDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button className="bg-green-600 hover:bg-green-700">
-                      <Plus className="mr-2 h-4 w-4" />
-                      Create Cash Receipt
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-[600px]">
-                    <DialogHeader>
-                      <DialogTitle>Create Cash Receipt</DialogTitle>
-                    </DialogHeader>
-                    <div className="grid gap-6 py-4">
-                      {/* Customer Information Section */}
-                      <div>
-                        <h3 className="text-lg font-semibold text-gray-800">Customer Information</h3>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
-                          <div>
-                            <Label htmlFor="accountNumber">Account Number</Label>
-                            <Input
-                              id="accountNumber"
-                              name="accountNumber"
-                              value={formData.accountNumber}
-                              onChange={async (e) => {
-                                const accountNumber = e.target.value;
-                                setFormData((prev) => ({ ...prev, accountNumber }));
-
-                                // Fetch customer name from Firestore
-                                if (accountNumber) {
-                                  try {
-                                    const { collection, query, where, getDocs } = await import("firebase/firestore");
-                                    const { db } = await import("../../lib/firebase");
-
-                                    const customersCollection = collection(db, "customers");
-                                    const customerQuery = query(
-                                      customersCollection,
-                                      where("accountNumber", "==", accountNumber)
-                                    );
-                                    const snapshot = await getDocs(customerQuery);
-
-                                    if (!snapshot.empty) {
-                                      const customer = snapshot.docs[0].data();
-                                      setFormData((prev) => ({
-                                        ...prev,
-                                        customerName: customer.name || "",
-                                      }));
-                                    } else {
-                                      setFormData((prev) => ({ ...prev, customerName: "" }));
-                                    }
-                                  } catch (error) {
-                                    console.error("Error fetching customer name:", error);
-                                  }
-                                } else {
-                                  setFormData((prev) => ({ ...prev, customerName: "" }));
-                                }
-                              }}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="customerName">Customer Name</Label>
-                            <Input
-                              id="customerName"
-                              name="customerName"
-                              value={formData.customerName}
-                              onChange={handleInputChange}
-                              disabled
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Payment Details Section */}
-                      <div>
-                        <h3 className="text-lg font-semibold text-gray-800">Payment Details</h3>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
-                          <div>
-                            <Label htmlFor="amount">Amount</Label>
-                            <Input
-                              id="amount"
-                              name="amount"
-                              value={formData.amount}
-                              onChange={handleInputChange}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="paymentDate">Payment Date</Label>
-                            <Input
-                              id="paymentDate"
-                              name="paymentDate"
-                              value={formData.paymentDate}
-                              onChange={handleInputChange}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="paymentMethod">Payment Method</Label>
-                            <Input
-                              id="paymentMethod"
-                              name="paymentMethod"
-                              value={formData.paymentMethod}
-                              disabled
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="referenceNumber">Reference Number</Label>
-                            <Input
-                              id="referenceNumber"
-                              name="referenceNumber"
-                              value={formData.referenceNumber}
-                              disabled
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Status Section */}
-                      <div>
-                        <h3 className="text-lg font-semibold text-gray-800">Status</h3>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
-                          <div>
-                            <Label htmlFor="status">Status</Label>
-                            <Input id="status" name="status" value={formData.status} disabled />
-                          </div>
-                          <div>
-                            <Label htmlFor="submissionDateTime">Submission DateTime</Label>
-                            <Input
-                              id="submissionDateTime"
-                              name="submissionDateTime"
-                              value={formData.submissionDateTime}
-                              disabled
-                            />
-                          </div>
-
-                        </div>
-                      </div>
-                    </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setIsCreateReceiptDialogOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button
-                      onClick={handleCreateReceipt}
-                      disabled={isProcessing} // Disable the button while processing
-                      className={`bg-green-600 hover:bg-green-700 ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
-                    >
-                      {isProcessing ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Processing...
-                        </>
-                      ) : (
-                        "Save Receipt"
-                      )}
-                    </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              </div>
                 {loading ? (
                   <div className="flex justify-center items-center h-40">
                     <p>Loading payment verifications...</p>
@@ -2335,6 +2266,366 @@ const handleExportPaymentHistory = async () => {
           </DialogContent>
         </Dialog>
           </TabsContent>
+
+
+
+          {/* Cash Payment Tab */}
+          <TabsContent value="cash-payment" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Cash Payment</CardTitle>
+                <CardDescription>
+                  Select a customer and create a cash receipt (auto-verified).
+                </CardDescription>
+              </CardHeader>
+                <CardContent>
+                  {/* Search and Filter Controls for Cash Payment */}
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4 gap-2">
+                    <Input
+                      placeholder="Search by name, email, account #, or phone"
+                      value={cashSearchTerm}
+                      onChange={(e) => setCashSearchTerm(e.target.value)}
+                      className="w-full md:w-1/3"
+                    />
+                    <div className="w-full md:w-1/4">
+                      <Select value={cashFilterSite} onValueChange={setCashFilterSite}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Filter by Site" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Sites</SelectItem>
+                          <SelectItem value="site1">Site 1</SelectItem>
+                          <SelectItem value="site2">Site 2</SelectItem>
+                          <SelectItem value="site3">Site 3</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="w-full md:w-1/4">
+                      <Select value={cashFilterStatus} onValueChange={setCashFilterStatus}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Filter by Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Status</SelectItem>
+                          <SelectItem value="pending">Pending</SelectItem>
+                          <SelectItem value="paid">Paid</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Account #</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Email/Phone</TableHead>
+                        <TableHead>Total Amount Due</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Site</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                    {filteredCashCustomers.slice(
+                        (cashCurrentPage - 1) * cashItemsPerPage,
+                        cashCurrentPage * cashItemsPerPage
+                      ).length > 0 ? (
+                        filteredCashCustomers
+                          .slice(
+                            (cashCurrentPage - 1) * cashItemsPerPage,
+                            cashCurrentPage * cashItemsPerPage
+                          )
+                          .map((customer) => (
+                            <TableRow key={customer.id}>
+                              <TableCell>{customer.accountNumber}</TableCell>
+                              <TableCell>{customer.name}</TableCell>
+                              <TableCell>{customer.email || customer.phone}</TableCell>
+                              <TableCell>{formatCurrency(customer.amountDue)}</TableCell>
+                              <TableCell>
+                                {customer.amountDue > 0 ? (
+                                  <Badge className="bg-yellow-100 text-yellow-800">Pending</Badge>
+                                ) : (
+                                  <Badge className="bg-green-100 text-green-800">Paid</Badge>
+                                )}
+                              </TableCell>
+                              <TableCell>{customer.site || "—"}</TableCell>
+                              <TableCell>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedCashCustomer(customer);
+                                    setCashAmount(customer.amountDue > 0 ? customer.amountDue.toString() : "");
+                                    setCashPaymentDate(formatPaymentDate(new Date()));
+                                    setCashReferenceNumber(generateReferenceNumber());
+                                    setIsCashReceiptDialogOpen(true);
+                                  }}
+                                >
+                                  Create Cash Receipt
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center">
+                            No customers found.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                  {/* Pagination controls below the table */}
+                  <div className="flex justify-between items-center mt-4">
+                    <Button
+                      variant="outline"
+                      onClick={() => setCashCurrentPage((p) => Math.max(1, p - 1))}
+                      disabled={cashCurrentPage === 1}
+                    >
+                      Previous
+                    </Button>
+                    <span>
+                      Page {cashCurrentPage} of {cashTotalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      onClick={() => setCashCurrentPage((p) => Math.min(cashTotalPages, p + 1))}
+                      disabled={cashCurrentPage === cashTotalPages}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </CardContent>
+            </Card>
+
+            {/* Cash Receipt Dialog */}
+            <Dialog open={isCashReceiptDialogOpen} onOpenChange={setIsCashReceiptDialogOpen}>
+              <DialogContent className="sm:max-w-[500px]">
+                <DialogHeader>
+                  <DialogTitle>Create Cash Receipt</DialogTitle>
+                  <DialogDescription>
+                    Fill in the payment details for <b>{selectedCashCustomer?.name}</b>
+                  </DialogDescription>
+                </DialogHeader>
+                {cashError && (
+                  <div className="flex items-center gap-2 p-3 mb-4 text-sm rounded-md bg-red-50 text-red-600">
+                    <AlertCircle className="h-4 w-4" />
+                    <span>{cashError}</span>
+                  </div>
+                )}
+                <div className="grid gap-4 py-4">
+                  <div>
+                    <Label>Account Number</Label>
+                    <Input value={selectedCashCustomer?.accountNumber || ""} disabled />
+                  </div>
+                  <div>
+                    <Label>Customer Name</Label>
+                    <Input value={selectedCashCustomer?.name || ""} disabled />
+                  </div>
+                  <div>
+                    <Label>Amount</Label>
+                    <Input
+                      value={cashAmount}
+                      onChange={(e) => setCashAmount(e.target.value)}
+                      type="number"
+                      min="0"
+                    />
+                  </div>
+                  <div>
+                    <Label>Payment Date</Label>
+                    <Input
+                      value={cashPaymentDate}
+                      onChange={(e) => setCashPaymentDate(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label>Reference Number</Label>
+                    <Input value={cashReferenceNumber} disabled />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsCashReceiptDialogOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+          
+                  <Button
+                    onClick={async () => {
+                      if (!selectedCashCustomer) return;
+                      setCashProcessing(true);
+                      setCashError("");
+                      try {
+                        const { collection, addDoc, doc, updateDoc, getDoc, getDocs, query, where, orderBy, deleteDoc } = await import("firebase/firestore");
+                        const { db } = await import("../../lib/firebase");
+
+                        // Prepare payment verification data (already verified)
+                        const paymentAmount = parseFloat(cashAmount);
+                        const paymentVerification = {
+                          accountNumber: selectedCashCustomer.accountNumber,
+                          customerId: selectedCashCustomer.id,
+                          customerName: selectedCashCustomer.name,
+                          amount: paymentAmount,
+                          paymentDate: cashPaymentDate,
+                          paymentMethod: "Cash",
+                          referenceNumber: cashReferenceNumber,
+                          status: "verified",
+                          submissionDateTime: formatSubmissionDateTime(new Date()),
+                          verifiedAt: new Date().toISOString(),
+                          billId: "",
+                          site: selectedCashCustomer.site || "",
+                          notes: "",
+                        };
+
+                        // Add to paymentVerifications as verified
+                        await addDoc(collection(db, "paymentVerifications"), paymentVerification);
+
+                        // Update updatedPayments
+                        const updatedPaymentsRef = doc(db, "updatedPayments", selectedCashCustomer.accountNumber);
+                        const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
+                        const prevPaymentsAmount = parseFloat(updatedPaymentsSnap?.data()?.amount ?? 0);
+                        const newUpdatedAmount = Math.max(0, prevPaymentsAmount - paymentAmount);
+                        await updateDoc(updatedPaymentsRef, { amount: newUpdatedAmount, customerId: selectedCashCustomer.id });
+
+                        // --- Apply payment to bills (like handleVerifyPayment) ---
+                        const billsCollectionRef = collection(db, "bills", selectedCashCustomer.accountNumber, "records");
+                        const billsQueryOrderedByNumber = query(
+                          billsCollectionRef,
+                          orderBy("billNumber", "asc")
+                        );
+                        const billsSnap = await getDocs(billsQueryOrderedByNumber);
+
+                        // Extract bills with positive amounts (unpaid bills)
+                        const pendingBills = billsSnap.docs
+                          .filter(doc => doc.data().amount > 0)
+                          .map((doc) => {
+                            const data = doc.data();
+                            return {
+                              id: doc.id,
+                              ref: doc.ref,
+                              billNumber: data.billNumber || "",
+                              amount: data.amount || 0,
+                              currentAmountDue: data.currentAmountDue || 0,
+                              dueDate: data.dueDate,
+                              overPayment: data.overPayment || 0,
+                              penaltyApplied: data.penaltyApplied || false,
+                              originalAmount: data.originalAmount || 0,
+                              status: data.status || "pending"
+                            };
+                          });
+
+                        let remainingPayment = paymentAmount;
+                        let currentBillPaid = null;
+
+                        for (const bill of pendingBills) {
+                          if (remainingPayment <= 0) break;
+
+                          // Check if penalty should be applied
+                          let billAmount = bill.amount;
+                          let penaltyApplied = bill.penaltyApplied || false;
+
+                          // Apply penalty if needed (due date passed and not yet applied)
+                          if (billAmount > 0 && !penaltyApplied) {
+                            let dueDate;
+                            if (bill.dueDate && typeof bill.dueDate === 'string') {
+                              if (bill.dueDate.includes('/')) {
+                                const [day, month, year] = bill.dueDate.split('/');
+                                dueDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+                              } else if (bill.dueDate.includes('-')) {
+                                dueDate = new Date(bill.dueDate);
+                              } else {
+                                dueDate = new Date(bill.dueDate);
+                              }
+                            } else {
+                              dueDate = new Date(bill.dueDate);
+                            }
+                            const currentDate = new Date();
+                            if (dueDate < currentDate) {
+                              const penaltyAmount = billAmount * 0.1;
+                              billAmount += penaltyAmount;
+                              penaltyApplied = true;
+                              await updateDoc(bill.ref, {
+                                amount: billAmount,
+                                currentAmountDue: billAmount,
+                                penaltyApplied: true
+                              });
+                            }
+                          }
+
+                          // Process payment for this bill
+                          if (remainingPayment >= billAmount) {
+                            // Full payment
+                            await updateDoc(bill.ref, {
+                              amount: 0,
+                              currentAmountDue: 0,
+                              paidAt: new Date().toISOString(),
+                              penaltyApplied: penaltyApplied,
+                              status: "paid"
+                            });
+                            remainingPayment -= billAmount;
+                            currentBillPaid = bill;
+                          } else {
+                            // Partial payment
+                            const newRemaining = billAmount - remainingPayment;
+                            await updateDoc(bill.ref, {
+                              amount: newRemaining,
+                              currentAmountDue: newRemaining,
+                              penaltyApplied: penaltyApplied,
+                              status: newRemaining < bill.originalAmount ? "partially paid" : "pending"
+                            });
+                            remainingPayment = 0;
+                          }
+                        }
+
+                        // Handle overpayment: apply to the last bill that was fully paid
+                        if (remainingPayment > 0 && currentBillPaid) {
+                          await updateDoc(currentBillPaid.ref, {
+                            overPayment: remainingPayment,
+                            status: "paid"
+                          });
+                        }
+
+                        // Remove disconnection notice if less than 3 unpaid bills remain
+                        const unpaidBillsQuery = query(
+                          collection(db, "bills", selectedCashCustomer.accountNumber, "records"),
+                          where("amount", ">", 0)
+                        );
+                        const unpaidBillsSnapshot = await getDocs(unpaidBillsQuery);
+
+                        if (unpaidBillsSnapshot.size < 3) {
+                          const noticeQuery = query(
+                            collection(db, "notice"),
+                            where("accountNumber", "==", selectedCashCustomer.accountNumber)
+                          );
+                          const noticeSnapshot = await getDocs(noticeQuery);
+                          for (const docSnap of noticeSnapshot.docs) {
+                            await deleteDoc(doc(db, "notice", docSnap.id));
+                          }
+                        }
+
+                        setIsCashReceiptDialogOpen(false);
+                        setSelectedCashCustomer(null);
+                        setCashAmount("");
+                        setCashPaymentDate(formatPaymentDate(new Date()));
+                        setCashReferenceNumber(generateReferenceNumber());
+                        alert("Cash receipt created, verified, and applied to bills successfully!");
+                      } catch (error: any) {
+                        setCashError(error.message || "Failed to create cash receipt.");
+                      } finally {
+                        setCashProcessing(false);
+                      }
+                    }}
+                    disabled={cashProcessing}
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    {cashProcessing ? "Processing..." : "Save Receipt"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </TabsContent>
+
 
           {/* Payment History Tab */}
           <TabsContent value="payment-history" className="space-y-6">

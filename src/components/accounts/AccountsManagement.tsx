@@ -9,6 +9,9 @@ import AddCustomerForm from "./AddCustomerForm";
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver'; // For browser environments
 import jsPDF from "jspdf";
+import * as XLSX from "xlsx"; // Add this import for parsing Excel/CSV files
+import Papa from "papaparse"; // For CSV parsing
+
 
 interface AccountsManagementProps {
   initialView?: "list" | "details";
@@ -30,6 +33,225 @@ const AccountsManagement = ({
       location: "all",
     },
   });
+  
+
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
+
+
+
+  // ...existing code...
+const handleDownloadTemplate = async () => {
+  // Create a workbook with the correct headers and one sample row
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Sheet1");
+  sheet.addRow([
+    "Account Number", "First Name", "Last Name", "Middle Initial", "Email/Contact",
+    "Phone Number", "Site", "Senior Citizen", "Block", "Lot", "Meter Number"
+  ]);
+  sheet.addRow([
+    "21-12-2156", "Analiza", "De Castro", "L", "", "09970754514", "site3", "Yes", "21", "56", "13343711"
+  ]);
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  saveAs(blob, "customer_import_template.xlsx");
+};
+// ...existing code...
+  // --- Import Customers Handler ---
+
+const handleImportCustomers = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    setImportError(null);
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+
+    try {
+      // Read file as ArrayBuffer for xlsx, or text for csv
+      const isExcel = file.name.endsWith(".xlsx") || file.name.endsWith(".xls");
+      let rows: any[] = [];
+
+      if (isExcel) {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        rows = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+      } else if (file.name.endsWith(".csv")) {
+        const text = await file.text();
+        const parsed = Papa.parse(text, { header: true });
+        rows = parsed.data as any[];
+      } else {
+        setImportError("Unsupported file type. Please upload a CSV or Excel file.");
+        setImporting(false);
+        alert("Import failed: Unsupported file type. Please upload a CSV or Excel file.");
+        return;
+      }
+
+      if (!rows.length) {
+        setImportError("No data found in the file. Please check your file content.");
+        setImporting(false);
+        alert("Import failed: No data found in the file. Please check your file content.");
+        return;
+      }
+
+      // Normalize and validate rows
+      const { collection, getDocs, where, query, addDoc } = await import("firebase/firestore");
+      const { db } = await import("../../lib/firebase");
+
+      // Fetch all existing account numbers, meter numbers, emails, phones for duplicate check
+      const customersRef = collection(db, "customers");
+      const existingSnapshot = await getDocs(customersRef);
+      const existing = existingSnapshot.docs.map(doc => doc.data());
+      const existingAccountNumbers = new Set(existing.map(c => c.accountNumber));
+      const existingMeterNumbers = new Set(existing.map(c => c.meterNumber));
+      const existingEmails = new Set(existing.map(c => c.email).filter(Boolean));
+      const existingPhones = new Set(existing.map(c => c.phone).filter(Boolean));
+
+      // Helper: Clean and map row to AddCustomerForm fields
+      const mapRow = (row: any) => {
+        // Accept both camelCase and Excel-style headers
+        return {
+          firstName: row.firstName || row["First Name"] || "",
+          lastName: row.lastName || row["Last Name"] || "",
+          middleInitial: row.middleInitial || row["Middle Initial"] || "",
+          email: row.email || row["Email/Contact"] || "",
+          phone: row.phone || row["Phone Number"] || "",
+          site: row.site || row["Site"] || "",
+          isSenior: row.isSenior === true || row.isSenior === "true" || row["Senior Citizen"] === "Yes" || false,
+          accountNumber: row.accountNumber || row["Account Number"] || "",
+          meterNumber: row.meterNumber || row["Meter Number"] || "",
+          block: row.block || row["Block"] || "",
+          lot: row.lot || row["Lot"] || "",
+        };
+      };
+
+      // Validate and filter out duplicates
+      const validRows: any[] = [];
+      const duplicateRows: any[] = [];
+      const missingFieldsRows: any[] = [];
+      for (const row of rows) {
+        const mapped = mapRow(row);
+
+        // Skip if required fields are missing
+        if (
+          !mapped.firstName ||
+          !mapped.lastName ||
+          !mapped.accountNumber ||
+          !mapped.meterNumber ||
+          !mapped.site ||
+          !mapped.block ||
+          !mapped.lot
+        ) {
+          missingFieldsRows.push(mapped);
+          continue;
+        }
+
+        // Check for duplicates in DB
+        if (
+          existingAccountNumbers.has(mapped.accountNumber) ||
+          existingMeterNumbers.has(mapped.meterNumber) ||
+          (mapped.email && existingEmails.has(mapped.email)) ||
+          (mapped.phone && existingPhones.has(mapped.phone))
+        ) {
+          duplicateRows.push(mapped);
+          continue;
+        }
+
+        // Check for duplicates in the same import batch
+        if (
+          validRows.some(
+            v =>
+              v.accountNumber === mapped.accountNumber ||
+              v.meterNumber === mapped.meterNumber ||
+              (mapped.email && v.email === mapped.email) ||
+              (mapped.phone && v.phone === mapped.phone)
+          )
+        ) {
+          duplicateRows.push(mapped);
+          continue;
+        }
+
+        validRows.push(mapped);
+      }
+
+      // Add valid customers to Firestore
+      let addedCount = 0;
+      let failedAdds: any[] = [];
+      for (const customer of validRows) {
+        try {
+          // Compose full name and address as in AddCustomerForm
+          const siteAddresses = {
+            site1: "Site 1, Brgy. Dayap, Calauan, Laguna",
+            site2: "Site 2, Brgy. Dayap, Calauan, Laguna",
+            site3: "Site 3, Brgy. Dayap, Calauan, Laguna",
+          };
+          const fullName = `${customer.firstName} ${customer.middleInitial ? customer.middleInitial + ". " : ""}${customer.lastName}`.trim();
+         
+          // Ensure all fields (except isSenior) are strings
+          const customerData = {
+            accountNumber: String(customer.accountNumber || ""),
+            address: String(siteAddresses[customer.site as keyof typeof siteAddresses] || ""),
+            block: String(customer.block || ""),
+            email: customer.email ? String(customer.email) : null,
+            firstName: String(customer.firstName || ""),
+            joinDate: new Date().toISOString().split("T")[0], // Default to today's date
+            lastBillingDate: new Date().toISOString().split("T")[0], // Default to today's date
+            lastName: String(customer.lastName || ""),
+            lot: String(customer.lot || ""),
+            meterNumber: String(customer.meterNumber || ""),
+            middleInitial: String(customer.middleInitial || ""),
+            name: fullName,
+            phone: String(customer.phone || ""),
+            site: String(customer.site || ""),
+            status: "active",
+            isSenior: Boolean(customer.isSenior), // Ensure isSenior is a boolean
+          };
+
+          await addDoc(customersRef, customerData);
+          addedCount++;
+        } catch (e) {
+          failedAdds.push(customer);
+        }
+      }
+
+      // Refresh customer list after import
+      const refreshedSnapshot = await getDocs(customersRef);
+      const refreshedList = refreshedSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setCustomers(refreshedList);
+
+      setImporting(false);
+
+      let msg = `Imported ${addedCount} customers successfully.`;
+      if (duplicateRows.length > 0) {
+        msg += `\n${duplicateRows.length} rows were skipped due to duplicate account number, meter number, email, or phone.`;
+      }
+      if (missingFieldsRows.length > 0) {
+        msg += `\n${missingFieldsRows.length} rows were skipped due to missing required fields (first name, last name, account number, meter number, site, block, or lot).`;
+      }
+      if (failedAdds.length > 0) {
+        msg += `\n${failedAdds.length} rows failed to add due to a database error.`;
+      }
+      if (addedCount === 0) {
+        msg = "No customers were imported.\n" + msg;
+        alert(msg);
+      } else {
+        alert(msg);
+      }
+    } catch (err: any) {
+      setImportError("Import failed: " + (err.message || "Unknown error"));
+      setImporting(false);
+      alert("Import failed: " + (err.message || "Unknown error"));
+    }
+  };
+
+
+
 
   const exportToExcel = (data: any[], exportName: string) => {
     if (data.length === 0) {
@@ -571,6 +793,53 @@ useEffect(() => {
 
 
 
+
+const handleSendLoginCredentialsSms = async () => {
+  if (filteredCustomersForExport.length === 0) {
+    alert("No customers available to send SMS.");
+    return;
+  }
+
+  const sendSms = async (to: string, message: string) => {
+    try {
+      // Adjust the URL to your deployed Cloud Function endpoint if needed
+      const response = await fetch("/sendSms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to, message }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to send SMS");
+      return true;
+    } catch (error) {
+      console.error("Error sending SMS:", error);
+      return false;
+    }
+  };
+
+  let successCount = 0;
+  for (const customer of filteredCustomersForExport) {
+    const username = customer.email || customer.phone || "N/A";
+    const password = customer.accountNumber || "N/A";
+    const to = customer.phone;
+    if (!to) continue;
+
+    const message = 
+      `CENTENNIAL WATER LOGIN\n` +
+      `Username: ${username}\n` +
+      `Password: ${password}\n` +
+      `Please change your password after first login.`;
+
+    const sent = await sendSms(to, message);
+    if (sent) successCount++;
+  }
+
+  alert(`Sent SMS to ${successCount} out of ${filteredCustomersForExport.length} customers.`);
+};
+
+
+
+
 const handlePrintLoginCredentials = () => {
   if (filteredCustomersForExport.length === 0) {
     alert("No customers available to print login credentials.");
@@ -786,6 +1055,18 @@ const handlePrintLoginCredentials = () => {
             </p>
           </div>
           <div className="flex space-x-3">
+            {/* Import Customers Button */}
+            <div>
+              <Button
+                variant="outline"
+                className="flex items-center gap-2"
+                onClick={() => setImportDialogOpen(true)}
+                disabled={importing}
+              >
+                <Download className="h-4 w-4" />
+                Import Customers
+              </Button>
+            </div>
             {/* Export Data Button */}
             <Button variant="outline" className="flex items-center gap-2" onClick={handleExportData}>
               <Download className="h-4 w-4" />
@@ -812,6 +1093,121 @@ const handlePrintLoginCredentials = () => {
             </Button>
           </div>
         </div>
+
+          {importDialogOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+              <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md border border-gray-200">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-bold text-gray-800">Import Customers</h2>
+                  <button 
+                    onClick={() => setImportDialogOpen(false)}
+                    className="text-gray-500 hover:text-gray-700 transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+                
+                <div className="bg-blue-50 rounded-lg p-4 mb-5 border border-blue-100">
+                  <p className="text-sm text-blue-800">
+                    Please download and use our template. Fill it out and upload the completed file.
+                  </p>
+                </div>
+                
+                <Button
+                  onClick={handleDownloadTemplate}
+                  className="mb-5 w-full flex items-center justify-center"
+                  variant="outline"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                  Download Template
+                </Button>
+
+                <div
+                  className={`border-2 border-dashed rounded-lg p-4 text-center mb-4 transition-colors ${
+                    dragging
+                      ? "border-blue-500 bg-blue-50"
+                      : "border-gray-300 hover:border-blue-500"
+                  }`}
+                  onDragOver={e => {
+                    e.preventDefault();
+                    setDragging(true);
+                  }}
+                  onDragLeave={e => {
+                    e.preventDefault();
+                    setDragging(false);
+                  }}
+                  onDrop={async e => {
+                    e.preventDefault();
+                    setDragging(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                      const file = e.dataTransfer.files[0];
+                      const fakeEvent = { target: { files: [file] } } as unknown as React.ChangeEvent<HTMLInputElement>;
+                      await handleImportCustomers(fakeEvent);
+                      setImportDialogOpen(false);
+                    }
+                  }}
+                >
+                  <input
+                    type="file"
+                    accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                    id="import-customers-input"
+                    onChange={async (e) => {
+                      await handleImportCustomers(e);
+                      setImportDialogOpen(false);
+                    }}
+                    disabled={importing}
+                    className="hidden"
+                  />
+                  <label
+                    htmlFor="import-customers-input"
+                    className="cursor-pointer block"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-8 w-8 text-gray-400 mb-2" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                    </svg>
+                    <span className="text-sm font-medium text-gray-700">
+                      {importing ? 'Uploading...' : 'Click or drag file here to upload'}
+                    </span>
+                    <span className="text-xs text-gray-500 block mt-1">
+                      Supported formats: CSV, XLS, XLSX
+                    </span>
+                  </label>
+                </div>
+
+                
+                {importError && (
+                  <div className="bg-red-50 text-red-700 text-sm p-3 rounded-md mb-4 flex items-start">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2 mt-0.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    <span>{importError}</span>
+                  </div>
+                )}
+                
+                <div className="flex justify-end gap-3 mt-2">
+                  <Button 
+                    variant="ghost" 
+                    onClick={() => setImportDialogOpen(false)}
+                    className="text-gray-700"
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    variant="default"
+                    disabled={importing}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={() => document.getElementById('import-customers-input').click()}
+                  >
+                    {importing ? 'Importing...' : 'Upload File'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
 
 

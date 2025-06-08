@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -25,6 +25,28 @@ import {
   increment,
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { getStorage, ref, getDownloadURL } from "firebase/storage";
+
+const storage = getStorage();
+
+function isImageFile(fileName: string) {
+  const lower = fileName.toLowerCase();
+  return (
+    lower.endsWith(".jpg") ||
+    lower.endsWith(".jpeg") ||
+    lower.endsWith(".png") ||
+    lower.endsWith(".gif") ||
+    lower.endsWith(".bmp")
+  );
+}
+
+function parseFileMessage(message: string) {
+  // Format: "File attached: originalFileName|chat_files/timestamp_originalFileName"
+  if (!message.startsWith("File attached:")) return null;
+  const content = message.replace("File attached:", "").trim();
+  const [displayName, fileId] = content.split("|");
+  return { displayName, fileId };
+}
 
 interface Message {
   id: string;
@@ -34,10 +56,10 @@ interface Message {
 }
 
 interface CustomerChatProps {
-  customerDocId: string; // user document id from "users"
+  customerDocId: string;
   customerName: string;
   customerAvatar: string;
-  accountNumber: string; // The consumer account number from consumerAccounts field
+  accountNumber: string;
   userRole: "admin" | "staff";
 }
 
@@ -51,6 +73,8 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [fileUrls, setFileUrls] = useState<{ [key: string]: string }>({});
+  const lastMessageRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!accountNumber) return;
@@ -69,32 +93,52 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
       setMessages(messagesList);
       setLoading(false);
 
-      // Automatically mark messages as read when the chat is opened
       markMessagesAsRead();
     });
 
     return () => unsubscribe();
   }, [accountNumber]);
 
+  useEffect(() => {
+    // Fetch download URLs for file messages
+    const fetchFileUrls = async () => {
+      const urls: { [key: string]: string } = {};
+      for (const msg of messages) {
+        const fileInfo = msg.message && parseFileMessage(msg.message);
+        if (fileInfo && fileInfo.fileId) {
+          try {
+            const fileRef = ref(storage, fileInfo.fileId);
+            urls[msg.id] = await getDownloadURL(fileRef);
+          } catch (e) {
+            // Ignore errors for missing files
+          }
+        }
+      }
+      setFileUrls(urls);
+    };
+    fetchFileUrls();
+  }, [messages]);
+
+  useEffect(() => {
+    if (!loading && messages.length > 0 && lastMessageRef.current) {
+      lastMessageRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, loading]);
+
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !accountNumber) return;
 
     try {
-      // Reference to parent chat document
       const chatDocRef = doc(db, "chats", accountNumber);
-
-      // Read current chat document to see if an admin reply already exists
       const chatSnap = await getDoc(chatDocRef);
       const currentLastMessageAdmin = chatSnap.exists() ? chatSnap.data()?.lastMessageAdmin || "" : "";
 
-      // Send the admin message in the messages subcollection
       await addDoc(collection(db, "chats", accountNumber, "messages"), {
         message: newMessage,
         sender: "admin",
         timestamp: serverTimestamp(),
       });
 
-      // Update the parent chat document with the admin reply details
       await updateDoc(chatDocRef, {
         lastMessageAdmin: newMessage,
         lastMessageTime: serverTimestamp(),
@@ -102,7 +146,6 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
         hasNewMessage: true,
       });
 
-      // If it is the first admin reply, add a notification
       if (userRole === "admin" && !currentLastMessageAdmin.trim()) {
         await addDoc(collection(db, "notifications", accountNumber, "records"), {
           type: "customer_service",
@@ -153,20 +196,48 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
             <p className="text-center">Loading messages...</p>
           ) : (
             <div className="space-y-4">
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.sender === "admin" ? "justify-end" : "justify-start"}`}
-                >
+              {messages.map((msg, idx) => {
+                const fileInfo = msg.message && parseFileMessage(msg.message);
+                const isLast = idx === messages.length - 1;
+                return (
                   <div
-                    className={`max-w-[80%] rounded-lg p-3 ${
-                      msg.sender === "admin" ? "bg-blue-100" : "bg-gray-100"
-                    }`}
+                    key={msg.id}
+                    ref={isLast ? lastMessageRef : undefined}
+                    className={`flex ${msg.sender === "admin" ? "justify-end" : "justify-start"}`}
                   >
-                    <p className="text-sm">{msg.message}</p>
+                    <div
+                      className={`max-w-[80%] rounded-lg p-3 ${
+                        msg.sender === "admin" ? "bg-blue-100" : "bg-gray-100"
+                      }`}
+                    >
+                      {fileInfo && fileInfo.fileId ? (
+                        <div>
+                          <a
+                            href={fileUrls[msg.id] || "#"}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: "#2563eb", textDecoration: "underline" }}
+                          >
+                            📎 {fileInfo.displayName}
+                          </a>
+                          {isImageFile(fileInfo.displayName) && fileUrls[msg.id] && (
+                            <div className="mt-2">
+                              <img
+                                src={fileUrls[msg.id]}
+                                alt={fileInfo.displayName}
+                                style={{ maxWidth: 200, borderRadius: 8 }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-sm">{msg.message}</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
+              <div ref={lastMessageRef} />
             </div>
           )}
         </ScrollArea>

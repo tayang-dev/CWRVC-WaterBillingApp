@@ -12,7 +12,7 @@ const formatCurrency = (amount) => {
   }).format(amount);
 };
 
-const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills }) => {
+const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills, customersCollection }) => {
   if (!selectedBills || selectedBills.length === 0) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -25,6 +25,15 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills }) => 
       </Dialog>
     );
   }
+
+  // Find the customer object from the provided collection using accountNumber
+  const getCustomerForBill = (bill) => {
+    if (!customersCollection) return null;
+    // Try to match by accountNumber
+    return customersCollection.find(
+      (customer) => customer.accountNumber === bill.accountNumber
+    );
+  };
 
   // Sort bills by creation date (newest first) - FIXED the TypeScript error here
   const sortedBills = [...selectedBills].sort((a, b) => {
@@ -107,6 +116,9 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills }) => 
             // Calculate the regular amount with arrears for QR code
             const regularAmount = parseFloat(bill.amountWithArrears || 0);
             const arrears = parseFloat(bill.arrears || 0);
+
+            // Get the customer object for this bill
+            const customer = getCustomerForBill(bill);
             
             return (
               <div key={index} className="border-2 border-black p-4 print:p-0">
@@ -309,10 +321,28 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills }) => 
                     "THIS WILL SERVE AS YOUR OFFICIAL RECEIPT WHEN MACHINE VALIDATED"
                   </p>
                 </div>
+                  {/* Initial Login Credentials and QR Code in the same row, spaced to start and end */}
+                <div className="mt-6 border-t-2 border-black pt-4 flex flex-row items-center justify-between gap-8">
+                  {/* Credentials centered */}
+                  <div className="flex-1 flex flex-col items-center">
+                    <h3 className="font-bold text-lg mb-2">INITIAL LOGIN CREDENTIALS</h3>
+                    <div className="flex flex-col items-center space-y-1">
+                      <span>
+                        <span className="font-semibold">username:</span>
+                        <span className="ml-2">{customer?.email || customer?.phone || "N/A"}</span>
+                      </span>
+                      <span>
+                        <span className="font-semibold">password:</span>
+                        <span className="ml-2">{bill.accountNumber || "N/A"}</span>
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-gray-600">
+                      Please change your password after your first login for security purposes.
+                    </p>
+                  </div>
 
-                {/* QR Code with updated data - now includes arrears explicitly */}
-                <div className="mt-4 flex justify-end">
-                  <div className="flex flex-col items-center">
+                {/* QR code aligned to the right/end */}
+                  <div className="flex flex-col items-end">
                     <QRCodeCanvas
                       value={JSON.stringify({
                         billNumber: bill.billNumber || "0000000000",
@@ -323,9 +353,9 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills }) => 
                         accountNumber: bill.accountNumber || "00-00-0000",
                         amountAfterDue: totalAmountAfterDue.toFixed(2) || "0.00",
                       })}
-                      size={128} // Size of the QR code
-                      level="H" // Error correction level
-                      includeMargin={true} // Include margin around the QR code
+                      size={128}
+                      level="H"
+                      includeMargin={true}
                     />
                     <p className="mt-2 text-sm text-gray-600">Scan to view bill details</p>
                   </div>

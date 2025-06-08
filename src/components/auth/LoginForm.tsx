@@ -67,7 +67,7 @@ const LoginForm = ({
     <Card className="w-full max-w-md mx-auto bg-white shadow-lg">
       <CardHeader className="space-y-1">
         <CardTitle className="text-2xl font-bold text-center text-blue-700">
-          Admin Portal Login
+          Login
         </CardTitle>
         <CardDescription className="text-center">
           Enter your credentials to access the water billing system
@@ -158,7 +158,7 @@ const LoginForm = ({
       </CardContent>
       <CardFooter className="flex flex-col space-y-4 border-t px-6 py-4 bg-gray-50">
         <div className="text-center text-sm text-gray-600">
-          <p>Water Billing Web-App - Admin Portal</p>
+          <p>Water Billing Web-App</p>
           <p className="mt-1 text-xs text-gray-500">
             &copy; {new Date().getFullYear()} Centennial Water Resource Venture Corporation         
             </p>
