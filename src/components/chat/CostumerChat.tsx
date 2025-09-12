@@ -40,6 +40,17 @@ function isImageFile(fileName: string) {
   );
 }
 
+function isVideoFile(fileName: string) {
+  const lower = fileName.toLowerCase();
+  return (
+    lower.endsWith(".mp4") ||
+    lower.endsWith(".webm") ||
+    lower.endsWith(".ogg") ||
+    lower.endsWith(".mov")
+  );
+}
+
+
 function parseFileMessage(message: string) {
   // Format: "File attached: originalFileName|chat_files/timestamp_originalFileName"
   if (!message.startsWith("File attached:")) return null;
@@ -63,6 +74,8 @@ interface CustomerChatProps {
   userRole: "admin" | "staff";
 }
 
+const urlCache = new Map<string, string>();
+
 const CustomerChat: React.FC<CustomerChatProps> = ({
   customerDocId,
   customerName,
@@ -75,6 +88,7 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
   const [loading, setLoading] = useState(true);
   const [fileUrls, setFileUrls] = useState<{ [key: string]: string }>({});
   const lastMessageRef = useRef<HTMLDivElement | null>(null);
+  // Add this outside the component to make it persist across renders
 
   useEffect(() => {
     if (!accountNumber) return;
@@ -99,25 +113,33 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
     return () => unsubscribe();
   }, [accountNumber]);
 
-  useEffect(() => {
-    // Fetch download URLs for file messages
-    const fetchFileUrls = async () => {
-      const urls: { [key: string]: string } = {};
-      for (const msg of messages) {
-        const fileInfo = msg.message && parseFileMessage(msg.message);
-        if (fileInfo && fileInfo.fileId) {
+useEffect(() => {
+  const fetchFileUrls = async () => {
+    const urls: { [key: string]: string } = {};
+    for (const msg of messages) {
+      const fileInfo = msg.message && parseFileMessage(msg.message);
+      if (fileInfo && fileInfo.fileId) {
+        // Check if URL is already cached
+        if (urlCache.has(fileInfo.fileId)) {
+          urls[msg.id] = urlCache.get(fileInfo.fileId)!;
+        } else {
           try {
             const fileRef = ref(storage, fileInfo.fileId);
-            urls[msg.id] = await getDownloadURL(fileRef);
+            const url = await getDownloadURL(fileRef);
+            urlCache.set(fileInfo.fileId, url);
+            urls[msg.id] = url;
           } catch (e) {
-            // Ignore errors for missing files
+            // Handle errors silently
           }
         }
       }
-      setFileUrls(urls);
-    };
-    fetchFileUrls();
-  }, [messages]);
+    }
+    setFileUrls(urls);
+  };
+
+  fetchFileUrls();
+}, [messages]);
+
 
   useEffect(() => {
     if (!loading && messages.length > 0 && lastMessageRef.current) {
@@ -210,29 +232,45 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
                         msg.sender === "admin" ? "bg-blue-100" : "bg-gray-100"
                       }`}
                     >
-                      {fileInfo && fileInfo.fileId ? (
-                        <div>
-                          <a
-                            href={fileUrls[msg.id] || "#"}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ color: "#2563eb", textDecoration: "underline" }}
-                          >
-                            📎 {fileInfo.displayName}
-                          </a>
-                          {isImageFile(fileInfo.displayName) && fileUrls[msg.id] && (
-                            <div className="mt-2">
-                              <img
-                                src={fileUrls[msg.id]}
-                                alt={fileInfo.displayName}
-                                style={{ maxWidth: 200, borderRadius: 8 }}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-sm">{msg.message}</p>
-                      )}
+                    {fileInfo && fileInfo.fileId ? (
+                      <div>
+                        {fileUrls[msg.id] && isImageFile(fileInfo.displayName) && (
+                          <div className="mt-2">
+                            <img
+                              src={fileUrls[msg.id]}
+                              alt={fileInfo.displayName}
+                              style={{ maxWidth: 200, borderRadius: 8 }}
+                            />
+                          </div>
+                        )}
+
+                        {fileUrls[msg.id] && isVideoFile(fileInfo.displayName) && (
+                          <div className="mt-2">
+                            <video
+                              src={fileUrls[msg.id]}
+                              controls
+                              style={{ maxWidth: 300, borderRadius: 8 }}
+                            />
+                          </div>
+                        )}
+
+                        {fileUrls[msg.id] && !isImageFile(fileInfo.displayName) && !isVideoFile(fileInfo.displayName) && (
+                          <div className="mt-2">
+                            <a
+                              href={fileUrls[msg.id]}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ color: "#2563eb", textDecoration: "underline" }}
+                            >
+                              📄 {fileInfo.displayName}
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm">{msg.message}</p>
+                    )}
+
                     </div>
                   </div>
                 );

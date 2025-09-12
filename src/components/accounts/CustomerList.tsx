@@ -103,8 +103,9 @@ const formSchema = z.object({
     .optional(),
 
   phone: z.string()
-    .optional()
-    .refine((val) => !val || (/^0\d{10}$/.test(val)), { message: "Phone must be exactly 11 digits and start with 0" }),
+    .min(11, { message: "Phone must be exactly 11 digits and start with 0" })
+    .max(11, { message: "Phone must be exactly 11 digits and start with 0" })
+    .regex(/^0\d{10}$/, "Phone must be exactly 11 digits and start with 0"),
 
   site: z.string().min(1, { message: "Please select a site location." }),
 

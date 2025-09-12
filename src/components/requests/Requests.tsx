@@ -439,10 +439,18 @@ const exportToXLSX = () => {
   logoRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
   overview.mergeCells(logoRow.number, 1, logoRow.number, 2);
   
-  const titleRow = overview.addRow(['SERVICE REQUESTS REPORT']);
+  // Change title to CWRVC Water Billing App
+  const titleRow = overview.addRow(['CWRVC Water Billing App']);
   applyTitleStyle(titleRow);
   overview.mergeCells(titleRow.number, 1, titleRow.number, 2);
   
+  // Add address row
+  const addressRow = overview.addRow(['Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna']);
+  addressRow.font = { italic: true, size: 13, color: colors.primary };
+  addressRow.alignment = { horizontal: 'center', vertical: 'middle' };
+  overview.mergeCells(addressRow.number, 1, addressRow.number, 2);
+  
+  // Subtitle row (optional, you can keep or update)
   const subtitleRow = overview.addRow(['Comprehensive Analysis of Customer Service Requests']);
   applySubtitleStyle(subtitleRow);
   overview.mergeCells(subtitleRow.number, 1, subtitleRow.number, 2);

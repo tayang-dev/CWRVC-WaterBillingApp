@@ -44,16 +44,110 @@ const AccountsManagement = ({
 
   // ...existing code...
 const handleDownloadTemplate = async () => {
-  // Create a workbook with the correct headers and one sample row
+  // Use the same color constants as exportToExcel
+  const EXCEL_BLUE_HEADER = "4472C4";
+  const EXCEL_DARK_BLUE = "1F4E79";
+  const EXCEL_LIGHT_BLUE = "E6F2FF";
+  const EXCEL_VERY_LIGHT_BLUE = "F0F8FF";
+
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Sheet1");
-  sheet.addRow([
-    "Account Number", "First Name", "Last Name", "Middle Initial", "Email/Contact",
-    "Phone Number", "Site", "Senior Citizen", "Block", "Lot", "Meter Number"
-  ]);
-  sheet.addRow([
+  workbook.creator = "Water Billing System";
+  workbook.lastModifiedBy = "Water Billing System";
+  workbook.created = new Date();
+  workbook.modified = new Date();
+  workbook.properties.date1904 = false;
+
+  workbook.title = "Customer Import Template";
+  workbook.subject = "Customer Data Import";
+  workbook.keywords = "water billing, customers, import, template";
+  workbook.category = "Templates";
+
+  // Create worksheet with styled tab
+  const sheet = workbook.addWorksheet("Customer Import Template", {
+    properties: { tabColor: { argb: `FF${EXCEL_BLUE_HEADER}` } }
+  });
+
+  // Set column widths and headers
+  const columns = [
+    { header: "Account Number", width: 15 },
+    { header: "First Name", width: 15 },
+    { header: "Last Name", width: 15 },
+    { header: "Middle Initial", width: 10 },
+    { header: "Email/Contact", width: 25 },
+    { header: "Phone Number", width: 15 },
+    { header: "Site", width: 10 },
+    { header: "Senior Citizen", width: 12 },
+    { header: "Block", width: 8 },
+    { header: "Lot", width: 8 },
+    { header: "Meter Number", width: 15 }
+  ];
+  sheet.columns = columns;
+
+  // Header row (row 1) - styled
+  const headerRow = sheet.getRow(1);
+  headerRow.values = columns.map(col => col.header);
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  headerRow.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: `FF${EXCEL_BLUE_HEADER}` }
+  };
+  headerRow.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  headerRow.height = 18;
+  headerRow.eachCell((cell) => {
+    cell.border = {
+      top: { style: "thin" },
+      bottom: { style: "thin" },
+      left: { style: "thin" },
+      right: { style: "thin" }
+    };
+  });
+
+  // Sample data row (row 2) - styled
+  const sampleRow = sheet.addRow([
     "21-12-2156", "Analiza", "De Castro", "L", "", "09970754514", "site3", "Yes", "21", "56", "13343711"
   ]);
+  sampleRow.font = { color: { argb: "FF555555" } };
+  sampleRow.alignment = { horizontal: "center", vertical: "middle" };
+  sampleRow.eachCell((cell) => {
+    cell.border = {
+      top: { style: "thin" },
+      bottom: { style: "thin" },
+      left: { style: "thin" },
+      right: { style: "thin" }
+    };
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: `FF${EXCEL_VERY_LIGHT_BLUE}` }
+    };
+  });
+
+  // Add some empty rows with borders for user to fill
+  for (let i = 3; i <= 12; i++) {
+    const emptyRow = sheet.getRow(i);
+    emptyRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      if (colNumber <= columns.length) {
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFE0E0E0" } },
+          bottom: { style: "thin", color: { argb: "FFE0E0E0" } },
+          left: { style: "thin", color: { argb: "FFE0E0E0" } },
+          right: { style: "thin", color: { argb: "FFE0E0E0" } }
+        };
+      }
+    });
+  }
+
+  // Freeze the header row
+  sheet.views = [{ state: 'frozen', xSplit: 0, ySplit: 1 }];
+
+  // Auto-filter on header row
+  sheet.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: 1, column: columns.length }
+  };
+
+  // Download the file
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   saveAs(blob, "customer_import_template.xlsx");
@@ -297,9 +391,9 @@ const handleImportCustomers = async (event: React.ChangeEvent<HTMLInputElement>)
     ];
     
     // Add cover sheet content
-    coverSheet.addRow(['WATER BILLING SYSTEM']);
+    coverSheet.addRow(['CWRVC Water Billing App']); // Changed title
     coverSheet.addRow(['CUSTOMER DATA REPORT']);
-    coverSheet.addRow(['']);
+    coverSheet.addRow(['Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna']); // Added address
     coverSheet.addRow([`Generated on: ${new Date().toLocaleString()}`]);
     coverSheet.addRow([`Total Records: ${data.length}`]);
     coverSheet.addRow(['']);
@@ -309,10 +403,12 @@ const handleImportCustomers = async (event: React.ChangeEvent<HTMLInputElement>)
     // Merge cells for title rows and other centered content
     coverSheet.mergeCells('A1:F1'); // Title
     coverSheet.mergeCells('A2:F2'); // Subtitle
+    coverSheet.mergeCells('A3:F3'); // Address
     coverSheet.mergeCells('A4:F4'); // Date
     coverSheet.mergeCells('A5:F5'); // Record count
     coverSheet.mergeCells('A7:F7'); // Description
     coverSheet.mergeCells('A8:F8'); // Contact info
+    
     
     // Style title row
     const titleRow = coverSheet.getRow(1);

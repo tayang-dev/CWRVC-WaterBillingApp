@@ -60,8 +60,9 @@ const formSchema = z.object({
     .optional(),
 
   phone: z.string()
-    .optional()
-    .refine((val) => !val || (/^0\d{10}$/.test(val)), { message: "Phone must be exactly 11 digits and start with 0" }),
+    .min(11, { message: "Phone must be exactly 11 digits and start with 0" })
+    .max(11, { message: "Phone must be exactly 11 digits and start with 0" })
+    .regex(/^0\d{10}$/, "Phone must be exactly 11 digits and start with 0"),
 
   site: z.string().min(1, { message: "Please select a site location." }),
 
@@ -271,6 +272,32 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
       };
   
       await addDoc(collection(db, "customers"), customerData);
+
+          // Send credentials email if email is provided
+    if (data.email) {
+      await fetch("https://us-central1-waterapp-ac2a4.cloudfunctions.net/sendReceiptEmail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: data.email,
+          subject: "Your CWRVC Water Billing App Login Credentials",
+          body: `
+            <p>Dear ${fullName},</p>
+            <p>Welcome to the CWRVC Water Billing App!</p>
+            <p>Your login credentials are as follows:</p>
+            <ul>
+              <li><strong>Username:</strong> ${data.email}</li>
+              <li><strong>Password:</strong> ${generatedAccountNumber}</li>
+            </ul>
+            <p>For your security, we highly recommend changing your password after your first login.</p>
+            <p>If you have any questions, please contact our support team.</p>
+            <br>
+            <p>Best regards,<br>CWRVC Water Billing Team</p>
+          `,
+        }),
+      });
+    }
+
       onSubmit({ ...data, accountNumber: generatedAccountNumber });
       form.reset();
       setGeneratedAccountNumber("");
@@ -335,7 +362,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
                 name="phone"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Phone Number</FormLabel>
+                    <FormLabel>Phone Number <span className="text-red-500">*</span></FormLabel>
                     <FormControl>
                       <Input
                         placeholder="09123456789"

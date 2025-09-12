@@ -317,7 +317,7 @@ const handleCreateCashReceipt = async () => {
       accountNumber: selectedCashCustomer.accountNumber,
       customerId: selectedCashCustomer.id,
       customerName: selectedCashCustomer.name,
-      amount: parseFloat(cashAmount),
+      amount: cashAmount,
       paymentDate: cashPaymentDate,
       paymentMethod: "Cash",
       referenceNumber: cashReferenceNumber,
@@ -332,14 +332,14 @@ await addDoc(collection(db, "paymentVerifications"), paymentData);
 const updatedPaymentsRef = doc(db, "updatedPayments", selectedCashCustomer.accountNumber);
 const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
 const prevPaymentsAmount = parseFloat(updatedPaymentsSnap?.data()?.amount ?? 0);
-const newUpdatedAmount = Math.max(0, prevPaymentsAmount - parseFloat(cashAmount));
+const newUpdatedAmount = Math.max(0, prevPaymentsAmount - cashAmount);
 await updateDoc(updatedPaymentsRef, { amount: newUpdatedAmount, customerId: selectedCashCustomer.id });
 
 // Optionally, update bills as in handleVerifyPayment if needed
 
 setIsCashReceiptDialogOpen(false);
 setSelectedCashCustomer(null);
-setCashAmount("");
+setCashAmount(0);
 setCashPaymentDate(formatPaymentDate(new Date()));
 setCashReferenceNumber(generateReferenceNumber());
 alert("Cash receipt created and verified successfully!");
@@ -406,7 +406,7 @@ const itemsPerPage = 10; // Number of items per page
   // Add state for cash payment dialog
   const [isCashReceiptDialogOpen, setIsCashReceiptDialogOpen] = useState(false);
   const [selectedCashCustomer, setSelectedCashCustomer] = useState<Customer | null>(null);
-  const [cashAmount, setCashAmount] = useState("");
+  const [cashAmount, setCashAmount] = useState<number>(0);
   const [cashPaymentDate, setCashPaymentDate] = useState(formatPaymentDate(new Date()));
   const [cashReferenceNumber, setCashReferenceNumber] = useState(generateReferenceNumber());
   const [cashProcessing, setCashProcessing] = useState(false);
@@ -684,54 +684,90 @@ useEffect(() => {
     }
   };
 
-  const fetchCustomers = async () => {
-    try {
-      const { collection, onSnapshot } = await import("firebase/firestore");
-      const { db } = await import("../../lib/firebase");
-      const customersCollection = collection(db, "customers");
-      const updatedPaymentsCollection = collection(db, "updatedPayments");
+const fetchCustomers = async () => {
+  try {
+    const { collection, onSnapshot, getDocs, query, where } = await import("firebase/firestore");
+    const { db } = await import("../../lib/firebase");
+    const customersCollection = collection(db, "customers");
+    const updatedPaymentsCollection = collection(db, "updatedPayments");
 
-      let customersData: Customer[] = [];
-      let updatedPaymentsMap = new Map<string, number>();
+    let customersData: Customer[] = [];
+    let updatedPaymentsMap = new Map<string, number>();
 
-      const unsubscribeCustomers = onSnapshot(customersCollection, (snapshot) => {
-        customersData = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...(doc.data() as Customer),
-          amountDue: 0,
-        }));
-        customersData.forEach((customer) => {
-          const acct = customer.accountNumber;
-          if (acct) {
-            customer.amountDue = updatedPaymentsMap.get(acct) || 0;
+    const unsubscribeCustomers = onSnapshot(customersCollection, async (snapshot) => {
+      customersData = await Promise.all(snapshot.docs.map(async (doc) => {
+        const customer = { id: doc.id, ...(doc.data() as Customer), amountDue: 0, pendingBills: [] as any[] };
+        // Fetch bills for this customer
+        const billsRef = collection(db, "bills", customer.accountNumber, "records");
+        const billsSnapshot = await getDocs(billsRef);
+
+        let totalPenalty = 0;
+        let totalAmountDue = 0;
+        let pendingBills: any[] = [];
+
+        billsSnapshot.docs.forEach((billDoc) => {
+          const bill = billDoc.data();
+          // Include both "pending" and "partially paid" bills
+          if (
+            (bill.status === "pending" || bill.status === "partially paid") &&
+            parseFloat(bill.amount) > 0
+          ) {
+            // Parse due date (dd/mm/yyyy)
+            let isOverdue = false;
+            if (bill.dueDate) {
+              const [day, month, year] = bill.dueDate.split("/").map(Number);
+              const dueDateObj = new Date(year, month - 1, day);
+              const now = new Date();
+              if (dueDateObj < now) {
+                isOverdue = true;
+                totalPenalty += parseFloat(bill.penalty || 0);
+              }
+            }
+            totalAmountDue += parseFloat(bill.amount) || 0;
+            pendingBills.push({
+              id: billDoc.id,
+              billNumber: bill.billNumber,
+              dueDate: bill.dueDate,
+              amount: bill.amount,
+              penalty: bill.penalty || 0,
+              isOverdue,
+              status: bill.status,
+              description: bill.description,
+            });
           }
         });
-        setCustomers(customersData);
-      });
 
-      const unsubscribeUpdatedPayments = onSnapshot(updatedPaymentsCollection, (snapshot) => {
-        updatedPaymentsMap = new Map();
-        snapshot.docs.forEach((doc) => {
-          const data = doc.data();
-          updatedPaymentsMap.set(doc.id, data.amount || 0);
-        });
-        customersData.forEach((customer) => {
-          const acct = customer.accountNumber;
-          if (acct) {
-            customer.amountDue = updatedPaymentsMap.get(acct) || 0;
-          }
-        });
-        setCustomers(customersData);
-      });
+        customer.amountDue = Number(totalAmountDue) + Number(totalPenalty);
+        customer.pendingBills = pendingBills;
+        return customer;
+      }));
 
-      return () => {
-        unsubscribeCustomers();
-        unsubscribeUpdatedPayments();
-      };
-    } catch (error) {
-      console.error("Error fetching customers and updated payments:", error);
-    }
-  };
+      setCustomers(customersData);
+    });
+
+    const unsubscribeUpdatedPayments = onSnapshot(updatedPaymentsCollection, (snapshot) => {
+      updatedPaymentsMap = new Map();
+      snapshot.docs.forEach((doc) => {
+        const data = doc.data();
+        updatedPaymentsMap.set(doc.id, data.amount || 0);
+      });
+      customersData.forEach((customer) => {
+        const acct = customer.accountNumber;
+        if (acct) {
+          // amountDue is already set above using bills logic
+        }
+      });
+      setCustomers(customersData);
+    });
+
+    return () => {
+      unsubscribeCustomers();
+      unsubscribeUpdatedPayments();
+    };
+  } catch (error) {
+    console.error("Error fetching customers and updated payments:", error);
+  }
+};
 
   const handleAddMethod = async () => {
     try {
@@ -2355,7 +2391,7 @@ const handleExportPaymentHistory = async () => {
                                   size="sm"
                                   onClick={() => {
                                     setSelectedCashCustomer(customer);
-                                    setCashAmount(customer.amountDue > 0 ? customer.amountDue.toString() : "");
+                                    setCashAmount(customer.amountDue > 0 ? customer.amountDue : 0);
                                     setCashPaymentDate(formatPaymentDate(new Date()));
                                     setCashReferenceNumber(generateReferenceNumber());
                                     setIsCashReceiptDialogOpen(true);
@@ -2426,7 +2462,7 @@ const handleExportPaymentHistory = async () => {
                     <Label>Amount</Label>
                     <Input
                       value={cashAmount}
-                      onChange={(e) => setCashAmount(e.target.value)}
+                      onChange={(e) => setCashAmount(Number(e.target.value))}
                       type="number"
                       min="0"
                     />
@@ -2461,12 +2497,12 @@ const handleExportPaymentHistory = async () => {
                         const { db } = await import("../../lib/firebase");
 
                         // Prepare payment verification data (already verified)
-                        const paymentAmount = parseFloat(cashAmount);
+                        
                         const paymentVerification = {
                           accountNumber: selectedCashCustomer.accountNumber,
                           customerId: selectedCashCustomer.id,
                           customerName: selectedCashCustomer.name,
-                          amount: paymentAmount,
+                          amount: cashAmount,
                           paymentDate: cashPaymentDate,
                           paymentMethod: "Cash",
                           referenceNumber: cashReferenceNumber,
@@ -2485,7 +2521,7 @@ const handleExportPaymentHistory = async () => {
                         const updatedPaymentsRef = doc(db, "updatedPayments", selectedCashCustomer.accountNumber);
                         const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
                         const prevPaymentsAmount = parseFloat(updatedPaymentsSnap?.data()?.amount ?? 0);
-                        const newUpdatedAmount = Math.max(0, prevPaymentsAmount - paymentAmount);
+                        const newUpdatedAmount = Math.max(0, prevPaymentsAmount - cashAmount);
                         await updateDoc(updatedPaymentsRef, { amount: newUpdatedAmount, customerId: selectedCashCustomer.id });
 
                         // --- Apply payment to bills (like handleVerifyPayment) ---
@@ -2515,7 +2551,7 @@ const handleExportPaymentHistory = async () => {
                             };
                           });
 
-                        let remainingPayment = paymentAmount;
+                        let remainingPayment = cashAmount;
                         let currentBillPaid = null;
 
                         for (const bill of pendingBills) {
@@ -2606,7 +2642,7 @@ const handleExportPaymentHistory = async () => {
 
                         setIsCashReceiptDialogOpen(false);
                         setSelectedCashCustomer(null);
-                        setCashAmount("");
+                        setCashAmount(0);
                         setCashPaymentDate(formatPaymentDate(new Date()));
                         setCashReferenceNumber(generateReferenceNumber());
                         alert("Cash receipt created, verified, and applied to bills successfully!");

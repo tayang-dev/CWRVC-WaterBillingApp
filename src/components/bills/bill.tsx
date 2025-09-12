@@ -350,68 +350,69 @@ const calculateBillingPeriodFromDueDate = (dueDateStr: string): string => {
     }
   };
 
-  const calculateBillAmount = (usage: number, isSenior: boolean = false) => {
-    let total = 0;
-  
-    if (usage > 0) {
-      // First tier: 1-10 cubic meters
-      const tier1 = Math.min(usage, 10);
-      total += tier1 * 19.1;
-      usage -= tier1;
-  
-      if (usage > 0) {
-        // Second tier: 11-20 cubic meters
-        const tier2 = Math.min(usage, 10);
-        total += tier2 * 21.1;
-        usage -= tier2;
-      }
-  
-      if (usage > 0) {
-        // Third tier: 21-30 cubic meters
-        const tier3 = Math.min(usage, 10);
-        total += tier3 * 23.1;
-        usage -= tier3;
-      }
-  
-      if (usage > 0) {
-        // Fourth tier: 31-40 cubic meters
-        const tier4 = Math.min(usage, 10);
-        total += tier4 * 25.1;
-        usage -= tier4;
-      }
-  
-      if (usage > 0) {
-        // Fifth tier: 41-50 cubic meters
-        const tier5 = Math.min(usage, 10);
-        total += tier5 * 27.1;
-        usage -= tier5;
-      }
-  
-      if (usage > 0) {
-        // Sixth tier: 51+ cubic meters
-        total += usage * 29.1;
-      }
-  
-      // Apply minimum charge
-      if (total < 191) {
-        total = 191;
-      }
+const calculateBillAmount = (usage: number, isSenior: boolean = false) => {
+  let total = 0;
+  let remaining = usage;
+
+  // 0-5 units: ₱0.00 per unit, but minimum charge ₱94.70
+  if (remaining > 0) {
+    if (usage <= 5) {
+      total = Math.max(usage * 0, 94.70);
+      remaining = 0;
+    } else {
+      total += 94.70; // Always add minimum charge for first 5 units
+      remaining -= 5;
     }
-  
-    const tax = total * billingData.taxRate;
-    const discount = isSenior ? total * billingData.seniorDiscountRate : 0;
-    const totalBeforePenalty = total + tax - discount;
-    const penalty = totalBeforePenalty * billingData.penaltyRate;
-    const totalAmountDue = totalBeforePenalty;
-  
-    return {
-      waterCharge: total,
-      tax,
-      discount,
-      penalty,
-      totalAmountDue,
-    };
+  }
+
+  // 6-10 units: ₱20.70 per unit
+  if (remaining > 0) {
+    const tier2 = Math.min(remaining, 5);
+    total += tier2 * 20.70;
+    remaining -= tier2;
+  }
+
+  // 11-20 units: ₱22.50 per unit
+  if (remaining > 0) {
+    const tier3 = Math.min(remaining, 10);
+    total += tier3 * 22.50;
+    remaining -= tier3;
+  }
+
+  // 21-30 units: ₱24.40 per unit
+  if (remaining > 0) {
+    const tier4 = Math.min(remaining, 10);
+    total += tier4 * 24.40;
+    remaining -= tier4;
+  }
+
+  // 31-40 units: ₱26.30 per unit
+  if (remaining > 0) {
+    const tier5 = Math.min(remaining, 10);
+    total += tier5 * 26.30;
+    remaining -= tier5;
+  }
+
+  // 41+ units: ₱28.10 per unit
+  if (remaining > 0) {
+    total += remaining * 28.10;
+  }
+
+  // Tax, discount, penalty
+  const tax = total * billingData.taxRate;
+  const discount = isSenior ? total * billingData.seniorDiscountRate : 0;
+  const totalBeforePenalty = total + tax - discount;
+  const penalty = totalBeforePenalty * billingData.penaltyRate;
+  const totalAmountDue = totalBeforePenalty;
+
+  return {
+    waterCharge: total,
+    tax,
+    discount,
+    penalty,
+    totalAmountDue,
   };
+};
 
   const createBillData = (
     customer: Customer, 
@@ -907,46 +908,80 @@ const handleCreateBills = async (readings: MeterReading[]) => {
   
 
   // View Bills Tab Functionality
-  const fetchBillsData = async () => {
-    setLoadingState("loading");
-    try {
-      const paymentsSnapshot = await getDocs(collection(db, "updatedPayments"));
-  
-      const paymentsData = await Promise.allSettled(
-        paymentsSnapshot.docs.map(async (paymentDoc) => {
-          const accountNumber = paymentDoc.id;
-          const paymentData = paymentDoc.data();
-  
-          const customerId = paymentData.customerId;
-  
-          const customerRef = doc(db, "customers", customerId);
-          const customerSnap = await getDoc(customerRef);
-          const customerData = customerSnap.exists() ? customerSnap.data() : null;
-  
-          return {
-            accountNumber,
-            name: customerData ? `${customerData.firstName} ${customerData.lastName}` : "Unknown",
-            email: customerData?.email || customerData?.phone || "N/A",
-            totalAmountDue: paymentData.amount || 0,
-            status: paymentData.status || "unknown",
-            site: customerData?.site || "", // <-- Add this line to include site!
-            isSenior: customerData?.isSenior || false, // Optional: for senior filtering
-          };
-        })
-      );
-  
-      const finalData = paymentsData
-        .filter((res) => res.status === "fulfilled" && res.value !== null)
-        .map((res) => (res as PromiseFulfilledResult<any>).value);
-  
-      setBills(finalData);
-      setLoadingState("success");
-    } catch (err) {
-      console.error("Error fetching bills data:", err);
-      setLoadingState("error");
-      showNotification("Failed to load bills data.", "error");
-    }
-  };
+  // ...existing code...
+const fetchBillsData = async () => {
+  setLoadingState("loading");
+  try {
+    const paymentsSnapshot = await getDocs(collection(db, "updatedPayments"));
+
+    const paymentsData = await Promise.allSettled(
+      paymentsSnapshot.docs.map(async (paymentDoc) => {
+        const accountNumber = paymentDoc.id;
+        const paymentData = paymentDoc.data();
+
+        const customerId = paymentData.customerId;
+
+        const customerRef = doc(db, "customers", customerId);
+        const customerSnap = await getDoc(customerRef);
+        const customerData = customerSnap.exists() ? customerSnap.data() : null;
+
+        // Fetch all bills for this account
+        const billsRef = collection(db, "bills", accountNumber, "records");
+        const billsSnapshot = await getDocs(billsRef);
+
+        let totalPenalty = 0;
+        let totalAmountDue = 0;
+
+        billsSnapshot.docs.forEach((billDoc) => {
+          const bill = billDoc.data();
+          // Include both "pending" and "partially paid" bills
+          if (
+            (bill.status === "pending" || bill.status === "partially paid") &&
+            parseFloat(bill.amount) > 0
+          ) {
+            // Parse due date (dd/mm/yyyy)
+            let isOverdue = false;
+            if (bill.dueDate) {
+              const [day, month, year] = bill.dueDate.split("/").map(Number);
+              const dueDateObj = new Date(year, month - 1, day);
+              const now = new Date();
+              if (dueDateObj < now) {
+                isOverdue = true;
+                totalPenalty += parseFloat(bill.penalty || 0);
+              }
+            }
+            totalAmountDue += parseFloat(bill.amount) || 0;
+          }
+        });
+
+        // Add penalty to total amount due
+        const totalDueWithPenalty = Number(totalAmountDue) + Number(totalPenalty);
+
+        return {
+          accountNumber,
+          name: customerData ? `${customerData.firstName} ${customerData.lastName}` : "Unknown",
+          email: customerData?.email || customerData?.phone || "N/A",
+          totalAmountDue: totalDueWithPenalty,
+          status: paymentData.status || "unknown",
+          site: customerData?.site || "",
+          isSenior: customerData?.isSenior || false,
+        };
+      })
+    );
+
+    const finalData = paymentsData
+      .filter((res) => res.status === "fulfilled" && res.value !== null)
+      .map((res) => (res as PromiseFulfilledResult<any>).value);
+
+    setBills(finalData);
+    setLoadingState("success");
+  } catch (err) {
+    console.error("Error fetching bills data:", err);
+    setLoadingState("error");
+    showNotification("Failed to load bills data.", "error");
+  }
+};
+// ...existing code...
   
   const handlePrintAllReceipts = async (printFilterMonth?: string,printFilterYear?: string, filterSite?: string) => {
 
@@ -969,7 +1004,10 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           const due = doc.data().dueDate; // format: dd/mm/yyyy
           if (!due) return false;
           const [day, month, year] = due.split("/");
-          return month === printFilterMonth && year === printFilterYear;
+          // Fix: Allow "all" for month or year
+          const monthMatch = printFilterMonth === "all" || month === printFilterMonth;
+          const yearMatch = printFilterYear === "all" || year === printFilterYear;
+          return monthMatch && yearMatch;
         });
         console.log("Formatted filter due date:", printFilterDueDate);
         console.log("Bill due date sample:", filteredDocs[0]?.data().dueDate);
@@ -1031,38 +1069,55 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
       };
     };
       // Helper function to calculate default rates if not available
-      function calculateDefaultRates(usage) {
-        const rates = [];
-        let remainingUsage = usage;
-      
-        const tiers = [
-          { min: 1, max: 10, rate: 19.10 },
-          { min: 11, max: 20, rate: 21.10 },
-          { min: 21, max: 30, rate: 23.10 },
-          { min: 31, max: 40, rate: 25.10 },
-          { min: 41, max: 50, rate: 27.10 },
-          { min: 51, max: "above", rate: 29.10 },
-        ];
-      
-        for (let i = 0; i < tiers.length; i++) {
-          const tier = tiers[i];
-          const tierUsage = typeof tier.max === "number" ? Math.min(remainingUsage, tier.max - tier.min + 1) : remainingUsage;
-      
-          if (tierUsage <= 0) break;
-      
-          rates.push({
-            min: tier.min,
-            max: tier.max,
-            rate: tier.rate,
-            usage: tierUsage,
-            amount: parseFloat((tierUsage * tier.rate).toFixed(2)),
-          });
-      
-          remainingUsage -= tierUsage;
-        }
-      
-        return rates;
-      }
+// ...existing code...
+function calculateDefaultRates(usage) {
+  const rates = [];
+  let remainingUsage = usage;
+
+  const tiers = [
+    { min: 0, max: 5, rate: 0.00 },
+    { min: 6, max: 10, rate: 20.70 },
+    { min: 11, max: 20, rate: 22.50 },
+    { min: 21, max: 30, rate: 24.40 },
+    { min: 31, max: 40, rate: 26.30 },
+    { min: 41, max: "above", rate: 28.10 },
+  ];
+
+  // Minimum charge for 0-5 units
+  if (usage <= 5) {
+    rates.push({
+      min: 0,
+      max: 5,
+      rate: 0.00,
+      usage: usage,
+      amount: Math.max(usage * 0.00, 94.70),
+    });
+    return rates;
+  }
+
+for (let i = 0; i < tiers.length; i++) {
+  const tier = tiers[i];
+  const tierMin = tier.min;
+  // Fix: Ensure tierMax is always a number for arithmetic
+  const tierMax = tier.max === "above" ? Infinity : Number(tier.max);
+  const tierCapacity = tierMax === Infinity ? remainingUsage : Math.min(remainingUsage, tierMax - tierMin + 1);
+
+  if (usage >= tierMin && tierCapacity > 0) {
+    rates.push({
+      min: tierMin,
+      max: tier.max,
+      rate: tier.rate,
+      usage: tierCapacity,
+      amount: parseFloat((tierCapacity * tier.rate).toFixed(2)),
+    });
+    remainingUsage -= tierCapacity;
+  }
+  if (remainingUsage <= 0) break;
+}
+
+  return rates;
+}
+// ...existing code...
       
   
       // Create PDF document - landscape for better layout
@@ -1108,14 +1163,40 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
       };
       
       // For each bill
+      // Track which customers have already had their credentials printed
+      const printedCredentialsAccounts = new Set();
+
       for (let i = 0; i < filteredBills.length; i++) {
+        if (i > 0) pdf.addPage(); // <-- Add this line
         const bill = filteredBills[i];
-        
-        // Add new page if not the first bill
-        if (i > 0) {
-          pdf.addPage();
-        }
-        
+
+        // ...inside handlePrintAllReceipts, before drawing each bill...
+
+// Fetch all bills for this account (you can cache this for performance)
+const allBillsForAccount = filteredDocs
+  .filter(d => d.data().accountNumber === bill.accountNumber)
+  .map(d => ({
+    dueDate: d.data().dueDate,
+    billNumber: d.data().billNumber,
+    id: d.id
+  }));
+
+// Find the earliest bill (by dueDate or billNumber)
+const isEarliestBill = (() => {
+  if (allBillsForAccount.length === 0) return false;
+  // Compare by dueDate (format: dd/mm/yyyy)
+  const sorted = [...allBillsForAccount].sort((a, b) => {
+    const [da, ma, ya] = a.dueDate.split("/").map(Number);
+    const [db, mb, yb] = b.dueDate.split("/").map(Number);
+    const dateA = new Date(ya, ma - 1, da);
+    const dateB = new Date(yb, mb - 1, db);
+    return dateA.getTime() - dateB.getTime();
+  });
+  return sorted[0].id === bill.id;
+})();
+
+const showLoginCredentials = isEarliestBill;
+
         // Get page dimensions
         const pageWidth = pdf.internal.pageSize.getWidth();
         const pageHeight = pdf.internal.pageSize.getHeight();
@@ -1610,45 +1691,47 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
         const rightX = marginX + leftColWidth + colGap;
         const rightY = sectionTopY;
 
-        // Set sizes
-        // const qrCodeSize = 20; // Removed redeclaration to avoid block-scoped variable error
         const credentialsBoxWidth = rightColWidth;
         const credentialsBoxHeight = 32;
 
-        // Draw background block for credentials + QR code
-        pdf.setFillColor(245, 245, 245);
-        pdf.rect(rightX - 3, rightY, credentialsBoxWidth, credentialsBoxHeight, 'F');
+        if (showLoginCredentials) {
+          // Draw background block for credentials + QR code
+          pdf.setFillColor(245, 245, 245);
+          pdf.rect(rightX - 3, rightY, credentialsBoxWidth, credentialsBoxHeight, 'F');
 
-        // --- Draw login credentials (left side of box) ---
-        const credentialsPadding = 4;
-        const credentialsTextX = rightX + credentialsPadding;
-        const credentialsTextY = rightY + 6;
-        const qrCodeMargin = 6;
+          // --- Draw login credentials (left side of box) ---
+          const credentialsPadding = 4;
+          const credentialsTextX = rightX + credentialsPadding;
+          const credentialsTextY = rightY + 6;
+          const qrCodeMargin = 6;
 
-        // Text
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(9);
-        pdf.text("INITIAL LOGIN CREDENTIALS", credentialsTextX, credentialsTextY);
+          // Text
+          pdf.setFont("helvetica", "bold");
+          pdf.setFontSize(9);
+          pdf.text("INITIAL LOGIN CREDENTIALS", credentialsTextX, credentialsTextY);
 
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(8);
-        pdf.text(`username: ${login.username}`, credentialsTextX, credentialsTextY + 6);
-        pdf.text(`password: ${login.password}`, credentialsTextX, credentialsTextY + 11);
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(8);
+          pdf.text(`username: ${login.username}`, credentialsTextX, credentialsTextY + 6);
+          pdf.text(`password: ${login.password}`, credentialsTextX, credentialsTextY + 11);
 
-        pdf.setFontSize(7);
-        pdf.setTextColor(120);
-        pdf.text("Please change your password after \nyour first login.", credentialsTextX, credentialsTextY + 16);
+          pdf.setFontSize(7);
+          pdf.setTextColor(120);
+          pdf.text("Please change your password after \nyour first login.", credentialsTextX, credentialsTextY + 16);
 
-        // --- Draw QR code (right side of box, vertically centered) ---
-        pdf.setTextColor(0, 0, 0); // Reset text color
+          // --- Draw QR code (right side of box, vertically centered) ---
+          pdf.setTextColor(0, 0, 0); // Reset text color
 
-        const qrCodeX = rightX + credentialsBoxWidth - qrCodeSize - qrCodeMargin;
-        const qrCodeY = rightY + (credentialsBoxHeight - qrCodeSize) / 2;
+          const qrCodeX = rightX + credentialsBoxWidth - qrCodeSize - qrCodeMargin;
+          const qrCodeY = rightY + (credentialsBoxHeight - qrCodeSize) / 2;
 
-        pdf.addImage(qrCodeBase64, "PNG", qrCodeX, qrCodeY, qrCodeSize, qrCodeSize);
-
-
-
+          pdf.addImage(qrCodeBase64, "PNG", qrCodeX, qrCodeY, qrCodeSize, qrCodeSize);
+        } else {
+          // Only show QR code (no credentials)
+          const qrCodeX = rightX + (credentialsBoxWidth - qrCodeSize) / 2;
+          const qrCodeY = rightY + (credentialsBoxHeight - qrCodeSize) / 2;
+          pdf.addImage(qrCodeBase64, "PNG", qrCodeX, qrCodeY, qrCodeSize, qrCodeSize);
+        }
 
       }
       console.log("Saving PDF with", filteredBills.length, "bills");
@@ -1714,62 +1797,69 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
   };
   
   // Calculate water rate tiers
-  function calculateTiers(waterUsage) {
-    if (!waterUsage || waterUsage <= 0) return [];
-    
-    // Define the tiers
-    const tiers = [
-      { min: 1, max: 10, rate: 19.1 },
-      { min: 11, max: 20, rate: 21.1 },
-      { min: 21, max: 30, rate: 23.1 },
-      { min: 31, max: 40, rate: 25.1 },
-      { min: 41, max: 50, rate: 27.1 },
-      { min: 51, max: null, rate: 29.1 }
-    ];
-    
-    let activeTiers = [];
-    let remainingUsage = waterUsage;
-    
-    // Special case for minimum consumption (1-10 cubic meters)
-    if (waterUsage <= 10) {
-      return [{
-        min: 0,
-        max: 10,
-        rate: 19.1,
-        usage: waterUsage,
-        amount: 191.00 // Minimum charge
-      }];
-    }
-    
-    // Calculate tiered usage
-    for (const tier of tiers) {
-      if (remainingUsage <= 0) break;
-      
-      if (waterUsage >= tier.min) {
-        const tierMax = tier.max || Infinity;
-        const usageInTier = Math.min(
-          remainingUsage,
-          tierMax - tier.min + 1
-        );
-        
-        if (usageInTier > 0) {
-          const tierAmount = usageInTier * tier.rate;
-          
-          activeTiers.push({
-            min: tier.min,
-            max: tier.max,
-            rate: tier.rate,
-            usage: usageInTier,
-            amount: tierAmount
-          });
-          
-          remainingUsage -= usageInTier;
-        }
-      }
-    }
-    
+function calculateTiers(waterUsage) {
+  if (!waterUsage || waterUsage <= 0) return [];
+
+  const tiers = [
+    { min: 0, max: 5, rate: 0.00 },
+    { min: 6, max: 10, rate: 20.70 },
+    { min: 11, max: 20, rate: 22.50 },
+    { min: 21, max: 30, rate: 24.40 },
+    { min: 31, max: 40, rate: 26.30 },
+    { min: 41, max: Infinity, rate: 28.10 },
+  ];
+
+  let remainingUsage = waterUsage;
+  let activeTiers = [];
+
+  // Always show 5 units and minimum charge for first tier
+  if (waterUsage <= 5) {
+    activeTiers.push({
+      min: 0,
+      max: 5,
+      rate: 0.00,
+      usage: waterUsage,
+      amount: 94.70,
+    });
     return activeTiers;
+  } else {
+    activeTiers.push({
+      min: 0,
+      max: 5,
+      rate: 0.00,
+      usage: 5,
+      amount: 94.70,
+    });
+    remainingUsage -= 5;
   }
+
+  // Distribute remaining usage to other tiers
+  for (let i = 1; i < tiers.length && remainingUsage > 0; i++) {
+    const tierMin = tiers[i].min;
+    const tierMax = tiers[i].max;
+    const tierRange = tierMax === Infinity ? remainingUsage : tierMax - tierMin + 1;
+    const tierUsage = Math.min(remainingUsage, tierRange);
+
+    if (tierUsage > 0) {
+      activeTiers.push({
+        min: tierMin,
+        max: tierMax === Infinity ? "over" : tierMax,
+        rate: tiers[i].rate,
+        usage: tierUsage,
+        amount: parseFloat((tierUsage * tiers[i].rate).toFixed(2)),
+      });
+      remainingUsage -= tierUsage;
+    }
+  }
+
+  return activeTiers;
+}
+
+function calculateDefaultRates(usage) {
+  return calculateTiers(usage);
+}
+
+
 
 // Define TypeScript interfaces for our data
 interface BillData {
@@ -2434,7 +2524,7 @@ const filteredBills = bills.filter((bill) => {
           </div>
 
           <div className="bg-white rounded-lg shadow p-6 mb-6 border border-gray-200">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
               <div className="flex flex-col md:flex-row gap-4">
                 <div className="flex items-center gap-2">
                   <Filter className="h-4 w-4 text-gray-500" />
@@ -2617,38 +2707,53 @@ const filteredBills = bills.filter((bill) => {
                     <DialogHeader>
                       <DialogTitle>Filter Bills to Print</DialogTitle>
                       <DialogDescription>Print all bills for the selected month and year.</DialogDescription>
-                  
                     </DialogHeader>
                     <div className="space-y-4">
-                    <div>
-                  <Label>Month</Label>
-                  <Select value={printFilterMonth} onValueChange={setPrintFilterMonth}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select Month" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Array.from({ length: 12 }, (_, i) => {
-                        const month = String(i + 1).padStart(2, "0");
-                        return <SelectItem key={month} value={month}>{month}</SelectItem>;
-                      })}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label>Year</Label>
-                  <Select value={printFilterYear} onValueChange={setPrintFilterYear}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select Year" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {["2024", "2025", "2026"].map(year => (
-                        <SelectItem key={year} value={year}>{year}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
+                      <div>
+                        <Label>Month</Label>
+                        <Select value={printFilterMonth} onValueChange={setPrintFilterMonth}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select Month" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All</SelectItem>
+                            {[
+                              { value: "01", label: "January" },
+                              { value: "02", label: "February" },
+                              { value: "03", label: "March" },
+                              { value: "04", label: "April" },
+                              { value: "05", label: "May" },
+                              { value: "06", label: "June" },
+                              { value: "07", label: "July" },
+                              { value: "08", label: "August" },
+                              { value: "09", label: "September" },
+                              { value: "10", label: "October" },
+                              { value: "11", label: "November" },
+                              { value: "12", label: "December" },
+                            ].map((month) => (
+                              <SelectItem key={month.value} value={month.value}>
+                                {month.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label>Year</Label>
+                        <Select value={printFilterYear} onValueChange={setPrintFilterYear}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select Year" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All</SelectItem>
+                            {["2023", "2024", "2025", "2026", "2027", "2028"].map((year) => (
+                              <SelectItem key={year} value={year}>
+                                {year}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <div>
                         <Label>Site</Label>
                         <Select
@@ -2669,14 +2774,13 @@ const filteredBills = bills.filter((bill) => {
                         </Select>
                       </div>
                       <Button
-                  onClick={() => {
-                    setPrintFilterDialogOpen(false);
-                    handlePrintAllReceipts(printFilterMonth, printFilterYear, printFilterSite);
-                  }}
-                >
-                  Print Filtered Bills
-                </Button>
-
+                          onClick={() => {
+                            setPrintFilterDialogOpen(false);
+                            handlePrintAllReceipts(printFilterMonth, printFilterYear, printFilterSite);
+                          }}
+                        >
+                          Print Filtered Bills
+                        </Button>
                     </div>
                   </DialogContent>
                 </Dialog>

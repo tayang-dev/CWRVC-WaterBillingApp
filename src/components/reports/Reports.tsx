@@ -777,10 +777,16 @@ const exportToXLSX = () => {
   logoRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
   coverSheet.mergeCells(logoRow.number, 1, logoRow.number, 5);
   
-  // Add title row
-  const coverTitle = coverSheet.addRow(['LEAK REPORTS SUMMARY']);
+  // Add title row (change to CWRVC Water Billing App)
+  const coverTitle = coverSheet.addRow(['CWRVC Water Billing App']);
   applyTitleStyle(coverTitle);
   coverSheet.mergeCells(coverTitle.number, 1, coverTitle.number, 5);
+  
+  // Add address row
+  const addressRow = coverSheet.addRow(['Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna']);
+  addressRow.font = { italic: true, size: 13, color: colors.darkBlue };
+  addressRow.alignment = { horizontal: 'center', vertical: 'middle' };
+  coverSheet.mergeCells(addressRow.number, 1, addressRow.number, 5);
   
   // Add subtitle
   const coverSubtitle = coverSheet.addRow(['Comprehensive Analysis of Customer Reported Leaks']);

@@ -207,8 +207,7 @@ export const exportDashboardData = ({
   // 1. Cover Sheet with Water Theme
   const coverSheet = workbook.addWorksheet('Dashboard Overview');
   
-  // Set column widths - FIX: Manually set each column width instead of using forEach
-  // Bug was likely here - using .forEach on coverSheet.columns which might be null
+  // Set column widths
   coverSheet.getColumn(1).width = 20;
   coverSheet.getColumn(2).width = 20;
   coverSheet.getColumn(3).width = 20;
@@ -226,10 +225,16 @@ export const exportDashboardData = ({
   logoRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
   coverSheet.mergeCells(logoRow.number, 1, logoRow.number, 5);
   
-  // Add title row
-  const coverTitle = coverSheet.addRow(['WATER UTILITY DASHBOARD REPORT']);
+  // Add title row (changed as requested)
+  const coverTitle = coverSheet.addRow(['CWRVC Water Billing App']);
   applyTitleStyle(coverTitle);
   coverSheet.mergeCells(coverTitle.number, 1, coverTitle.number, 5);
+  
+  // Add address row (added as requested)
+  const addressRow = coverSheet.addRow(['Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna']);
+  addressRow.font = { italic: true, size: 13, color: colors.darkBlue };
+  addressRow.alignment = { horizontal: 'center', vertical: 'middle' };
+  coverSheet.mergeCells(addressRow.number, 1, addressRow.number, 5);
   
   // Add subtitle
   const coverSubtitle = coverSheet.addRow(['Complete Analytics and Billing Information']);
