@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { FileSpreadsheet } from "lucide-react";
 import { AlertCircle } from "lucide-react";
+import logo from "@/assets/logo.png"; // Adjust path if needed
 
 import {
   Card,
@@ -1375,7 +1376,7 @@ const handlePrintReceipts = () => {
   
     // Load image - we'll need to add it for each receipt
     const img = new Image();
-    img.src = "src/assets/logo.png";
+    img.src = logo; // Use imported logo path
     
     // Process and add receipts after image is loaded
     img.onload = () => {
