@@ -717,6 +717,7 @@ const handleDeleteCustomer = async () => {
       const matchesSearchTerm =
       (customer.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       (customer.email || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (customer.phone || "").toLowerCase().includes(searchTerm.toLowerCase()) || // <-- Add this line
       (customer.accountNumber || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
       (customer.lastBillingDate || "").toLowerCase().includes(searchTerm.toLowerCase());
 
@@ -806,7 +807,7 @@ const handleDeleteCustomer = async () => {
                 <SelectItem value="all">All Statuses</SelectItem>
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="inactive">Inactive</SelectItem>
-                <SelectItem value="delinquent">Delinquent</SelectItem>
+
               </SelectContent>
             </Select>
             {/* Filter for Senior Citizens */}

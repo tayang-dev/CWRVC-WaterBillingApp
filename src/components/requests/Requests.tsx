@@ -1213,11 +1213,12 @@ const exportToXLSX = () => {
         {/* Request Details Dialog */}
         <Dialog open={showDetails} onOpenChange={setShowDetails}>
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader className="sticky top-0 bg-white z-10 pb-4 border-b">
-              <DialogTitle>Service Request Details</DialogTitle>
-            </DialogHeader>
             {selectedRequest && (
               <div className="space-y-6 py-2">
+                <DialogHeader className="pb-4 border-b">
+                  <DialogTitle>Service Request Details</DialogTitle>
+                </DialogHeader>
+                
                 <div className="flex justify-between items-center flex-wrap gap-2">
                   <div>
                     <h2 className="text-xl font-semibold">{selectedRequest.subject}</h2>

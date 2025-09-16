@@ -1357,19 +1357,14 @@ const fetchCustomers = async () => {
   
 
 
-  const handlePrintReceipts = (month: string, year: string, site: string) => {
-    const filtered = paymentHistory.filter((payment) => {
-      const [day, mon, yr] = payment.paymentDate.split("/");
-      const matchesMonth = mon === month;
-      const matchesYear = yr === year;
-      const matchesSite = site === "all" || payment.site === site;
-      return matchesMonth && matchesYear && matchesSite;
-    });
-  
-    if (filtered.length === 0) {
-      alert("No receipts found for the selected filters.");
-      return;
-    }
+const handlePrintReceipts = () => {
+  // Use the already filtered data shown in the table (matches search and all filters)
+  const filtered = filteredHistory;
+
+  if (filtered.length === 0) {
+    alert("No receipts found for the selected filters.");
+    return;
+  }
   
     // Create a new jsPDF instance
     const doc = new jsPDF({
@@ -1503,7 +1498,7 @@ const fetchCustomers = async () => {
       });
       
       // Save the PDF
-      doc.save(`Receipts_${month}_${year}_${site}.pdf`);
+      doc.save(`CWRVC_Receipts.pdf`);
     };
     
   }
@@ -2685,78 +2680,15 @@ const handleExportPaymentHistory = async () => {
                       <FileSpreadsheet className="mr-2 h-4 w-4" />
                       Export to Excel
                     </Button>
-                    <Dialog open={isPrintDialogOpen} onOpenChange={setIsPrintDialogOpen}>
-                      <DialogTrigger asChild>
-                        <Button variant="outline" className="mt-4 md:mt-0">
-                          <FileText className="mr-2 h-4 w-4" />
-                          Print All Receipts
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent className="sm:max-w-[400px]">
-                        <DialogHeader>
-                          <DialogTitle>Filter Receipts</DialogTitle>
-                        </DialogHeader>
-                        <div className="space-y-4">
-                          <div>
-                            <Label>Month</Label>
-                            <Select value={printMonth} onValueChange={setPrintMonth}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select month" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {Array.from({ length: 12 }, (_, i) => {
-                                  const month = String(i + 1).padStart(2, "0");
-                                  return (
-                                    <SelectItem key={month} value={month}>
-                                      {month}
-                                    </SelectItem>
-                                  );
-                                })}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label>Year</Label>
-                            <Select value={printYear} onValueChange={setPrintYear}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select year" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {["2024", "2025", "2026"].map((year) => (
-                                  <SelectItem key={year} value={year}>
-                                    {year}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label>Site</Label>
-                            <Select value={printSite} onValueChange={setPrintSite}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select site" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="all">All</SelectItem>
-                                <SelectItem value="site1">Site 1</SelectItem>
-                                <SelectItem value="site2">Site 2</SelectItem>
-                                <SelectItem value="site3">Site 3</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          
-                          <Button
-                            onClick={() => {
-                              setIsPrintDialogOpen(false);
-                              handlePrintReceipts( printMonth, printYear, printSite);
-                            }}
-                            className="w-full"
-                          >
-                            Print
-                          </Button>
-                        </div>
-                      </DialogContent>
-                    </Dialog>
+                    <Button
+                      variant="outline"
+                      className="mt-4 md:mt-0"
+                      onClick={handlePrintReceipts}
+                      disabled={filteredHistory.length === 0}
+                    >
+                      <FileText className="mr-2 h-4 w-4" />
+                      Print All Receipts
+                    </Button>
                   </div>
                 </div>
               </CardHeader>

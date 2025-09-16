@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import ChatList from "./ChatList";
 import CustomerChat from "./CostumerChat";
 import { useLocation } from "react-router-dom";
@@ -7,28 +7,36 @@ interface CustomerSupportProps {
   userRole?: "admin" | "staff";
 }
 
-const CustomerSupport: React.FC<CustomerSupportProps> = ({ userRole = "admin" }) => {
+const CustomerSupport: React.FC<CustomerSupportProps> = ({ userRole }) => {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [selectedCustomerName, setSelectedCustomerName] = useState<string>("");
   const [selectedCustomerAvatar, setSelectedCustomerAvatar] = useState<string>("");
   const [selectedAccount, setSelectedAccount] = useState<string>("");
 
+  // Add state to prevent duplicate message sends
+  const [isSending, setIsSending] = useState(false);
+  const lastSentMessage = useRef<string>('');
+
   const location = useLocation();
 
-    // Handle chat selection from URL (for notification redirection)
-    useEffect(() => {
-      const searchParams = new URLSearchParams(location.search);
-      const chatId = searchParams.get("chat");
-      if (chatId) {
-        setSelectedCustomerId(chatId);
-        setSelectedAccount(chatId); // If accountNumber is same as chatId, otherwise adjust as needed
-        // Optionally set name/avatar if you have a lookup or fetch logic
-      }
-    }, [location.search]);
+  // Handle chat selection from URL (for notification redirection)
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const chatId = searchParams.get("chat");
+    if (chatId) {
+      setSelectedCustomerId(chatId);
+      setSelectedAccount(chatId); // If accountNumber is same as chatId, otherwise adjust as needed
+      // Optionally set name/avatar if you have a lookup or fetch logic
+    }
+  }, [location.search]);
 
   const handleSelectCustomer = (customerId: string, accountNumber: string) => {
     setSelectedCustomerId(customerId);
     setSelectedAccount(accountNumber);
+
+    // Reset message sending state when switching customers
+    setIsSending(false);
+    lastSentMessage.current = '';
 
     // For production, fetch customer details from Firestore.
     // For demo, using mock data:
@@ -59,8 +67,45 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({ userRole = "admin" })
     if (customer) {
       setSelectedCustomerName(customer.name);
       setSelectedCustomerAvatar(customer.avatar);
+    } else {
+      setSelectedCustomerName(`Account ${accountNumber}`);
+      setSelectedCustomerAvatar("");
     }
   };
+
+  // Function to handle message sending with duplicate prevention
+  const handleSendMessage = async (message: string) => {
+    const trimmedMessage = message.trim();
+    
+    // Prevent sending if message is empty, already sending, or same as last sent
+    if (!trimmedMessage || isSending || trimmedMessage === lastSentMessage.current) {
+      return false;
+    }
+
+    try {
+      setIsSending(true);
+      lastSentMessage.current = trimmedMessage;
+      return true; // Allow the message to be sent
+    } catch (error) {
+      console.error('Error in message sending:', error);
+      return false;
+    } finally {
+      // Reset sending state after a short delay to prevent rapid clicking
+      setTimeout(() => {
+        setIsSending(false);
+        lastSentMessage.current = ''; // Reset after successful send
+      }, 500);
+    }
+  };
+
+  // Default to "staff" if userRole is not provided
+  const displayRole = userRole === "admin"
+    ? "Admin"
+    : userRole === "staff"
+    ? "Staff"
+    : userRole === "cashier"
+    ? "Cashier"
+    : "Staff";
 
   return (
     <div className="w-full h-full bg-gray-50 p-6">
@@ -68,7 +113,7 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({ userRole = "admin" })
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-blue-800">Customer Service</h1>
           <div className="text-sm bg-blue-100 text-blue-800 px-3 py-1 rounded-full">
-            {userRole === "admin" ? "Admin" : "Staff"} Mode
+            {displayRole} Mode
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-[calc(100vh-150px)]">
@@ -76,7 +121,7 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({ userRole = "admin" })
             <ChatList
               onSelectCustomer={handleSelectCustomer}
               selectedCustomerId={selectedCustomerId || undefined}
-              userRole={userRole}
+              userRole={userRole || "staff"}
             />
           </div>
           <div className="md:col-span-2">
@@ -86,7 +131,9 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({ userRole = "admin" })
                 customerName={selectedCustomerName}
                 customerAvatar={selectedCustomerAvatar}
                 accountNumber={selectedAccount}
-                userRole={userRole}
+                userRole={userRole || "staff"}
+                onSendMessage={handleSendMessage}
+                isSending={isSending}
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center bg-white rounded-lg border border-gray-200 p-6">

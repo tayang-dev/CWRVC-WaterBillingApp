@@ -50,7 +50,6 @@ function isVideoFile(fileName: string) {
   );
 }
 
-
 function parseFileMessage(message: string) {
   // Format: "File attached: originalFileName|chat_files/timestamp_originalFileName"
   if (!message.startsWith("File attached:")) return null;
@@ -72,6 +71,8 @@ interface CustomerChatProps {
   customerAvatar: string;
   accountNumber: string;
   userRole: "admin" | "staff";
+  onSendMessage: (message: string) => Promise<boolean>;
+  isSending: boolean;
 }
 
 const urlCache = new Map<string, string>();
@@ -82,13 +83,14 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
   customerAvatar,
   accountNumber,
   userRole,
+  onSendMessage,
+  isSending,
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [fileUrls, setFileUrls] = useState<{ [key: string]: string }>({});
   const lastMessageRef = useRef<HTMLDivElement | null>(null);
-  // Add this outside the component to make it persist across renders
 
   useEffect(() => {
     if (!accountNumber) return;
@@ -113,33 +115,32 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
     return () => unsubscribe();
   }, [accountNumber]);
 
-useEffect(() => {
-  const fetchFileUrls = async () => {
-    const urls: { [key: string]: string } = {};
-    for (const msg of messages) {
-      const fileInfo = msg.message && parseFileMessage(msg.message);
-      if (fileInfo && fileInfo.fileId) {
-        // Check if URL is already cached
-        if (urlCache.has(fileInfo.fileId)) {
-          urls[msg.id] = urlCache.get(fileInfo.fileId)!;
-        } else {
-          try {
-            const fileRef = ref(storage, fileInfo.fileId);
-            const url = await getDownloadURL(fileRef);
-            urlCache.set(fileInfo.fileId, url);
-            urls[msg.id] = url;
-          } catch (e) {
-            // Handle errors silently
+  useEffect(() => {
+    const fetchFileUrls = async () => {
+      const urls: { [key: string]: string } = {};
+      for (const msg of messages) {
+        const fileInfo = msg.message && parseFileMessage(msg.message);
+        if (fileInfo && fileInfo.fileId) {
+          // Check if URL is already cached
+          if (urlCache.has(fileInfo.fileId)) {
+            urls[msg.id] = urlCache.get(fileInfo.fileId)!;
+          } else {
+            try {
+              const fileRef = ref(storage, fileInfo.fileId);
+              const url = await getDownloadURL(fileRef);
+              urlCache.set(fileInfo.fileId, url);
+              urls[msg.id] = url;
+            } catch (e) {
+              // Handle errors silently
+            }
           }
         }
       }
-    }
-    setFileUrls(urls);
-  };
+      setFileUrls(urls);
+    };
 
-  fetchFileUrls();
-}, [messages]);
-
+    fetchFileUrls();
+  }, [messages]);
 
   useEffect(() => {
     if (!loading && messages.length > 0 && lastMessageRef.current) {
@@ -147,8 +148,13 @@ useEffect(() => {
     }
   }, [messages, loading]);
 
+  // Updated handleSendMessage to use parent's onSendMessage
   const handleSendMessage = async () => {
-    if (!newMessage.trim() || !accountNumber) return;
+    if (!newMessage.trim() || !accountNumber || isSending) return;
+
+    // Use parent's onSendMessage for duplicate prevention
+    const canSend = await onSendMessage(newMessage);
+    if (!canSend) return;
 
     try {
       const chatDocRef = doc(db, "chats", accountNumber);
@@ -196,6 +202,14 @@ useEffect(() => {
     }
   };
 
+  // Handle Enter key press with proper prevention
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault(); // Prevent default form submission
+      handleSendMessage();
+    }
+  };
+
   return (
     <Card className="w-full h-full flex flex-col">
       <CardHeader className="pb-3 border-b">
@@ -232,45 +246,44 @@ useEffect(() => {
                         msg.sender === "admin" ? "bg-blue-100" : "bg-gray-100"
                       }`}
                     >
-                    {fileInfo && fileInfo.fileId ? (
-                      <div>
-                        {fileUrls[msg.id] && isImageFile(fileInfo.displayName) && (
-                          <div className="mt-2">
-                            <img
-                              src={fileUrls[msg.id]}
-                              alt={fileInfo.displayName}
-                              style={{ maxWidth: 200, borderRadius: 8 }}
-                            />
-                          </div>
-                        )}
+                      {fileInfo && fileInfo.fileId ? (
+                        <div>
+                          {fileUrls[msg.id] && isImageFile(fileInfo.displayName) && (
+                            <div className="mt-2">
+                              <img
+                                src={fileUrls[msg.id]}
+                                alt={fileInfo.displayName}
+                                style={{ maxWidth: 200, borderRadius: 8 }}
+                              />
+                            </div>
+                          )}
 
-                        {fileUrls[msg.id] && isVideoFile(fileInfo.displayName) && (
-                          <div className="mt-2">
-                            <video
-                              src={fileUrls[msg.id]}
-                              controls
-                              style={{ maxWidth: 300, borderRadius: 8 }}
-                            />
-                          </div>
-                        )}
+                          {fileUrls[msg.id] && isVideoFile(fileInfo.displayName) && (
+                            <div className="mt-2">
+                              <video
+                                src={fileUrls[msg.id]}
+                                controls
+                                style={{ maxWidth: 300, borderRadius: 8 }}
+                              />
+                            </div>
+                          )}
 
-                        {fileUrls[msg.id] && !isImageFile(fileInfo.displayName) && !isVideoFile(fileInfo.displayName) && (
-                          <div className="mt-2">
-                            <a
-                              href={fileUrls[msg.id]}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              style={{ color: "#2563eb", textDecoration: "underline" }}
-                            >
-                              📄 {fileInfo.displayName}
-                            </a>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-sm">{msg.message}</p>
-                    )}
-
+                          {fileUrls[msg.id] && !isImageFile(fileInfo.displayName) && !isVideoFile(fileInfo.displayName) && (
+                            <div className="mt-2">
+                              <a
+                                href={fileUrls[msg.id]}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ color: "#2563eb", textDecoration: "underline" }}
+                              >
+                                📄 {fileInfo.displayName}
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-sm">{msg.message}</p>
+                      )}
                     </div>
                   </div>
                 );
@@ -286,10 +299,15 @@ useEffect(() => {
             placeholder="Type your message..."
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
-            onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
+            onKeyPress={handleKeyPress}
+            disabled={isSending}
             className="flex-grow"
           />
-          <Button onClick={handleSendMessage} size="icon">
+          <Button 
+            onClick={handleSendMessage} 
+            size="icon"
+            disabled={!newMessage.trim() || isSending}
+          >
             <Send className="h-4 w-4" />
           </Button>
         </div>
