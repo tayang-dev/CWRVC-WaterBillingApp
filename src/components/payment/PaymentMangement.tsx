@@ -120,6 +120,15 @@ const formatCurrency = (amount: number) => {
   }).format(amount);
 };
 
+const formatSiteName = (site?: string) => {
+  if (!site) return "—";
+  const match = site.match(/^site(\d+)$/i);
+  if (match) {
+    return `Site ${match[1]}`;
+  }
+  return site.charAt(0).toUpperCase() + site.slice(1);
+};
+
 interface Bill {
   id?: string;
   customerId: string;
@@ -2380,7 +2389,7 @@ const handleExportPaymentHistory = async () => {
                                   <Badge className="bg-green-100 text-green-800">Paid</Badge>
                                 )}
                               </TableCell>
-                              <TableCell>{customer.site || "—"}</TableCell>
+                              <TableCell>{formatSiteName(customer.site)}</TableCell>
                               <TableCell>
                                 <Button
                                   variant="secondary"

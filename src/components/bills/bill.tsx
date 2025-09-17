@@ -62,7 +62,16 @@ const formatCurrency = (amount: number) => {
     currency: "PHP",
   }).format(amount);
 };
-
+// Helper to format site names (e.g., "site1" -> "Site 1")
+const formatSiteName = (site?: string) => {
+  if (!site) return "—";
+  const match = site.match(/^site(\d+)$/i);
+  if (match) {
+    return `Site ${match[1]}`;
+  }
+  // Capitalize first letter if not matching "siteN"
+  return site.charAt(0).toUpperCase() + site.slice(1);
+};
 interface Customer {
   id: string;
   name: string;
@@ -2544,7 +2553,7 @@ const filteredBills = bills.filter((bill) => {
                     className="border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     {siteOptions.map(site => (
-                      <option key={site} value={site}>{site || "No Site"}</option>
+                    <option key={site} value={site}>{formatSiteName(site) || "No Site"}</option>
                     ))}
                   </select>
                 </div>
@@ -2633,7 +2642,7 @@ const filteredBills = bills.filter((bill) => {
                                 {usage}
                               </span>
                             </td>
-                            <td className="px-4 py-2">{reading.site || "—"}</td>
+                            <td className="px-4 py-2">{formatSiteName(reading.site)}</td>
                             <td className="px-4 py-2">{`${reading.month}/${reading.year}`}</td>
                           </tr>
                         );
@@ -2777,7 +2786,7 @@ const filteredBills = bills.filter((bill) => {
                             <SelectItem value="all">All</SelectItem>
                             {siteOptions.map((site) => (
                               <SelectItem key={site} value={site}>
-                                {site}
+                                {formatSiteName(site)}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -2822,7 +2831,7 @@ const filteredBills = bills.filter((bill) => {
       .filter((site) => site && site !== "All")
       .map((site) => (
         <SelectItem key={site} value={site}>
-          {site}
+          {formatSiteName(site)}
         </SelectItem>
       ))}
   </SelectContent>
@@ -2872,7 +2881,7 @@ const filteredBills = bills.filter((bill) => {
             <Badge className="bg-green-100 text-green-800">Paid</Badge>
           )}
         </TableCell>
-        <TableCell>{bill.site || "—"}</TableCell> {/* Add this line */}
+        <TableCell>{formatSiteName(bill.site)}</TableCell> {/* Add this line */}
         <TableCell>
           <Button
             variant="secondary"
