@@ -270,17 +270,8 @@ const calculateTieredUsage = (totalUsage) => {
                             <tr>
                               <td colSpan={5} className="px-2 py-1">No water usage recorded</td>
                             </tr>
-                          ) : bill.waterUsage <= 10 ? (
-                            <tr>
-                              <td className="px-2 py-1 border-r border-black">1</td>
-                              <td className="px-2 py-1 border-r border-black">10</td>
-                              <td className="px-2 py-1 border-r border-black">19.10</td>
-                              <td className="px-2 py-1 border-r border-black">{bill.waterUsage}</td>
-                              <td className="px-2 py-1">{Math.max(bill.waterUsage * 19.10, 191).toFixed(2)}</td>
-                            </tr>
                           ) : (
                             <>
-                              {/* Show all applicable tiers based on water usage */}
                               {tiers
                                 .filter(tier => tier.usage > 0)
                                 .map((tier, i) => (

@@ -1070,9 +1070,8 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
     };
       // Helper function to calculate default rates if not available
 // ...existing code...
-function calculateDefaultRates(usage) {
-  const rates = [];
-  let remainingUsage = usage;
+function calculateDefaultRates(waterUsage) {
+  if (!waterUsage || waterUsage <= 0) return [];
 
   const tiers = [
     { min: 0, max: 5, rate: 0.00 },
@@ -1080,42 +1079,53 @@ function calculateDefaultRates(usage) {
     { min: 11, max: 20, rate: 22.50 },
     { min: 21, max: 30, rate: 24.40 },
     { min: 31, max: 40, rate: 26.30 },
-    { min: 41, max: "above", rate: 28.10 },
+    { min: 41, max: Infinity, rate: 28.10 },
   ];
 
-  // Minimum charge for 0-5 units
-  if (usage <= 5) {
-    rates.push({
+  let remainingUsage = waterUsage;
+  let activeTiers = [];
+
+  // Always show 5 units and minimum charge for first tier
+  if (waterUsage <= 5) {
+    activeTiers.push({
       min: 0,
       max: 5,
       rate: 0.00,
-      usage: usage,
-      amount: Math.max(usage * 0.00, 94.70),
+      usage: waterUsage,
+      amount: 94.70,
     });
-    return rates;
+    return activeTiers;
+  } else {
+    activeTiers.push({
+      min: 0,
+      max: 5,
+      rate: 0.00,
+      usage: 5,
+      amount: 94.70,
+    });
+    remainingUsage -= 5;
   }
 
-for (let i = 0; i < tiers.length; i++) {
-  const tier = tiers[i];
-  const tierMin = tier.min;
-  // Fix: Ensure tierMax is always a number for arithmetic
-  const tierMax = tier.max === "above" ? Infinity : Number(tier.max);
-  const tierCapacity = tierMax === Infinity ? remainingUsage : Math.min(remainingUsage, tierMax - tierMin + 1);
+  // Distribute remaining usage to other tiers
+  for (let i = 1; i < tiers.length && remainingUsage > 0; i++) {
+    const tierMin = tiers[i].min;
+    const tierMax = tiers[i].max;
+    const tierRange = tierMax === Infinity ? remainingUsage : tierMax - tierMin + 1;
+    const tierUsage = Math.min(remainingUsage, tierRange);
 
-  if (usage >= tierMin && tierCapacity > 0) {
-    rates.push({
-      min: tierMin,
-      max: tier.max,
-      rate: tier.rate,
-      usage: tierCapacity,
-      amount: parseFloat((tierCapacity * tier.rate).toFixed(2)),
-    });
-    remainingUsage -= tierCapacity;
+    if (tierUsage > 0) {
+      activeTiers.push({
+        min: tierMin,
+        max: tierMax === Infinity ? "above" : tierMax,
+        rate: tiers[i].rate,
+        usage: tierUsage,
+        amount: parseFloat((tierUsage * tiers[i].rate).toFixed(2)),
+      });
+      remainingUsage -= tierUsage;
+    }
   }
-  if (remainingUsage <= 0) break;
-}
 
-  return rates;
+  return activeTiers;
 }
 // ...existing code...
       
