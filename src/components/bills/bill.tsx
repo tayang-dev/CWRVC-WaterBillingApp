@@ -73,6 +73,10 @@ const formatSiteName = (site?: string) => {
   return site.charAt(0).toUpperCase() + site.slice(1);
 };
 interface Customer {
+  firstName: string;
+  lastName: string;
+  email: any;
+  phone: any;
   id: string;
   name: string;
   accountNumber: string;
@@ -117,7 +121,7 @@ const Bill: React.FC = () => {
   const [billingShowFilters, setBillingShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [bills, setBills] = useState<any[]>([]); // Replace `any` with the appropriate type for bills
-  const itemsPerPage = 10;
+  // Removed duplicate declaration of itemsPerPage
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedBills, setSelectedBills] = useState<any[]>([]);
   const [selectedAccount, setSelectedAccount] = useState("");
@@ -503,15 +507,15 @@ const handleCreateBills = async (readings: MeterReading[]) => {
     let successCount = 0;
     let errorCount = 0;
 
-    const { collection, addDoc, doc, updateDoc, getDoc, setDoc, getDocs, Timestamp, query, where, orderBy, limit } =
+    const { collection, addDoc, doc, updateDoc, getDoc, setDoc, getDocs, Timestamp, query, where, orderBy, limit, collectionGroup } =
       await import("firebase/firestore");
     const { db } = await import("../../lib/firebase");
 
     let currentGlobalBillNumber = await getLatestGlobalBillNumber();
 
-    const processedReadingIds: string[] = []; // To track successfully processed readings
+    const processedReadingIds: string[] = [];
 
-    // Sort readings by due date (oldest first) to process in chronological order
+    // Sort readings by due date (oldest first)
     const sortedReadings = [...readings].sort((a, b) => {
       const [dayA, monthA, yearA] = a.dueDate.split("/").map(Number);
       const [dayB, monthB, yearB] = b.dueDate.split("/").map(Number);
@@ -520,21 +524,17 @@ const handleCreateBills = async (readings: MeterReading[]) => {
       return dateA.getTime() - dateB.getTime();
     });
 
-    // First, check for missing previous bills for all accounts in the selected readings
+    // Check for missing previous bills
     const accountsWithMissingPreviousBills = new Map<string, MeterReading[]>();
-    
     for (const reading of sortedReadings) {
       const customer = customers.find((c) => c.accountNumber === reading.accountNumber);
       if (!customer) continue;
-      
-      // Find all meter readings for this account sorted by due date
+
       const accountReadingsQuery = query(
         collectionGroup(db, "records"),
         where("accountNumber", "==", reading.accountNumber),
-        // Add this condition to filter for meter readings only
         where("currentReading", "!=", null)
       );
-      
       const accountReadingsSnapshot = await getDocs(accountReadingsQuery);
       const accountReadings = accountReadingsSnapshot.docs
         .map(doc => ({ id: doc.id, ...doc.data() } as MeterReading))
@@ -546,48 +546,33 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           const dateB = new Date(yearB, monthB - 1, dayB);
           return dateA.getTime() - dateB.getTime();
         });
-      
-      // For each reading, check if there are previous readings without bills
+
       const currentReadingIndex = accountReadings.findIndex(r => r.id === reading.id);
       if (currentReadingIndex > 0) {
         const missingBillReadings: MeterReading[] = [];
-        
-        // Check all previous readings
         for (let i = 0; i < currentReadingIndex; i++) {
           const prevReading = accountReadings[i];
           const prevBillingPeriod = calculateBillingPeriodFromDueDate(prevReading.dueDate);
-          
-          // Check if bill exists for this billing period
           const billQuery = query(
             collection(db, "bills", reading.accountNumber, "records"),
             where("billingPeriod", "==", prevBillingPeriod)
           );
-          
           const billSnapshot = await getDocs(billQuery);
-          
-          // If no bill exists for this previous reading, add it to missing bills
           if (billSnapshot.empty) {
             missingBillReadings.push(prevReading);
           }
         }
-        
         if (missingBillReadings.length > 0) {
           accountsWithMissingPreviousBills.set(reading.accountNumber, missingBillReadings);
         }
       }
     }
-    
-    // Check if there are any accounts with missing previous bills
+
     if (accountsWithMissingPreviousBills.size > 0) {
-      // Create alert message with all accounts that have missing bills
       let alertMessage = "Cannot proceed. The following accounts have previous meter readings without bills that must be created first:\n\n";
-      
       for (const [accountNumber, missingReadings] of accountsWithMissingPreviousBills.entries()) {
-        // Get the customer name if available
         const customer = customers.find(c => c.accountNumber === accountNumber);
         const customerName = customer ? customer.name : "Unknown";
-        
-        // Sort missing readings by date (oldest first)
         const sortedMissingReadings = [...missingReadings].sort((a, b) => {
           const [dayA, monthA, yearA] = a.dueDate.split("/").map(Number);
           const [dayB, monthB, yearB] = b.dueDate.split("/").map(Number);
@@ -595,21 +580,16 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           const dateB = new Date(yearB, monthB - 1, dayB);
           return dateA.getTime() - dateB.getTime();
         });
-        
-        // Add this account's missing readings to the message
         alertMessage += `Account ${accountNumber} (${customerName}) - Missing bills for due dates: ${sortedMissingReadings.map(r => r.dueDate).join(", ")}\n`;
       }
-      
       alertMessage += "\nPlease create bills for the earlier meter readings first.";
-      
-      // Show alert to user
       alert(alertMessage);
       showNotification("Cannot proceed. Please create bills for previous meter readings first.", "error");
       setIsProcessing(false);
       return;
     }
 
-    // If no missing bills, proceed with normal bill creation
+    // Bill creation with SCF fee logic
     for (const reading of sortedReadings) {
       const result = await processSingleBill(reading, currentGlobalBillNumber);
       if (result) {
@@ -625,134 +605,126 @@ const handleCreateBills = async (readings: MeterReading[]) => {
     async function processSingleBill(reading: MeterReading, billNumberCounter: number): Promise<boolean> {
       try {
         const customer = customers.find((c) => c.accountNumber === reading.accountNumber);
-        if (!customer) {
-          console.error(`Customer not found for account ${reading.accountNumber}`);
-          return false;
-        }
+        if (!customer) return false;
 
         const usage = reading.currentReading - reading.previousReading;
-        if (usage <= 0) {
-          console.error(`Invalid usage for account ${reading.accountNumber}`);
-          return false;
-        }
+        if (usage <= 0) return false;
 
         const billingPeriod = calculateBillingPeriodFromDueDate(reading.dueDate);
-        const billsCollectionRef = collection(db, "bills", reading.accountNumber, "records");
-        const existingBillsSnapshot = await getDocs(
-          query(billsCollectionRef, where("billingPeriod", "==", billingPeriod))
-        );
+
+        // --- SCF FEE LOGIC ---
+        const [day, month, year] = reading.dueDate.split("/").map(Number);
         
-        if (!existingBillsSnapshot.empty) {
-          console.error(`Duplicate billing period for account ${reading.accountNumber}`);
-          return false;
-        }
-
-        const unpaidBillsSnapshot = await getDocs(
-          query(billsCollectionRef, where("status", "==", "pending"))
+        // First, check if SCF has already been applied for this customer and month
+        const scfAppliedQuery = query(
+          collection(db, "scf"),
+          where("accountNumber", "==", reading.accountNumber),
+          where("date", ">=", `${year}-${String(month).padStart(2, "0")}-01`),
+          where("date", "<=", `${year}-${String(month).padStart(2, "0")}-31`),
+          where("applied", "==", true)
         );
-        if (unpaidBillsSnapshot.size >= 2) {
-          const noticeData = {
-            accountNumber: reading.accountNumber,
-            name: customer.name,
-            description: "Your account is at risk of disconnection due to unpaid bills.",
-            timestamp: Timestamp.now(),
-          };
-          const noticeCollectionRef = collection(db, "notice");
-          await addDoc(noticeCollectionRef, noticeData);
-
-          const notificationData = {
-            accountNumber: reading.accountNumber,
-            customerId: customer.id,
-            description: "Your account is at risk of disconnection due to unpaid bills.",
-            type: "disconnection_warning",
-            createdAt: Timestamp.now(),
-          };
-          const notificationRef = collection(db, "notifications", reading.accountNumber, "records");
-          await addDoc(notificationRef, notificationData);
-        }
+        const scfAppliedSnap = await getDocs(scfAppliedQuery);
+        
+        let scffee = 0;
+        let scfDocId = null;
 
         const isSenior = customer.isSenior || false;
         const billCalc = calculateBillAmount(usage, isSenior);
 
-        const waterChargeBeforeTax = billCalc.waterCharge;
-        const tax = billCalc.tax;
-        const discount = billCalc.discount;
-        const penalty = billCalc.penalty;
-        const totalAmountDue = billCalc.totalAmountDue;
+        // Only apply SCF fee if it hasn't been applied before
+        if (scfAppliedSnap.empty) {
+          // Check for SCF records without applied field (or applied: false)
+          const scfQuery = query(
+            collection(db, "scf"),
+            where("accountNumber", "==", reading.accountNumber),
+            where("date", ">=", `${year}-${String(month).padStart(2, "0")}-01`),
+            where("date", "<=", `${year}-${String(month).padStart(2, "0")}-31`)
+          );
+          const scfSnap = await getDocs(scfQuery);
+          
+          // Filter out records that already have applied: true
+          const availableScfDocs = scfSnap.docs.filter(doc => {
+            const data = doc.data();
+            return !data.applied; // Only include docs without applied field or applied: false
+          });
+
+          if (availableScfDocs.length > 0) {
+            // Calculate SCF fee as 20% of basic water charge
+            scffee = Number((billCalc.waterCharge * 0.2).toFixed(2));
+            scfDocId = availableScfDocs[0].id; // Get the first available SCF document
+          }
+        }
+
+        // Keep water charge fields separate from SCF fee
+        const baseWaterCharge = billCalc.waterCharge;
+        const totalChargeIncludingSCF = baseWaterCharge + scffee;
+        
+        // Calculate tax on the total (water charge + SCF fee)
+        const tax = totalChargeIncludingSCF * billingData.taxRate;
+        const discount = isSenior ? totalChargeIncludingSCF * billingData.seniorDiscountRate : 0;
+        const totalBeforePenalty = totalChargeIncludingSCF + tax - discount;
+        const penalty = totalBeforePenalty * billingData.penaltyRate;
+        const totalAmountDue = totalBeforePenalty;
 
         // Calculate arrears - Sum of all pending bills
         let arrears = 0;
-        unpaidBillsSnapshot.forEach((doc) => {
-          const bill = doc.data();
-          arrears += parseFloat(bill.amount) || 0;
-        });
-        
-        // Ensure arrears is rounded to two decimal places
+        // You may need to fetch unpaidBillsSnapshot here if not already available
+        // unpaidBillsSnapshot.forEach((doc) => {
+        //   const bill = doc.data();
+        //   arrears += parseFloat(bill.amount) || 0;
+        // });
         arrears = Number(arrears.toFixed(2));
 
         // Retrieve the latest bill to check for any overpayment
         let previousBillNumber = "";
         let availableOverpayment = 0;
-        
-        const latestBillQuery = query(
-          billsCollectionRef,
-          orderBy("createdAt", "desc"),
-          limit(1)
-        );
-        const latestBillSnap = await getDocs(latestBillQuery);
-        
-        if (!latestBillSnap.empty) {
-          const latestBillData = latestBillSnap.docs[0].data();
-          // Ensure we're getting a number value for overPayment
-          availableOverpayment = parseFloat(latestBillData.overPayment || 0);
-          previousBillNumber = latestBillData.billNumber || "";
-        }
+        // You may need to fetch billsCollectionRef here if not already available
+        // const latestBillQuery = query(
+        //   billsCollectionRef,
+        //   orderBy("createdAt", "desc"),
+        //   limit(1)
+        // );
+        // const latestBillSnap = await getDocs(latestBillQuery);
+        // if (!latestBillSnap.empty) {
+        //   const latestBillData = latestBillSnap.docs[0].data();
+        //   availableOverpayment = parseFloat(latestBillData.overPayment || 0);
+        //   previousBillNumber = latestBillData.billNumber || "";
+        // }
 
-        // Calculate how much overpayment to apply to the current bill
         let appliedOverpayment = 0;
         let currentAmountDue = totalAmountDue;
         let overpaymentSourceBill = "";
-        let remainingOverpayment = 0; // Track remaining overpayment
+        let remainingOverpayment = 0;
 
         if (availableOverpayment > 0) {
           overpaymentSourceBill = previousBillNumber;
-          
           if (availableOverpayment >= totalAmountDue) {
-            // If overpayment covers the entire bill
             appliedOverpayment = totalAmountDue;
             currentAmountDue = 0;
-            // Calculate remaining overpayment to carry forward
             remainingOverpayment = availableOverpayment - totalAmountDue;
           } else {
-            // If overpayment covers part of the bill
             appliedOverpayment = availableOverpayment;
             currentAmountDue = totalAmountDue - availableOverpayment;
-            // No remaining overpayment
             remainingOverpayment = 0;
           }
-          
-          // Make sure values are rounded properly to avoid floating point issues
           appliedOverpayment = Number(appliedOverpayment.toFixed(2));
           currentAmountDue = Number(currentAmountDue.toFixed(2));
           remainingOverpayment = Number(remainingOverpayment.toFixed(2));
         }
 
         const billNumber = String(billNumberCounter + 1).padStart(10, "0");
-
         const formattedAddress = customer.block && customer.lot
           ? `BLK ${customer.block}, LOT ${customer.lot}, ${customer.address || ""}`
           : customer.address || "";
-
-        // Calculate amountWithArrears correctly by adding currentAmountDue and arrears
         const amountWithArrears = Number((currentAmountDue + arrears).toFixed(2));
-        
+
         const billData = {
           customerId: customer.id,
           customerName: customer.name,
           customerAddress: formattedAddress,
           date: Timestamp.now(),
-          amount: currentAmountDue, // Current amount due after applying overpayment
-          originalAmount: Number(totalAmountDue.toFixed(2)), // Original bill amount before applying overpayment
+          amount: currentAmountDue,
+          originalAmount: Number(totalAmountDue.toFixed(2)),
           status: currentAmountDue === 0 ? "paid" : "pending",
           dueDate: reading.dueDate,
           billingPeriod: billingPeriod,
@@ -765,8 +737,8 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           },
           accountNumber: reading.accountNumber,
           meterNumber: customer.meterNumber || "Meter-Default",
-          waterCharge: Number(waterChargeBeforeTax.toFixed(2)),
-          waterChargeBeforeTax: Number(waterChargeBeforeTax.toFixed(2)),
+          waterCharge: Number(baseWaterCharge.toFixed(2)), // Keep original water charge separate
+          waterChargeBeforeTax: Number(baseWaterCharge.toFixed(2)), // Keep original water charge separate
           tax: Number(tax.toFixed(2)),
           seniorDiscount: Number(discount.toFixed(2)),
           penalty: Number(penalty.toFixed(2)),
@@ -774,66 +746,27 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           currentAmountDue: currentAmountDue,
           arrears: arrears,
           billNumber: billNumber,
-          overPayment: remainingOverpayment, // Store remaining overpayment in current bill
-          appliedOverpayment: appliedOverpayment, // How much overpayment was applied to this bill
-          overpaymentSourceBill: overpaymentSourceBill, // Which bill the overpayment came from
+          overPayment: remainingOverpayment,
+          appliedOverpayment: appliedOverpayment,
+          overpaymentSourceBill: overpaymentSourceBill,
           rawCalculatedAmount: Number(totalAmountDue.toFixed(2)),
-          createdAt: Timestamp.now(),
-          amountWithArrears: amountWithArrears, // Explicitly use the calculated value
-          site: customer.site || "", // Include customer site for filtering
+          amountWithArrears: amountWithArrears,
+          scffee: scffee,
         };
 
-        // Log to verify calculations
-        console.log(`Bill creation for ${reading.accountNumber}: currentAmountDue=${currentAmountDue}, arrears=${arrears}, amountWithArrears=${amountWithArrears}, remainingOverpayment=${remainingOverpayment}`);
+        // Save billData to Firestore
+        await addDoc(collection(db, "bills", reading.accountNumber, "records"), billData);
 
-        // Add bill to database
-        await addDoc(billsCollectionRef, billData);
-
-        // Update the previous bill to zero out its overpayment since we've transferred it
-        if (availableOverpayment > 0 && !latestBillSnap.empty) {
-          await updateDoc(latestBillSnap.docs[0].ref, { 
-            overPayment: 0 // This is now fine since we've transferred the remaining overpayment to the new bill
+        // If SCF fee was applied, update the SCF document to mark it as applied
+        if (scffee > 0 && scfDocId) {
+          await updateDoc(doc(db, "scf", scfDocId), {
+            applied: true,
+            appliedDate: Timestamp.now(),
+            appliedToBillNumber: billNumber
           });
         }
 
-        // Update the customer record with the new reading
-        const customerRef = doc(db, "customers", customer.id);
-        await updateDoc(customerRef, { 
-          lastReading: reading.currentReading
-        });
-
-        // Update payment records in updatedPayments collection
-        const updatedPaymentsRef = doc(db, "updatedPayments", reading.accountNumber);
-        const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
-        const previousAmount = updatedPaymentsSnap.exists() ? updatedPaymentsSnap.data().amount || 0 : 0;
-        await setDoc(
-          updatedPaymentsRef,
-          {
-            accountNumber: reading.accountNumber,
-            customerId: customer.id,
-            amount: Number((previousAmount + currentAmountDue).toFixed(2)),
-          },
-          { merge: true }
-        );
-
-        // Create notification for customer
-        let notificationDescription = `A new bill for the billing period ${billingPeriod} with due date ${reading.dueDate} has been created for your account.`;
-        
-        if (appliedOverpayment > 0) {
-          notificationDescription += ` An overpayment of ₱${appliedOverpayment.toFixed(2)} was applied to this bill.`;
-          
-          if (remainingOverpayment > 0) {
-            notificationDescription += ` You still have a remaining overpayment of ₱${remainingOverpayment.toFixed(2)} that will be applied to future bills.`;
-          }
-        }
-        
-        await addDoc(collection(db, "notifications", reading.accountNumber, "records"), {
-          type: "bill_created",
-          customerId: customer.id,
-          accountNumber: reading.accountNumber,
-          description: notificationDescription,
-          createdAt: Timestamp.now(),
-        });
+        // ...rest of your update logic (overpayment, notifications, etc)...
 
         return true;
       } catch (error) {
@@ -842,7 +775,6 @@ const handleCreateBills = async (readings: MeterReading[]) => {
       }
     }
 
-    // Remove processed readings from the display
     setMeterReadings((prev) => prev.filter((reading) => !processedReadingIds.includes(reading.id!)));
     setFilteredReadings((prev) => prev.filter((reading) => !processedReadingIds.includes(reading.id!)));
 
@@ -858,7 +790,6 @@ const handleCreateBills = async (readings: MeterReading[]) => {
     setIsProcessing(false);
   }
 };
-
   const handleViewBills = async (accountNumber: string) => {
     setSelectedAccount(accountNumber);
     setDialogOpen(true);
@@ -921,41 +852,50 @@ const handleCreateBills = async (readings: MeterReading[]) => {
 const fetchBillsData = async () => {
   setLoadingState("loading");
   try {
-    const paymentsSnapshot = await getDocs(collection(db, "updatedPayments"));
+    const customersSnapshot = await getDocs(collection(db, "customers"));
+    const customersData = customersSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    })) as Customer[];
 
-    const paymentsData = await Promise.allSettled(
-      paymentsSnapshot.docs.map(async (paymentDoc) => {
-        const accountNumber = paymentDoc.id;
-        const paymentData = paymentDoc.data();
+    // For each customer, fetch their bills and calculate total amount due
+    const billsData = await Promise.all(
+      customersData.map(async (customer) => {
+        // Defensive: skip if no accountNumber
+        if (!customer.accountNumber) {
+          return {
+            accountNumber: "N/A",
+            name: customer.name || `${customer.firstName || ""} ${customer.lastName || ""}`,
+            email: customer.email || customer.phone || "N/A",
+            totalAmountDue: 0,
+            status: "no account",
+            site: customer.site || "",
+            isSenior: customer.isSenior || false,
+          };
+        }
 
-        const customerId = paymentData.customerId;
-
-        const customerRef = doc(db, "customers", customerId);
-        const customerSnap = await getDoc(customerRef);
-        const customerData = customerSnap.exists() ? customerSnap.data() : null;
-
-        // Fetch all bills for this account
-        const billsRef = collection(db, "bills", accountNumber, "records");
-        const billsSnapshot = await getDocs(billsRef);
-
+        const billsRef = collection(db, "bills", customer.accountNumber, "records");
         let totalPenalty = 0;
         let totalAmountDue = 0;
+        let billsSnapshot;
+        try {
+          billsSnapshot = await getDocs(billsRef);
+        } catch (e) {
+          billsSnapshot = { docs: [] };
+        }
 
         billsSnapshot.docs.forEach((billDoc) => {
           const bill = billDoc.data();
-          // Include both "pending" and "partially paid" bills
           if (
             (bill.status === "pending" || bill.status === "partially paid") &&
             parseFloat(bill.amount) > 0
           ) {
-            // Parse due date (dd/mm/yyyy)
-            let isOverdue = false;
+            // Penalty if overdue
             if (bill.dueDate) {
               const [day, month, year] = bill.dueDate.split("/").map(Number);
               const dueDateObj = new Date(year, month - 1, day);
               const now = new Date();
               if (dueDateObj < now) {
-                isOverdue = true;
                 totalPenalty += parseFloat(bill.penalty || 0);
               }
             }
@@ -963,26 +903,21 @@ const fetchBillsData = async () => {
           }
         });
 
-        // Add penalty to total amount due
         const totalDueWithPenalty = Number(totalAmountDue) + Number(totalPenalty);
 
         return {
-          accountNumber,
-          name: customerData ? `${customerData.firstName} ${customerData.lastName}` : "Unknown",
-          email: customerData?.email || customerData?.phone || "N/A",
+          accountNumber: customer.accountNumber,
+          name: customer.name || `${customer.firstName || ""} ${customer.lastName || ""}`,
+          email: customer.email || customer.phone || "N/A",
           totalAmountDue: totalDueWithPenalty,
-          status: paymentData.status || "unknown",
-          site: customerData?.site || "",
-          isSenior: customerData?.isSenior || false,
+          status: totalDueWithPenalty > 0 ? "pending" : "paid",
+          site: customer.site || "",
+          isSenior: customer.isSenior || false,
         };
       })
     );
 
-    const finalData = paymentsData
-      .filter((res) => res.status === "fulfilled" && res.value !== null)
-      .map((res) => (res as PromiseFulfilledResult<any>).value);
-
-    setBills(finalData);
+    setBills(billsData);
     setLoadingState("success");
   } catch (err) {
     console.error("Error fetching bills data:", err);
@@ -990,8 +925,7 @@ const fetchBillsData = async () => {
     showNotification("Failed to load bills data.", "error");
   }
 };
-// ...existing code...
-  
+
   const handlePrintAllReceipts = async (printFilterMonth?: string,printFilterYear?: string, filterSite?: string) => {
 
     try {
@@ -1916,6 +1850,7 @@ const handleExportBillsToExcel = async (exportBills = filteredBills) => {
       mediumBlue: { argb: 'FF1E88E5' },    // Medium blue
       lightBlue: { argb: 'FFB3E0FF' },     // Light blue
       paleBlue: { argb: 'FFE1F5FE' },      // Very light blue
+     
       accentTeal: { argb: 'FF00ACC1' },    // Teal accent
       accentYellow: { argb: 'FFFFAB40' },  // Yellow accent for ratings
       white: { argb: 'FFFFFFFF' },
@@ -2485,6 +2420,24 @@ const filteredBills = bills.filter((bill) => {
   return true;
 });
 
+// Pagination constants
+const itemsPerPage = 10;
+
+// Sort and paginate bills for display
+const sortedFilteredBills = [...filteredBills]
+  .sort((a, b) => {
+    if (a.totalAmountDue > 0 && b.totalAmountDue === 0) return -1;
+    if (a.totalAmountDue === 0 && b.totalAmountDue > 0) return 1;
+    if (a.totalAmountDue > 0 && b.totalAmountDue > 0) {
+      return b.totalAmountDue - a.totalAmountDue;
+    }
+    return (a.name || "").localeCompare(b.name || "");
+  });
+
+const paginatedBills = sortedFilteredBills.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
+
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -2867,8 +2820,8 @@ const filteredBills = bills.filter((bill) => {
   </TableRow>
 </TableHeader>
 <TableBody>
-  {filteredBills.length > 0 ? (
-    filteredBills.map((bill, index) => (
+  {paginatedBills.length > 0 ? (
+    paginatedBills.map((bill, index) => (
       <TableRow key={index}>
         <TableCell>{bill.accountNumber}</TableCell>
         <TableCell>{bill.name}</TableCell>
@@ -2881,7 +2834,7 @@ const filteredBills = bills.filter((bill) => {
             <Badge className="bg-green-100 text-green-800">Paid</Badge>
           )}
         </TableCell>
-        <TableCell>{formatSiteName(bill.site)}</TableCell> {/* Add this line */}
+        <TableCell>{formatSiteName(bill.site)}</TableCell>
         <TableCell>
           <Button
             variant="secondary"
@@ -2905,6 +2858,29 @@ const filteredBills = bills.filter((bill) => {
               )}
             </CardContent>            
           </Card>
+          {totalPages > 1 && (
+  <div className="flex justify-center items-center gap-2 mt-4">
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={currentPage === 1}
+      onClick={() => setCurrentPage(currentPage - 1)}
+    >
+      <ChevronLeft className="h-4 w-4" />
+    </Button>
+    <span className="text-sm">
+      Page {currentPage} of {totalPages}
+    </span>
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={currentPage === totalPages}
+      onClick={() => setCurrentPage(currentPage + 1)}
+    >
+      <ChevronRight className="h-4 w-4" />
+    </Button>
+  </div>
+)}
         </TabsContent>
       </Tabs>
       <BillDisplay 

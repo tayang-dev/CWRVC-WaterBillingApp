@@ -74,6 +74,8 @@ import {
 } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Calendar } from "@/components/ui/calendar"; // If you have a calendar/date picker
+import { format } from "date-fns"; // For date formatting
 
 // Updated form schema to include block, lot, and meterNumber
 const formSchema = z.object({
@@ -156,6 +158,7 @@ interface Customer {
   site?: string;
   isSenior?: boolean;
   phone?: string;
+  hasSCF: boolean;
 }
 
 interface CustomerListProps {
@@ -184,7 +187,10 @@ const CustomerList: React.FC<CustomerListProps> = ({
   const [filterSenior, setFilterSenior] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [filterStatus, setFilterStatus] = useState("all"); // <-- Add this line
-
+  const [scfCustomer, setScfCustomer] = useState<Customer | null>(null);
+  const [isScfSubmitting, setIsScfSubmitting] = useState(false);
+  const [scfError, setScfError] = useState("");
+  const [showScfConfirm, setShowScfConfirm] = useState(false); // Add this state at the top inside CustomerList component
 
   const itemsPerPage = 10;
 
@@ -207,79 +213,80 @@ const CustomerList: React.FC<CustomerListProps> = ({
     fetchCustomers();
   }, []);
   
-  const fetchCustomers = async () => {
-    try {
-      const customersCollection = collection(db, "customers");
-      const customersSnapshot = await getDocs(customersCollection);
-  
-      // Fetch updatedPayments collection
-      const paymentsCollection = collection(db, "updatedPayments");
-      const paymentsSnapshot = await getDocs(paymentsCollection);
-      
-      // Create a map of accountNumber -> amount from updatedPayments
-      const paymentsMap: { [key: string]: number } = {};
-      paymentsSnapshot.forEach((doc) => {
-        const data = doc.data();
-        if (data.accountNumber && data.amount) {
-          paymentsMap[data.accountNumber] = data.amount;
-        }
-      });
-  
-      let customersList = await Promise.all(
-        customersSnapshot.docs.map(async (customerDoc) => {
-          const customerData = customerDoc.data();
-          const accountNumber = customerData.accountNumber;
-  
-          let latestAmountDue = 0;
-  
-          // Check if amount is available in updatedPayments
-          if (accountNumber && paymentsMap[accountNumber] !== undefined) {
-            latestAmountDue = paymentsMap[accountNumber];
-          } else if (accountNumber) {
-            // Fetch the latest bill from `bills/{accountNumber}/records/`
-            const billsCollection = collection(db, "bills", accountNumber, "records");
-            const billsQuery = query(billsCollection, orderBy("date", "desc"));
-            const billsSnapshot = await getDocs(billsQuery);
-  
-            if (!billsSnapshot.empty) {
-              const latestBill = billsSnapshot.docs[0].data();
-              latestAmountDue = latestBill.currentAmountDue ?? latestBill.amount ?? 0;
-            }
-          }
-  
-          return {
-            id: customerDoc.id,
-            name: customerData.name,
-            firstName: customerData.firstName || "", // Add this line
-            lastName: customerData.lastName || "",   // Add this line
-            middleInitial: customerData.middleInitial || "", // Add this line
-            email: customerData.email || "",
-            address: customerData.address,
-            accountNumber: accountNumber,
-            status: customerData.status,
-            lastBillingDate: customerData.lastBillingDate || "N/A",
-            amountDue: latestAmountDue,
-            site: customerData.site,
-            isSenior: customerData.isSenior,
-            phone: customerData.phone || "",
-            meterNumber: customerData.meterNumber || "",   // <-- added
-            block: customerData.block || "",               // <-- added
-            lot: customerData.lot || "",    
-          };
-        })
-      );
-  
-      customersList.sort((a, b) => {
-        const nameA = a.name || "";
-        const nameB = b.name || "";
-        return nameA.localeCompare(nameB);
-      });
+  // Update the fetchCustomers function
+const fetchCustomers = async () => {
+  try {
+    const customersCollection = collection(db, "customers");
+    const customersSnapshot = await getDocs(customersCollection);
 
-      setCustomers(customersList);
-    } catch (error) {
-      console.error("Error fetching customers:", error);
-    }
-  };
+    // Fetch all SCFs once
+    const scfCollection = collection(db, "scf");
+    const scfSnapshot = await getDocs(scfCollection);
+    
+    // Get current month and year
+    const currentDate = new Date();
+    const currentMonth = currentDate.getMonth();
+    const currentYear = currentDate.getFullYear();
+    
+    // Create a map of accountNumber -> latest SCF status
+    const scfMap: { [key: string]: boolean } = {};
+    scfSnapshot.forEach((doc) => {
+      const scfData = doc.data();
+      if (scfData.accountNumber) {
+        // Convert SCF date string to Date object
+        const scfDate = new Date(scfData.date);
+        // Check if SCF is from current month
+        const isCurrentMonth = scfDate.getMonth() === currentMonth && 
+                             scfDate.getFullYear() === currentYear;
+        
+        // Only mark as having SCF if it's from current month
+        if (isCurrentMonth) {
+          scfMap[scfData.accountNumber] = true;
+        }
+      }
+    });
+
+    let customersList = customersSnapshot.docs.map((customerDoc) => {
+      const customerData = customerDoc.data();
+      const accountNumber = customerData.accountNumber;
+
+      // Check if customer has SCF in current month
+      const hasSCF = scfMap[accountNumber] || false;
+
+      return {
+        id: customerDoc.id,
+        name: customerData.name,
+        firstName: customerData.firstName || "",
+        lastName: customerData.lastName || "",
+        middleInitial: customerData.middleInitial || "",
+        email: customerData.email || "",
+        address: customerData.address,
+        accountNumber: accountNumber,
+        status: customerData.status,
+        site: customerData.site,
+        isSenior: customerData.isSenior,
+        phone: customerData.phone || "",
+        meterNumber: customerData.meterNumber || "",
+        block: customerData.block || "",
+        lot: customerData.lot || "",
+        hasSCF: hasSCF, // Will only be true if SCF exists for current month
+        lastBillingDate: customerData.lastBillingDate || "",
+        amountDue: customerData.amountDue ?? 0,
+      };
+    });
+
+    // Sort customers by name
+    customersList.sort((a, b) => {
+      const nameA = a.name || "";
+      const nameB = b.name || "";
+      return nameA.localeCompare(nameB);
+    });
+
+    setCustomers(customersList);
+  } catch (error) {
+    console.error("Error fetching customers:", error);
+  }
+};
   
   const checkIfDetailsExist = async (accountNumber: string, meterNumber: string, email?: string, phone?: string, excludeCustomerId?: string) => {
     try {
@@ -449,7 +456,211 @@ const handleDeleteCustomer = async () => {
   }
 };
 
+  // SCF Schema for Special Collection Fee dialog
+  const scfSchema = z.object({
+    description: z.string()
+      .min(2, { message: "Description must be at least 2 characters." })
+      .max(100, { message: "Description cannot exceed 100 characters." }),
+    date: z.date({
+      required_error: "Date is required."
+    }),
+  });
+
+  // SCF Dialog Component
+  const ScfDialog = () => {
+    const form = useForm<z.infer<typeof scfSchema>>({
+      resolver: zodResolver(scfSchema),
+      defaultValues: {
+        description: "",
+        date: new Date(),
+      },
+    });
+
+    // Add confirmation state
+    const [showConfirm, setShowConfirm] = useState(false);
+    const [pendingData, setPendingData] = useState<z.infer<typeof scfSchema> | null>(null);
+
+    const onSubmit = (data: z.infer<typeof scfSchema>) => {
+      setPendingData(data);
+      setShowConfirm(true);
+    };
+
+  const handleConfirmedSubmit = async () => {
+  if (!pendingData || !scfCustomer) return;
   
+  setIsScfSubmitting(true);
+  setScfError("");
+  
+  try {
+    // Check if SCF already exists for this date
+    const scfQuery = query(
+      collection(db, "scf"),
+      where("accountNumber", "==", scfCustomer.accountNumber),
+      where("date", "==", format(pendingData.date, "yyyy-MM-dd"))
+    );
+    
+    const existingScf = await getDocs(scfQuery);
+    
+    if (!existingScf.empty) {
+      setScfError("An SCF entry already exists for this date. Please choose a different date.");
+      setIsScfSubmitting(false);
+      return;
+    }
+
+    // If no duplicate, proceed with adding the SCF
+    await setDoc(doc(collection(db, "scf")), {
+      customerId: scfCustomer.id,
+      accountNumber: scfCustomer.accountNumber,
+      name: scfCustomer.name,
+      description: pendingData.description,
+      date: format(pendingData.date, "yyyy-MM-dd"),
+      site: scfCustomer.site,
+      block: scfCustomer.block,
+      lot: scfCustomer.lot,
+      createdAt: new Date().toISOString(),
+      status: "pending"
+    });
+
+    // Reset everything
+    form.reset();
+    setScfCustomer(null);
+    setShowConfirm(false);
+    setPendingData(null);
+    
+    await fetchCustomers();
+  } catch (e: any) {
+    setScfError(e.message || "Failed to add SCF");
+  } finally {
+    setIsScfSubmitting(false);
+  }
+};
+
+// Then, modify the table header and remove the SCF Status column
+
+    return (
+      <>
+        <Dialog open={!!scfCustomer} onOpenChange={(open) => {
+          if (!open) {
+            form.reset();
+            setScfCustomer(null);
+            setShowConfirm(false);
+            setPendingData(null);
+          }
+        }}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle>Add SCF (Service Customer Fee)</DialogTitle>
+              <DialogDescription>
+                For {scfCustomer?.name} ({scfCustomer?.accountNumber})
+              </DialogDescription>
+            </DialogHeader>
+            
+            {scfError && (
+              <div className="text-red-600 text-sm mb-2">{scfError}</div>
+            )}
+            
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="description"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Description <span className="text-red-500">*</span></FormLabel>
+                      <FormControl>
+                        <textarea 
+                          {...field}
+                          className="flex min-h-[200px] resize-y w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          placeholder="Enter detailed description of the service..."
+                          disabled={isScfSubmitting}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <FormField
+                  control={form.control}
+                  name="date"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Date <span className="text-red-500">*</span></FormLabel>
+                      <FormControl>
+                        <Input
+                          type="date"
+                          max={format(new Date(), "yyyy-MM-dd")}
+                          value={field.value ? format(field.value, "yyyy-MM-dd") : ""}
+                          onChange={e => {
+                            const date = e.target.value ? new Date(e.target.value) : new Date();
+                            field.onChange(date);
+                          }}
+                          disabled={isScfSubmitting}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <div className="flex justify-end space-x-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      form.reset();
+                      setScfCustomer(null);
+                    }}
+                    disabled={isScfSubmitting}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={isScfSubmitting}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    Add SCF
+                  </Button>
+                </div>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Confirmation Dialog */}
+        <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Confirm SCF Addition</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to add this SCF for {scfCustomer?.name}?
+                <div className="mt-4 space-y-2">
+                  <p><strong>Description:</strong> {pendingData?.description}</p>
+                  <p><strong>Date:</strong> {pendingData?.date ? format(pendingData.date, "MMMM d, yyyy") : ""}</p>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel 
+                onClick={() => setShowConfirm(false)}
+                disabled={isScfSubmitting}
+              >
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleConfirmedSubmit}
+                disabled={isScfSubmitting}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {isScfSubmitting ? "Adding..." : "Confirm"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </>
+    );
+  };
 
   // Edit Customer Form
   const EditCustomerDialog = () => {
@@ -685,6 +896,7 @@ const handleDeleteCustomer = async () => {
         </DialogContent>
       </Dialog>
     );
+
   };
 
   // Delete Confirmation Dialog
@@ -762,6 +974,13 @@ const handleDeleteCustomer = async () => {
     }
   };
 
+  // Add this function to get SCF badge color
+  const getScfStatusColor = (hasScf: boolean) => {
+    return hasScf 
+      ? "bg-yellow-100 text-yellow-800" 
+      : "bg-gray-100 text-gray-800";
+  };
+
   return (
     <div className="w-full bg-white p-6 rounded-lg shadow-sm">
       <div className="flex justify-between items-center mb-6">
@@ -819,76 +1038,86 @@ const handleDeleteCustomer = async () => {
         )}
       </div>
 
-      <div className="border rounded-md">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Account #</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Email/Phone</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Last Billing</TableHead>
-              <TableHead>Amount Due</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {currentCustomers.length > 0 ? (
-              currentCustomers.map((customer) => (
-                <TableRow key={customer.id}>
-                  <TableCell className="font-medium">
-                    {customer.accountNumber}
-                  </TableCell>
-                  <TableCell>{customer.name}</TableCell>
-                  <TableCell>{customer.email || customer.phone}</TableCell>
-                  <TableCell>
-                    <Badge 
-                      variant="outline" 
-                      className={getStatusBadgeColor(customer.status)}
-                    >
-                      {customer.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{customer.lastBillingDate}</TableCell>
-                  <TableCell>₱{customer.amountDue.toFixed(2)}</TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => onViewCustomer(customer.id)}>
-                          <Eye className="mr-2 h-4 w-4" />
-                          View Details
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setEditingCustomer(customer)}>
-                          <Edit className="mr-2 h-4 w-4" />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => setDeletingCustomer(customer)}
-                          className="text-red-600 focus:text-red-600"
-                        >
-                          <Trash className="mr-2 h-4 w-4" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center py-6 text-gray-500">
-                  No customers found
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      
+<div className="border rounded-md">
+  <Table>
+    <TableHeader>
+      <TableRow>
+        <TableHead>Account #</TableHead>
+        <TableHead>Name</TableHead>
+        <TableHead>Email/Phone</TableHead>
+        <TableHead>Block & Lot</TableHead>
+        
+        <TableHead>Status</TableHead>
+        <TableHead className="text-right">Actions</TableHead>
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {currentCustomers.length > 0 ? (
+        currentCustomers.map((customer) => (
+          <TableRow key={customer.id}>
+            <TableCell className="font-medium">
+              {customer.accountNumber}
+            </TableCell>
+            <TableCell>{customer.name}</TableCell>
+            <TableCell>
+              {customer.email && customer.phone
+                ? `${customer.email} / ${customer.phone}`
+                : customer.email || customer.phone || "-"}
+            </TableCell>
+            <TableCell>
+              Block {customer.block} Lot {customer.lot}
+            </TableCell>
+            <TableCell>
+              <Badge
+                variant="outline"
+                className={getStatusBadgeColor(customer.status)}
+              >
+                {customer.status}
+              </Badge>
+            </TableCell>
+            <TableCell className="text-right">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setScfCustomer(customer)}>
+                    <AlertCircle className="mr-2 h-4 w-4" />
+                    SCF
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onViewCustomer(customer.id)}>
+                    <Eye className="mr-2 h-4 w-4" />
+                    View Details
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setEditingCustomer(customer)}>
+                    <Edit className="mr-2 h-4 w-4" />
+                    Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setDeletingCustomer(customer)}
+                    className="text-red-600 focus:text-red-600"
+                  >
+                    <Trash className="mr-2 h-4 w-4" />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </TableCell>
+          </TableRow>
+        ))
+      ) : (
+        <TableRow>
+          <TableCell colSpan={6} className="text-center py-6 text-gray-500">
+            No customers found
+          </TableCell>
+        </TableRow>
+      )}
+    </TableBody>
+  </Table>
+</div>
 
       {/* Pagination */}
       {filteredCustomers.length > 0 && (
@@ -938,6 +1167,7 @@ const handleDeleteCustomer = async () => {
       {/* Add these dialogs at the end of the return */}
       <EditCustomerDialog />
       <DeleteConfirmationDialog />
+      <ScfDialog />
     </div>
   );
 };

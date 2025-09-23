@@ -2,18 +2,21 @@ import React, { useEffect, useState, useRef } from "react";
 import ChatList from "./ChatList";
 import CustomerChat from "./CostumerChat";
 import { useLocation } from "react-router-dom";
+import { MessageCircle, Settings } from "lucide-react";
 
 interface CustomerSupportProps {
-  userRole?: "admin" | "staff";
+  userRole?: "admin" | "staff" | "cashier" | "manager";
+  userName?: string;
 }
 
-const CustomerSupport: React.FC<CustomerSupportProps> = ({ userRole }) => {
+const CustomerSupport: React.FC<CustomerSupportProps> = ({ 
+  userRole = "staff",
+  userName = "User" 
+}) => {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [selectedCustomerName, setSelectedCustomerName] = useState<string>("");
   const [selectedCustomerAvatar, setSelectedCustomerAvatar] = useState<string>("");
   const [selectedAccount, setSelectedAccount] = useState<string>("");
-
-  // Add state to prevent duplicate message sends
   const [isSending, setIsSending] = useState(false);
   const lastSentMessage = useRef<string>('');
 
@@ -25,21 +28,17 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({ userRole }) => {
     const chatId = searchParams.get("chat");
     if (chatId) {
       setSelectedCustomerId(chatId);
-      setSelectedAccount(chatId); // If accountNumber is same as chatId, otherwise adjust as needed
-      // Optionally set name/avatar if you have a lookup or fetch logic
+      setSelectedAccount(chatId);
     }
   }, [location.search]);
 
   const handleSelectCustomer = (customerId: string, accountNumber: string) => {
     setSelectedCustomerId(customerId);
     setSelectedAccount(accountNumber);
-
-    // Reset message sending state when switching customers
     setIsSending(false);
     lastSentMessage.current = '';
 
-    // For production, fetch customer details from Firestore.
-    // For demo, using mock data:
+    // Mock customer data - replace with actual API call in production
     const mockCustomers: { [key: string]: { name: string; avatar: string } } = {
       "B3AlM9dYpQ8Zy8TLFkDG": {
         name: "John Doe",
@@ -73,11 +72,9 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({ userRole }) => {
     }
   };
 
-  // Function to handle message sending with duplicate prevention
   const handleSendMessage = async (message: string) => {
     const trimmedMessage = message.trim();
     
-    // Prevent sending if message is empty, already sending, or same as last sent
     if (!trimmedMessage || isSending || trimmedMessage === lastSentMessage.current) {
       return false;
     }
@@ -85,64 +82,112 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({ userRole }) => {
     try {
       setIsSending(true);
       lastSentMessage.current = trimmedMessage;
-      return true; // Allow the message to be sent
+      return true;
     } catch (error) {
       console.error('Error in message sending:', error);
       return false;
     } finally {
-      // Reset sending state after a short delay to prevent rapid clicking
       setTimeout(() => {
         setIsSending(false);
-        lastSentMessage.current = ''; // Reset after successful send
+        lastSentMessage.current = '';
       }, 500);
     }
   };
 
-  // Default to "staff" if userRole is not provided
-  const displayRole = userRole === "admin"
-    ? "Admin"
-    : userRole === "staff"
-    ? "Staff"
-    : userRole === "cashier"
-    ? "Cashier"
-    : "Staff";
+  // Online status display
+  const getOnlineStatus = () => {
+    return { 
+      label: "Online", 
+      color: "text-green-700", 
+      bgColor: "bg-green-50 border-green-200" 
+    };
+  };
+
+  const statusDisplay = getOnlineStatus();
 
   return (
-    <div className="w-full h-full bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-blue-800">Customer Service</h1>
-          <div className="text-sm bg-blue-100 text-blue-800 px-3 py-1 rounded-full">
-            {displayRole} Mode
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+      <div className="w-full h-full p-4 sm:p-6">
+        <div className="max-w-7xl mx-auto">
+          {/* Enhanced Header */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg">
+                <MessageCircle className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-bold text-slate-800">
+                  Customer Service
+                </h1>
+               
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <div className={`flex items-center gap-2 px-4 py-2 rounded-full border ${statusDisplay.bgColor} ${statusDisplay.color}`}>
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span className="text-sm font-medium">{statusDisplay.label}</span>
+              </div>
+              
+              {userRole === "admin" && (
+                <button className="flex items-center justify-center w-10 h-10 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                  <Settings className="w-5 h-5 text-gray-600" />
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-[calc(100vh-150px)]">
-          <div className="md:col-span-1">
-            <ChatList
-              onSelectCustomer={handleSelectCustomer}
-              selectedCustomerId={selectedCustomerId || undefined}
-              userRole={userRole || "staff"}
-            />
-          </div>
-          <div className="md:col-span-2">
-            {selectedCustomerId && selectedAccount ? (
-              <CustomerChat
-                customerDocId={selectedCustomerId}
-                customerName={selectedCustomerName}
-                customerAvatar={selectedCustomerAvatar}
-                accountNumber={selectedAccount}
-                userRole={userRole || "staff"}
-                onSendMessage={handleSendMessage}
-                isSending={isSending}
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center bg-white rounded-lg border border-gray-200 p-6">
-                <div className="text-center">
-                  <h3 className="text-lg font-medium text-gray-700 mb-2">Select a conversation</h3>
-                  <p className="text-gray-500">Choose a customer from the list to start chatting</p>
+
+          {/* Main Content Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-180px)] min-h-[600px]">
+            {/* Chat List Panel */}
+            <div className="lg:col-span-1">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 h-full overflow-hidden">
+                <div className="p-4 border-b border-gray-100">
+                  <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                    <MessageCircle className="w-5 h-5" />
+                    Active Conversations
+                  </h2>
+                </div>
+                <div className="h-[calc(100%-80px)]">
+                  <ChatList
+                    onSelectCustomer={handleSelectCustomer}
+                    selectedCustomerId={selectedCustomerId || undefined}
+                    userRole={userRole === "cashier" || userRole === "manager" ? "staff" : userRole}
+                  />
                 </div>
               </div>
-            )}
+            </div>
+
+            {/* Chat Panel */}
+            <div className="lg:col-span-2">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 h-full overflow-hidden">
+                {selectedCustomerId && selectedAccount ? (
+                  <CustomerChat
+                    customerDocId={selectedCustomerId}
+                    customerName={selectedCustomerName}
+                    customerAvatar={selectedCustomerAvatar}
+                    accountNumber={selectedAccount}
+                    userRole={userRole === "cashier" || userRole === "manager" ? "staff" : userRole}
+                    onSendMessage={handleSendMessage}
+                    isSending={isSending}
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center p-8">
+                    <div className="text-center max-w-md">
+                      <div className="flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mx-auto mb-4">
+                        <MessageCircle className="w-8 h-8 text-blue-600" />
+                      </div>
+                      <h3 className="text-xl font-semibold text-slate-800 mb-3">
+                        No Conversation Selected
+                      </h3>
+                      <p className="text-slate-600 leading-relaxed">
+                        Choose a customer from the conversation list to start chatting and providing support.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>

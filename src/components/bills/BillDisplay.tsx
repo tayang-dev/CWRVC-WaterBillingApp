@@ -126,6 +126,9 @@ const calculateTieredUsage = (totalUsage) => {
               const regularAmount = parseFloat(bill.amountWithArrears || 0);
               const arrears = parseFloat(bill.arrears || 0);
               const customer = getCustomerForBill(bill);
+              
+              // Get SCF from bill data - check multiple possible field names
+              const scf = parseFloat(bill.scffee || bill.scf || bill.scfFee || bill.serviceConnectionFee || 0);
 
               // Find all bills for this account
               const billsForAccount = selectedBills.filter(
@@ -242,7 +245,7 @@ const calculateTieredUsage = (totalUsage) => {
                           <td className="px-2 py-1 border-r border-black">{bill.billingPeriod || "01/01/25 - 01/31/25"}</td>
                           <td className="px-2 py-1 border-r border-black">{bill.waterChargeBeforeTax?.toFixed(2) || "0.00"}</td>
                           <td className="px-2 py-1 border-r border-black">{bill.tax?.toFixed(2) || "0.00"}</td>
-                          <td className="px-2 py-1 border-r border-black">0.00</td>
+                          <td className="px-2 py-1 border-r border-black">{scf.toFixed(2)}</td>
                           <td className="px-2 py-1 border-r border-black">{bill.seniorDiscount?.toFixed(2) || "0.00"}</td>
                           <td className="px-2 py-1 border-r border-black">{bill.arrears?.toFixed(2) || "0.00"}</td>
                           <td className="px-2 py-1 border-r border-black">{bill.appliedOverpayment?.toFixed(2) || "0.00"}</td>

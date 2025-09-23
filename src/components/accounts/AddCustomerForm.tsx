@@ -157,10 +157,27 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
   }, [form]);
 
   // Check if account number or meter number already exists
-  const checkIfDetailsExist = async (accountNumber: string, meterNumber: string, email?: string, phone?: string) => {
+  const checkIfDetailsExist = async (accountNumber: string, meterNumber: string, email?: string, phone?: string, block?: string, lot?: string, site?: string) => {
     setIsValidatingDetails(true);
-  
+
     try {
+      // Check if block + lot + site already exists
+      if (block && lot && site) {
+        const blockLotQuery = query(
+          collection(db, "customers"),
+          where("block", "==", block),
+          where("lot", "==", lot),
+          where("site", "==", site)
+        );
+        const blockLotSnapshot = await getDocs(blockLotQuery);
+
+        if (!blockLotSnapshot.empty) {
+          setError("A customer already exists for this block and lot in the selected site.");
+          setIsValidatingDetails(false);
+          return true;
+        }
+      }
+
       // Check if account number exists
       const accountQuery = query(
         collection(db, "customers"),
@@ -233,11 +250,14 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
   
     try {
       // Check if account number or meter number already exists
-      const detailsExist = await checkIfDetailsExist(
+     const detailsExist = await checkIfDetailsExist(
         generatedAccountNumber,
         data.meterNumber,
         data.email,
-        data.phone
+        data.phone,
+        data.block,
+        data.lot,
+        data.site
       );
             
       if (detailsExist) {

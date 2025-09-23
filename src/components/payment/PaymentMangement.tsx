@@ -83,6 +83,9 @@ interface PaymentVerification {
   referenceNumber: string;
   paymentDate: string;
   paymentMethod: string;
+   paymentProofFileName?: string;
+  paymentProofUrl?: string;
+  timestamp?: number;
   status: "pending" | "verified" | "rejected";
   notes?: string;
   submissionDateTime?: string;
@@ -1921,6 +1924,35 @@ const handleExportPaymentHistory = async () => {
     fileName
   );
 };
+
+// Add this state at the top of the component
+const [isImagePreviewOpen, setIsImagePreviewOpen] = useState(false);
+const [selectedImageUrl, setSelectedImageUrl] = useState("");
+
+// Add this component inside PaymentManagement but before the return statement
+const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  imageUrl: string; 
+}) => {
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Payment Proof</DialogTitle>
+        </DialogHeader>
+        <div className="relative aspect-video">
+          <img 
+            src={imageUrl} 
+            alt="Payment Proof" 
+            className="w-full h-full object-contain"
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
   return (
     <div className="w-full h-full bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
@@ -2158,6 +2190,7 @@ const handleExportPaymentHistory = async () => {
                         <TableHead>Payment Date</TableHead>
                         <TableHead>Method</TableHead>
                         <TableHead>Submitted</TableHead>
+                        <TableHead>Proof</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -2176,6 +2209,28 @@ const handleExportPaymentHistory = async () => {
                             {verification?.submissionDateTime
                               ? formatDateTime(verification.submissionDateTime)
                               : "N/A"}
+                          </TableCell>
+                          <TableCell>
+                            {verification.paymentProofUrl ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedImageUrl(verification.paymentProofUrl!);
+                                  setIsImagePreviewOpen(true);
+                                }}
+                                className="flex items-center gap-2"
+                              >
+                                <img 
+                                  src={verification.paymentProofUrl} 
+                                  alt="Proof thumbnail" 
+                                  className="w-8 h-8 object-cover rounded"
+                                />
+                                <span className="text-blue-600 hover:underline">View</span>
+                              </Button>
+                            ) : (
+                              "No proof"
+                            )}
                           </TableCell>
                           <TableCell className="text-right">
                             <Button
@@ -2838,6 +2893,13 @@ const handleExportPaymentHistory = async () => {
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* Image Preview Dialog - Outside of Tabs component */}
+        <ImagePreviewDialog
+          isOpen={isImagePreviewOpen}
+          onClose={() => setIsImagePreviewOpen(false)}
+          imageUrl={selectedImageUrl}
+        />
       </div>
     </div>
 
