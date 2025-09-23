@@ -11,7 +11,9 @@ import {
   doc,
   where,
   Timestamp,
-  getDoc
+  getDoc,
+  updateDoc,
+  setDoc,
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { AlertCircle, FileText, RefreshCw, Filter } from "lucide-react";
@@ -102,6 +104,19 @@ interface MeterReading {
   id?: string;
 }
 
+// --- NEW: Rates Management Types ---
+interface RateTier {
+  min: number;
+  max: number | "above" | "over";
+  rate: number;
+}
+interface RatesConfig {
+  id?: string;
+  tiers: RateTier[];
+  minimumCharge: number; 
+  updatedAt: Date | string;
+}
+
 const Bill: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [meterReadings, setMeterReadings] = useState<MeterReading[]>([]);
@@ -136,6 +151,14 @@ const Bill: React.FC = () => {
   const [printFilterSite, setPrintFilterSite] = useState("all");
   const [printFilterMonth, setPrintFilterMonth] = useState<string>("");
   const [printFilterYear, setPrintFilterYear] = useState<string>("");
+
+  // --- NEW: State for Rates Management ---
+const [ratesConfig, setRatesConfig] = useState<RatesConfig | null>(null);
+const [ratesLoading, setRatesLoading] = useState(false);
+const [editRates, setEditRates] = useState(false);
+const [editTiers, setEditTiers] = useState<RateTier[]>([]);
+const [minimumCharge, setMinimumCharge] = useState<number>(94.70);
+
   
   // Keep billingData.dueDate as a string (formatted as "yyyy-MM-dd" for the date input)
   const [billingData, setBillingData] = useState({
@@ -317,6 +340,73 @@ const fetchAllMeterReadingsWithoutBills = async () => {
   }
 };
 
+const fetchRatesConfig = async () => {
+  setRatesLoading(true);
+  try {
+    const ratesSnap = await getDocs(collection(db, "rates"));
+    if (!ratesSnap.empty) {
+      const doc = ratesSnap.docs[0];
+      const data = doc.data() as RatesConfig;
+      setRatesConfig({ id: doc.id, ...data });
+      setEditTiers(data.tiers);
+      setMinimumCharge(data.minimumCharge ?? 94.70);
+    } else {
+      // Default fallback if not found
+      setRatesConfig({
+        tiers: [
+          { min: 0, max: 5, rate: 0.00 },
+          { min: 6, max: 10, rate: 20.70 },
+          { min: 11, max: 20, rate: 22.50 },
+          { min: 21, max: 30, rate: 24.40 },
+          { min: 31, max: 40, rate: 26.30 },
+          { min: 41, max: "above", rate: 28.10 },
+        ],
+        minimumCharge: 94.70,
+        updatedAt: new Date(),
+      });
+      setEditTiers([
+        { min: 0, max: 5, rate: 0.00 },
+        { min: 6, max: 10, rate: 20.70 },
+        { min: 11, max: 20, rate: 22.50 },
+        { min: 21, max: 30, rate: 24.40 },
+        { min: 31, max: 40, rate: 26.30 },
+        { min: 41, max: "above", rate: 28.10 },
+      ]);
+      setMinimumCharge(94.70);
+    }
+  } catch (e) {
+    showNotification("Failed to load rates config.", "error");
+  }
+  setRatesLoading(false);
+};
+useEffect(() => {
+  fetchRatesConfig();
+}, []);
+
+// --- NEW: Save/Update RatesConfig in Firestore ---
+const saveRatesConfig = async () => {
+  setRatesLoading(true);
+  try {
+    const newConfig = {
+      tiers: editTiers,
+      minimumCharge: minimumCharge,
+      updatedAt: new Date().toISOString(),
+    };
+    if (ratesConfig?.id) {
+      await setDoc(doc(db, "rates", ratesConfig.id), newConfig);
+    } else {
+      await addDoc(collection(db, "rates"), newConfig);
+    }
+    setRatesConfig({ ...newConfig, id: ratesConfig?.id });
+    setEditRates(false);
+    showNotification("Rates updated successfully!", "success");
+    fetchRatesConfig();
+  } catch (e) {
+    showNotification("Failed to save rates.", "error");
+  }
+  setRatesLoading(false);
+};
+
 const calculateBillingPeriodFromDueDate = (dueDateStr: string): string => {
   if (!dueDateStr) return "";
   const [day, month, year] = dueDateStr.split("/").map(Number);
@@ -366,49 +456,35 @@ const calculateBillingPeriodFromDueDate = (dueDateStr: string): string => {
 const calculateBillAmount = (usage: number, isSenior: boolean = false) => {
   let total = 0;
   let remaining = usage;
+  const minCharge = ratesConfig?.minimumCharge ?? 94.70;
 
-  // 0-5 units: ₱0.00 per unit, but minimum charge ₱94.70
-  if (remaining > 0) {
-    if (usage <= 5) {
-      total = Math.max(usage * 0, 94.70);
-      remaining = 0;
-    } else {
-      total += 94.70; // Always add minimum charge for first 5 units
-      remaining -= 5;
+  // --- Dynamically get minimum tier from ratesConfig ---
+  const minTier = ratesConfig?.tiers?.[0];
+  const minTierMin = typeof minTier?.min === "number" ? minTier.min : 0;
+  const minTierMax = typeof minTier?.max === "number" ? minTier.max : 5;
+
+  // Always apply minimum charge for any usage within the minimum tier (including 0)
+  if (usage >= minTierMin && usage <= minTierMax) {
+    total = minCharge;
+    remaining = 0;
+  } else if (usage > minTierMax) {
+    total += minCharge; // Apply minimum charge for the first tier
+    remaining -= (minTierMax - minTierMin + 1);
+  }
+
+  // Use dynamic tiers for the rest
+  if (ratesConfig?.tiers) {
+    for (let i = 1; i < ratesConfig.tiers.length && remaining > 0; i++) {
+      const tier = ratesConfig.tiers[i];
+      const tierMin = typeof tier.min === "number" ? tier.min : 0;
+      const tierMax = tier.max === "above" || tier.max === "over" ? Infinity : Number(tier.max);
+      const tierRange = tierMax === Infinity ? remaining : tierMax - tierMin + 1;
+      const tierUsage = Math.min(remaining, tierRange);
+      if (tierUsage > 0) {
+        total += tierUsage * tier.rate;
+        remaining -= tierUsage;
+      }
     }
-  }
-
-  // 6-10 units: ₱20.70 per unit
-  if (remaining > 0) {
-    const tier2 = Math.min(remaining, 5);
-    total += tier2 * 20.70;
-    remaining -= tier2;
-  }
-
-  // 11-20 units: ₱22.50 per unit
-  if (remaining > 0) {
-    const tier3 = Math.min(remaining, 10);
-    total += tier3 * 22.50;
-    remaining -= tier3;
-  }
-
-  // 21-30 units: ₱24.40 per unit
-  if (remaining > 0) {
-    const tier4 = Math.min(remaining, 10);
-    total += tier4 * 24.40;
-    remaining -= tier4;
-  }
-
-  // 31-40 units: ₱26.30 per unit
-  if (remaining > 0) {
-    const tier5 = Math.min(remaining, 10);
-    total += tier5 * 26.30;
-    remaining -= tier5;
-  }
-
-  // 41+ units: ₱28.10 per unit
-  if (remaining > 0) {
-    total += remaining * 28.10;
   }
 
   // Tax, discount, penalty
@@ -608,7 +684,7 @@ const handleCreateBills = async (readings: MeterReading[]) => {
         if (!customer) return false;
 
         const usage = reading.currentReading - reading.previousReading;
-        if (usage <= 0) return false;
+        if (usage < 0) return false;
 
         const billingPeriod = calculateBillingPeriodFromDueDate(reading.dueDate);
 
@@ -630,6 +706,11 @@ const handleCreateBills = async (readings: MeterReading[]) => {
 
         const isSenior = customer.isSenior || false;
         const billCalc = calculateBillAmount(usage, isSenior);
+        
+        if (usage === 0 && billCalc.waterCharge === 0) {
+          billCalc.waterCharge = ratesConfig?.minimumCharge ?? 94.70;
+          billCalc.totalAmountDue = billCalc.waterCharge + billCalc.tax - billCalc.discount;
+        }
 
         // Only apply SCF fee if it hasn't been applied before
         if (scfAppliedSnap.empty) {
@@ -1750,53 +1831,49 @@ const showLoginCredentials = isEarliestBill;
   };
   
   // Calculate water rate tiers
-function calculateTiers(waterUsage) {
-  if (!waterUsage || waterUsage <= 0) return [];
-
-  const tiers = [
-    { min: 0, max: 5, rate: 0.00 },
-    { min: 6, max: 10, rate: 20.70 },
-    { min: 11, max: 20, rate: 22.50 },
-    { min: 21, max: 30, rate: 24.40 },
-    { min: 31, max: 40, rate: 26.30 },
-    { min: 41, max: Infinity, rate: 28.10 },
-  ];
+function calculateTiers(waterUsage: number) {
+  if (!ratesConfig?.tiers) return [];
+  const tiers = ratesConfig.tiers;
+  const minCharge = ratesConfig.minimumCharge ?? 94.70;
+  const minTier = tiers[0];
+  const minTierMin = typeof minTier.min === "number" ? minTier.min : 0;
+  const minTierMax = typeof minTier.max === "number" ? minTier.max : 5;
 
   let remainingUsage = waterUsage;
-  let activeTiers = [];
+  let activeTiers: any[] = [];
 
-  // Always show 5 units and minimum charge for first tier
-  if (waterUsage <= 5) {
+  // Always show minimum charge for any usage within the minimum tier (including 0)
+  if (waterUsage >= minTierMin && waterUsage <= minTierMax) {
     activeTiers.push({
-      min: 0,
-      max: 5,
-      rate: 0.00,
+      min: minTierMin,
+      max: minTierMax,
+      rate: minTier.rate,
       usage: waterUsage,
-      amount: 94.70,
+      amount: minCharge,
     });
     return activeTiers;
-  } else {
+  } else if (waterUsage > minTierMax) {
     activeTiers.push({
-      min: 0,
-      max: 5,
-      rate: 0.00,
-      usage: 5,
-      amount: 94.70,
+      min: minTierMin,
+      max: minTierMax,
+      rate: minTier.rate,
+      usage: minTierMax - minTierMin + 1,
+      amount: minCharge,
     });
-    remainingUsage -= 5;
+    remainingUsage -= (minTierMax - minTierMin + 1);
   }
 
   // Distribute remaining usage to other tiers
   for (let i = 1; i < tiers.length && remainingUsage > 0; i++) {
     const tierMin = tiers[i].min;
-    const tierMax = tiers[i].max;
+    const tierMax = tiers[i].max === "above" || tiers[i].max === "over" ? Infinity : Number(tiers[i].max);
     const tierRange = tierMax === Infinity ? remainingUsage : tierMax - tierMin + 1;
     const tierUsage = Math.min(remainingUsage, tierRange);
 
     if (tierUsage > 0) {
       activeTiers.push({
         min: tierMin,
-        max: tierMax === Infinity ? "over" : tierMax,
+        max: tiers[i].max,
         rate: tiers[i].rate,
         usage: tierUsage,
         amount: parseFloat((tierUsage * tiers[i].rate).toFixed(2)),
@@ -1804,11 +1881,9 @@ function calculateTiers(waterUsage) {
       remainingUsage -= tierUsage;
     }
   }
-
   return activeTiers;
 }
-
-function calculateDefaultRates(usage) {
+function calculateDefaultRates(usage: number) {
   return calculateTiers(usage);
 }
 
@@ -1845,7 +1920,7 @@ const handleExportBillsToExcel = async (exportBills = filteredBills) => {
     workbook.keywords = "water, bills, customers, payments";
     
     // Color palette with blue theme
-    const colors = {
+       const colors = {
       darkBlue: { argb: 'FF1A5980' },      // Deep blue
       mediumBlue: { argb: 'FF1E88E5' },    // Medium blue
       lightBlue: { argb: 'FFB3E0FF' },     // Light blue
@@ -2443,7 +2518,8 @@ const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="mb-6">
           <TabsTrigger value="customer-billing">Customer Billing</TabsTrigger>
-          <TabsTrigger value="view-bills" onClick={fetchBillsData}>View Bills</TabsTrigger> {/* New Tab */}
+          <TabsTrigger value="view-bills" onClick={fetchBillsData}>View Bills</TabsTrigger>
+          <TabsTrigger value="manage-rates" onClick={fetchRatesConfig}>Manage Rates</TabsTrigger>
         </TabsList>
 
         {/* Customer Billing Tab */}
@@ -2881,6 +2957,156 @@ const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
     </Button>
   </div>
 )}
+        </TabsContent>
+
+        {/* --- NEW: Manage Rates Tab --- */}
+        <TabsContent value="manage-rates" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Manage Water Rate Tiers</CardTitle>
+              <CardDescription>
+                View and update the rates breakdown used for billing calculations.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {ratesLoading ? (
+                <div>Loading rates...</div>
+              ) : (
+                <>
+                  {!editRates ? (
+                    <>
+                      <div className="mb-4">
+                        <Button onClick={() => setEditRates(true)}>Edit Rates</Button>
+                      <span className="text-sm text-gray-700">
+                        Minimum Charge: <b>₱{(ratesConfig?.minimumCharge ?? 94.70).toFixed(2)}</b>
+                      </span>
+                      </div>
+                      <table className="w-full border text-sm">
+                        <thead>
+                          <tr className="bg-gray-100">
+                            <th className="px-3 py-2 border">Min</th>
+                            <th className="px-3 py-2 border">Max</th>
+                            <th className="px-3 py-2 border">Rate (₱/unit)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ratesConfig?.tiers?.map((tier, idx) => (
+                            <tr key={idx}>
+                              <td className="px-3 py-2 border">{tier.min}</td>
+                              <td className="px-3 py-2 border">{tier.max}</td>
+                              <td className="px-3 py-2 border">{tier.rate}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div className="text-xs text-gray-500 mt-2">
+                        Last updated: {ratesConfig?.updatedAt ? new Date(ratesConfig.updatedAt).toLocaleString() : "N/A"}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="mb-2 text-sm text-gray-700">Edit Rate Tiers & Minimum Charge:</div>
+                      <div className="mb-4 flex items-center gap-4">
+                        <label className="text-sm font-medium">
+                          Minimum Charge (₱):{" "}
+                          <input
+                            type="number"
+                            step="0.01"
+                            min={0}
+                            value={minimumCharge}
+                            onChange={e => setMinimumCharge(Number(e.target.value))}
+                            className="border rounded px-2 py-1 w-24"
+                          />
+                        </label>
+                      </div>
+                      <table className="w-full border text-sm mb-4">
+                        <thead>
+                          <tr className="bg-gray-100">
+                            <th className="px-3 py-2 border">Min</th>
+                            <th className="px-3 py-2 border">Max</th>
+                            <th className="px-3 py-2 border">Rate (₱/unit)</th>
+                            <th className="px-3 py-2 border">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {editTiers.map((tier, idx) => (
+                            <tr key={idx}>
+                              <td className="px-3 py-2 border">
+                              <input
+                                type="number"
+                                value={tier.min}
+                                onChange={e => {
+                                  const val = Number(e.target.value);
+                                  setEditTiers(tiers =>
+                                    tiers.map((t, i) => i === idx ? { ...t, min: val } : t)
+                                  );
+                                }}
+                                className="w-16 border rounded px-1"
+                              />
+                            </td>
+                            <td className="px-3 py-2 border">
+                              <input
+                                type="text"
+                                value={tier.max}
+                                onChange={e => {
+                                  const val = e.target.value === "above" || e.target.value === "over"
+                                    ? e.target.value
+                                    : Number(e.target.value);
+                                  setEditTiers(tiers =>
+                                    tiers.map((t, i) => i === idx ? { ...t, max: val } : t)
+                                  );
+                                }}
+                                className="w-16 border rounded px-1"
+                              />
+                            </td>
+                            <td className="px-3 py-2 border">
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={tier.rate}
+                                onChange={e => {
+                                  const val = Number(e.target.value);
+                                  setEditTiers(tiers =>
+                                    tiers.map((t, i) => i === idx ? { ...t, rate: val } : t)
+                                  );
+                                }}
+                                className="w-20 border rounded px-1"
+                              />
+                            </td>
+                            <td className="px-3 py-2 border">
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => setEditTiers(tiers => tiers.filter((_, i) => i !== idx))}
+                                disabled={editTiers.length <= 1}
+                              >
+                                Remove
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                        </tbody>
+                      </table>
+                      <div className="flex gap-2 mb-4">
+                        <Button
+                          onClick={() => setEditTiers([...editTiers, { min: 0, max: "above", rate: 0 }])}
+                          variant="outline"
+                        >
+                          Add Tier
+                        </Button>
+                        <Button onClick={saveRatesConfig} disabled={ratesLoading}>
+                          Save Rates
+                        </Button>
+                        <Button variant="secondary" onClick={() => { setEditRates(false); setEditTiers(ratesConfig?.tiers || []); }}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
       <BillDisplay 

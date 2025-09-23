@@ -1,8 +1,10 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import logoImage from "@/assets/logo.png"; // Adjust the path as necessary
+import logoImage from "@/assets/logo.png";
 import { QRCodeCanvas } from "qrcode.react";
+import { db } from "../../lib/firebase";
+import { collection, getDocs } from "firebase/firestore";
 
 // Utility function to format currency
 const formatCurrency = (amount) => {
@@ -13,6 +15,50 @@ const formatCurrency = (amount) => {
 };
 
 const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills, customersCollection }) => {
+  const [ratesConfig, setRatesConfig] = useState(null);
+
+  // Fetch ratesConfig from Firestore
+  useEffect(() => {
+    const fetchRatesConfig = async () => {
+      try {
+        const ratesSnap = await getDocs(collection(db, "rates"));
+        if (!ratesSnap.empty) {
+          const doc = ratesSnap.docs[0];
+          const data = doc.data();
+          setRatesConfig({
+            tiers: data.tiers,
+            minimumCharge: data.minimumCharge ?? 94.70,
+          });
+        } else {
+          setRatesConfig({
+            tiers: [
+              { min: 0, max: 5, rate: 0.00 },
+              { min: 6, max: 10, rate: 20.70 },
+              { min: 11, max: 20, rate: 22.50 },
+              { min: 21, max: 30, rate: 24.40 },
+              { min: 31, max: 40, rate: 26.30 },
+              { min: 41, max: "above", rate: 28.10 },
+            ],
+            minimumCharge: 94.70,
+          });
+        }
+      } catch (e) {
+        setRatesConfig({
+          tiers: [
+            { min: 0, max: 5, rate: 0.00 },
+            { min: 6, max: 10, rate: 20.70 },
+            { min: 11, max: 20, rate: 22.50 },
+            { min: 21, max: 30, rate: 24.40 },
+            { min: 31, max: 40, rate: 26.30 },
+            { min: 41, max: "above", rate: 28.10 },
+          ],
+          minimumCharge: 94.70,
+        });
+      }
+    };
+    fetchRatesConfig();
+  }, []);
+
   if (!selectedBills || selectedBills.length === 0) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -29,119 +75,118 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills, custo
   // Find the customer object from the provided collection using accountNumber
   const getCustomerForBill = (bill) => {
     if (!customersCollection) return null;
-    // Try to match by accountNumber
     return customersCollection.find(
       (customer) => customer.accountNumber === bill.accountNumber
     );
   };
 
-  // Sort bills by creation date (newest first) - FIXED the TypeScript error here
+  // Sort bills by creation date (newest first)
   const sortedBills = [...selectedBills].sort((a, b) => {
-    // Handle Firestore Timestamp objects, string dates, or fallback to 0
     let dateA = 0;
     let dateB = 0;
-    
     if (a.createdAt) {
-      // Check if it's a Firestore Timestamp (has seconds and nanoseconds)
-      dateA = a.createdAt.seconds ? 
-        a.createdAt.seconds * 1000 + a.createdAt.nanoseconds / 1000000 : 
+      dateA = a.createdAt.seconds ?
+        a.createdAt.seconds * 1000 + a.createdAt.nanoseconds / 1000000 :
         new Date(a.createdAt).getTime();
     }
-    
     if (b.createdAt) {
-      // Check if it's a Firestore Timestamp (has seconds and nanoseconds)
-      dateB = b.createdAt.seconds ? 
-        b.createdAt.seconds * 1000 + b.createdAt.nanoseconds / 1000000 : 
+      dateB = b.createdAt.seconds ?
+        b.createdAt.seconds * 1000 + b.createdAt.nanoseconds / 1000000 :
         new Date(b.createdAt).getTime();
     }
-    
-    return dateB - dateA; // Sort in descending order (newest first)
+    return dateB - dateA;
   });
 
-  // Calculate tiered billing for display purposes
-const calculateTieredUsage = (totalUsage) => {
-  const tiers = [
-    { min: 0, max: 5, rate: 0.00, usage: 0, amount: 0 },
-    { min: 6, max: 10, rate: 20.70, usage: 0, amount: 0 },
-    { min: 11, max: 20, rate: 22.50, usage: 0, amount: 0 },
-    { min: 21, max: 30, rate: 24.40, usage: 0, amount: 0 },
-    { min: 31, max: 40, rate: 26.30, usage: 0, amount: 0 },
-    { min: 41, max: Infinity, rate: 28.10, usage: 0, amount: 0 },
-  ];
-
-  let remainingUsage = totalUsage;
-  let totalAmount = 0;
-
-  if (totalUsage <= 0) {
-    return { tiers, totalAmount };
-  }
-
-  // Always show 5 units and minimum charge for first tier
-  if (totalUsage <= 5) {
-    tiers[0].usage = totalUsage;
-    tiers[0].amount = 94.70;
-    totalAmount = 94.70;
-    return { tiers, totalAmount };
-  } else {
-    tiers[0].usage = 5;
-    tiers[0].amount = 94.70;
-    totalAmount += 94.70;
-    remainingUsage -= 5;
-  }
-
-  // Distribute remaining usage to other tiers
-  for (let i = 1; i < tiers.length && remainingUsage > 0; i++) {
-    const tierMin = tiers[i].min;
-    const tierMax = tiers[i].max;
-    const tierRange = tierMax === Infinity ? remainingUsage : tierMax - tierMin + 1;
-    const tierUsage = Math.min(remainingUsage, tierRange);
-
-    if (tierUsage > 0) {
-      tiers[i].usage = tierUsage;
-      tiers[i].amount = parseFloat((tierUsage * tiers[i].rate).toFixed(2));
-      totalAmount += tiers[i].amount;
-      remainingUsage -= tierUsage;
+  // --- Use dynamic ratesConfig for tiered billing ---
+  const calculateTieredUsage = (totalUsage) => {
+    if (!ratesConfig) {
+      // fallback to default
+      return {
+        tiers: [],
+        totalAmount: 0,
+      };
     }
-  }
+    const tiers = ratesConfig.tiers.map(tier => ({
+      ...tier,
+      usage: 0,
+      amount: 0,
+    }));
 
-  return { tiers, totalAmount };
-}
+    let remainingUsage = totalUsage;
+    let totalAmount = 0;
+
+    // Always apply minimum charge for usage within the minimum tier (including 0)
+    const minTier = tiers[0];
+    const minTierMin = typeof minTier.min === "number" ? minTier.min : 0;
+    const minTierMax = typeof minTier.max === "number" ? minTier.max : 5;
+    const minCharge = ratesConfig.minimumCharge ?? 94.70;
+
+    if (totalUsage >= minTierMin && totalUsage <= minTierMax) {
+      tiers[0].usage = totalUsage;
+      tiers[0].amount = minCharge;
+      totalAmount = minCharge;
+      return { tiers, totalAmount };
+    } else if (totalUsage > minTierMax) {
+      tiers[0].usage = minTierMax - minTierMin + 1;
+      tiers[0].amount = minCharge;
+      totalAmount += minCharge;
+      remainingUsage -= (minTierMax - minTierMin + 1);
+    } else {
+      // usage < minTierMin
+      tiers[0].usage = totalUsage;
+      tiers[0].amount = minCharge;
+      totalAmount = minCharge;
+      return { tiers, totalAmount };
+    }
+
+    // Distribute remaining usage to other tiers
+    for (let i = 1; i < tiers.length && remainingUsage > 0; i++) {
+      const tier = tiers[i];
+      const tierMin = typeof tier.min === "number" ? tier.min : 0;
+      const tierMax = tier.max === "above" || tier.max === "over" ? Infinity : Number(tier.max);
+      const tierRange = tierMax === Infinity ? remainingUsage : tierMax - tierMin + 1;
+      const tierUsage = Math.min(remainingUsage, tierRange);
+
+      if (tierUsage > 0) {
+        tiers[i].usage = tierUsage;
+        tiers[i].amount = parseFloat((tierUsage * tier.rate).toFixed(2));
+        totalAmount += tiers[i].amount;
+        remainingUsage -= tierUsage;
+      }
+    }
+
+    return { tiers, totalAmount };
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-6xl w-full max-h-[90vh] overflow-y-auto" // Increased width
-        style={{ width: "100%", maxWidth: "1100px" }} // Optional: force even wider if needed
+        className="max-w-6xl w-full max-h-[90vh] overflow-y-auto"
+        style={{ width: "100%", maxWidth: "1100px" }}
       >
         <DialogHeader>
           <DialogTitle>Bills for {selectedAccount}</DialogTitle>
         </DialogHeader>
         <div className="space-y-8">
-          {/* Track which account numbers have already shown credentials */}
           {(() => {
-            // For each bill, determine if it's the earliest for the account
             return sortedBills.map((bill, index) => {
               const { tiers, totalAmount } = calculateTieredUsage(bill.waterUsage || 0);
               const totalAmountAfterDue = parseFloat(bill.amountAfterDue || 0) + parseFloat(bill.arrears || 0);
               const regularAmount = parseFloat(bill.amountWithArrears || 0);
               const arrears = parseFloat(bill.arrears || 0);
               const customer = getCustomerForBill(bill);
-              
-              // Get SCF from bill data - check multiple possible field names
+
               const scf = parseFloat(bill.scffee || bill.scf || bill.scfFee || bill.serviceConnectionFee || 0);
 
-              // Find all bills for this account
               const billsForAccount = selectedBills.filter(
                 b => b.accountNumber === bill.accountNumber
               );
 
-              // Find the earliest bill by dueDate (format: dd/mm/yyyy)
               const getDateObj = (b) => {
                 if (b.dueDate && typeof b.dueDate === "string" && b.dueDate.includes("/")) {
                   const [day, month, year] = b.dueDate.split("/").map(Number);
                   return new Date(year, month - 1, day);
                 }
-                // fallback to createdAt if available
                 if (b.createdAt && b.createdAt.seconds) {
                   return new Date(b.createdAt.seconds * 1000 + (b.createdAt.nanoseconds || 0) / 1000000);
                 }
@@ -152,7 +197,6 @@ const calculateTieredUsage = (totalUsage) => {
                 return getDateObj(current) < getDateObj(earliest) ? current : earliest;
               }, billsForAccount[0]);
 
-              // Only show credentials if this bill is the earliest for the account
               const showCredentials = bill.id === earliestBill.id;
 
               return (
