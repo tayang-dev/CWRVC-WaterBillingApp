@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import logoImage from "@/assets/logo.png"; // Adjust the path if necessary
 import {
   collection,
@@ -16,7 +16,7 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
-import { AlertCircle, FileText, RefreshCw, Filter } from "lucide-react";
+import { AlertCircle, FileText, RefreshCw, Filter, BarChart, Calculator, CheckCircle, Clock, Edit, Info, Plus, Save, Trash2, X } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -159,6 +159,8 @@ const [editRates, setEditRates] = useState(false);
 const [editTiers, setEditTiers] = useState<RateTier[]>([]);
 const [minimumCharge, setMinimumCharge] = useState<number>(94.70);
 
+  const manageRatesRef = useRef<HTMLDivElement>(null);
+
   
   // Keep billingData.dueDate as a string (formatted as "yyyy-MM-dd" for the date input)
   const [billingData, setBillingData] = useState({
@@ -183,7 +185,12 @@ const [minimumCharge, setMinimumCharge] = useState<number>(94.70);
   const generateBillNumber = (count: number) => {
     return String(count + 1).padStart(10, "0");
   };
-
+  // Scroll to top of Manage Rates tab when notification appears
+  useEffect(() => {
+    if (notification && activeTab === "manage-rates" && manageRatesRef.current) {
+      manageRatesRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [notification, activeTab]);
   useEffect(() => {
     fetchCustomers();
   }, []);
@@ -383,8 +390,34 @@ useEffect(() => {
   fetchRatesConfig();
 }, []);
 
+function validateTiersAscending(tiers: RateTier[]): string | null {
+  if (tiers.length === 0) return null;
+  for (let i = 0; i < tiers.length; i++) {
+    const min = Number(tiers[i].min);
+    const max = tiers[i].max === "above" || tiers[i].max === "over" ? Infinity : Number(tiers[i].max);
+
+    // Min should not be greater than max (unless max is "above")
+    if (max !== Infinity && min > max) {
+      return `Tier ${i + 1}: Min (${min}) cannot be greater than Max (${max}).`;
+    }
+    // Next tier's min should be greater than previous tier's max
+    if (i > 0) {
+      const prevMax = tiers[i - 1].max === "above" || tiers[i - 1].max === "over" ? Infinity : Number(tiers[i - 1].max);
+      if (min <= prevMax) {
+        return `Tier ${i + 1}: Min (${min}) must be greater than previous Max (${prevMax}).`;
+      }
+    }
+  }
+  return null;
+}
 // --- NEW: Save/Update RatesConfig in Firestore ---
 const saveRatesConfig = async () => {
+    // Validate tiers before saving
+  const validationError = validateTiersAscending(editTiers);
+  if (validationError) {
+    showNotification(validationError, "error");
+    return;
+  }
   setRatesLoading(true);
   try {
     const newConfig = {
@@ -688,21 +721,18 @@ const handleCreateBills = async (readings: MeterReading[]) => {
 
         const billingPeriod = calculateBillingPeriodFromDueDate(reading.dueDate);
 
-        // --- SCF FEE LOGIC ---
-        const [day, month, year] = reading.dueDate.split("/").map(Number);
-        
-        // First, check if SCF has already been applied for this customer and month
-        const scfAppliedQuery = query(
-          collection(db, "scf"),
-          where("accountNumber", "==", reading.accountNumber),
-          where("date", ">=", `${year}-${String(month).padStart(2, "0")}-01`),
-          where("date", "<=", `${year}-${String(month).padStart(2, "0")}-31`),
-          where("applied", "==", true)
-        );
-        const scfAppliedSnap = await getDocs(scfAppliedQuery);
-        
-        let scffee = 0;
-        let scfDocId = null;
+// --- NEW SCF LOGIC ---
+    // Fetch latest customer data to get scfAmount
+    const customerRef = doc(db, "customers", customer.id);
+    const customerSnap = await getDoc(customerRef);
+    const customerData = customerSnap.data();
+    let scfAmount = customerData?.scfAmount ?? 0;
+
+    // Determine SCF to apply (max ₱500, or remaining scfAmount)
+    let scfToApply = 0;
+    if (scfAmount > 0) {
+      scfToApply = Math.min(500, scfAmount);
+    }
 
         const isSenior = customer.isSenior || false;
         const billCalc = calculateBillAmount(usage, isSenior);
@@ -712,35 +742,14 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           billCalc.totalAmountDue = billCalc.waterCharge + billCalc.tax - billCalc.discount;
         }
 
-        // Only apply SCF fee if it hasn't been applied before
-        if (scfAppliedSnap.empty) {
-          // Check for SCF records without applied field (or applied: false)
-          const scfQuery = query(
-            collection(db, "scf"),
-            where("accountNumber", "==", reading.accountNumber),
-            where("date", ">=", `${year}-${String(month).padStart(2, "0")}-01`),
-            where("date", "<=", `${year}-${String(month).padStart(2, "0")}-31`)
-          );
-          const scfSnap = await getDocs(scfQuery);
-          
-          // Filter out records that already have applied: true
-          const availableScfDocs = scfSnap.docs.filter(doc => {
-            const data = doc.data();
-            return !data.applied; // Only include docs without applied field or applied: false
-          });
 
-          if (availableScfDocs.length > 0) {
-            // Calculate SCF fee as 20% of basic water charge
-            scffee = Number((billCalc.waterCharge * 0.2).toFixed(2));
-            scfDocId = availableScfDocs[0].id; // Get the first available SCF document
-          }
-        }
 
-        // Keep water charge fields separate from SCF fee
+        // Add SCF to bill
         const baseWaterCharge = billCalc.waterCharge;
-        const totalChargeIncludingSCF = baseWaterCharge + scffee;
-        
-        // Calculate tax on the total (water charge + SCF fee)
+        const totalChargeIncludingSCF = baseWaterCharge + scfToApply;
+
+            
+        // Calculate tax, discount, penalty on total
         const tax = totalChargeIncludingSCF * billingData.taxRate;
         const discount = isSenior ? totalChargeIncludingSCF * billingData.seniorDiscountRate : 0;
         const totalBeforePenalty = totalChargeIncludingSCF + tax - discount;
@@ -799,6 +808,7 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           : customer.address || "";
         const amountWithArrears = Number((currentAmountDue + arrears).toFixed(2));
 
+
         const billData = {
           customerId: customer.id,
           customerName: customer.name,
@@ -832,18 +842,16 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           overpaymentSourceBill: overpaymentSourceBill,
           rawCalculatedAmount: Number(totalAmountDue.toFixed(2)),
           amountWithArrears: amountWithArrears,
-          scffee: scffee,
+          scfApplied: scfToApply, // Save SCF applied
         };
 
         // Save billData to Firestore
         await addDoc(collection(db, "bills", reading.accountNumber, "records"), billData);
 
-        // If SCF fee was applied, update the SCF document to mark it as applied
-        if (scffee > 0 && scfDocId) {
-          await updateDoc(doc(db, "scf", scfDocId), {
-            applied: true,
-            appliedDate: Timestamp.now(),
-            appliedToBillNumber: billNumber
+        // Subtract SCF from customer if applied
+        if (scfToApply > 0) {
+          await updateDoc(customerRef, {
+            scfAmount: scfAmount - scfToApply
           });
         }
 
@@ -1068,7 +1076,8 @@ console.log("Bill site sample:", filteredDocs[0]?.data().site);
         dueDate: doc.data().dueDate || "00/00/0000",
         penalty: doc.data().penalty || 0,
         amountAfterDue: doc.data().amountAfterDue || 0,
-        ratesBreakdown: doc.data().ratesBreakdown || calculateDefaultRates(doc.data().waterUsage || 0),
+        ratesBreakdown: doc.data().ratesBreakdown || calculateTiers(doc.data().waterUsage || 0),      
+        scfApplied: doc.data().scfApplied || 0,
       }));
       
       console.log(filteredBills); // Debug filtered bills data
@@ -1451,7 +1460,7 @@ const showLoginCredentials = isEarliestBill;
           formatBillingPeriod(bill.billingPeriod || "01/04/2025 - 01/05/2025"),
           formatCurrency(bill.waterChargeBeforeTax || 517.50),
           formatCurrency(bill.tax || 10.35),
-          formatCurrency(0.00), // SCF
+          formatCurrency(bill.scfApplied), // SCF
           formatCurrency(bill.seniorDiscount || 0.00),
           formatCurrency(bill.arrears || 0.00),
           formatCurrency(bill.appliedOverpayment || 0.00)
@@ -2959,79 +2968,211 @@ const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
 )}
         </TabsContent>
 
-        {/* --- NEW: Manage Rates Tab --- */}
-        <TabsContent value="manage-rates" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Manage Water Rate Tiers</CardTitle>
-              <CardDescription>
-                View and update the rates breakdown used for billing calculations.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {ratesLoading ? (
-                <div>Loading rates...</div>
-              ) : (
-                <>
-                  {!editRates ? (
-                    <>
-                      <div className="mb-4">
-                        <Button onClick={() => setEditRates(true)}>Edit Rates</Button>
-                      <span className="text-sm text-gray-700">
-                        Minimum Charge: <b>₱{(ratesConfig?.minimumCharge ?? 94.70).toFixed(2)}</b>
-                      </span>
-                      </div>
-                      <table className="w-full border text-sm">
-                        <thead>
-                          <tr className="bg-gray-100">
-                            <th className="px-3 py-2 border">Min</th>
-                            <th className="px-3 py-2 border">Max</th>
-                            <th className="px-3 py-2 border">Rate (₱/unit)</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {ratesConfig?.tiers?.map((tier, idx) => (
-                            <tr key={idx}>
-                              <td className="px-3 py-2 border">{tier.min}</td>
-                              <td className="px-3 py-2 border">{tier.max}</td>
-                              <td className="px-3 py-2 border">{tier.rate}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      <div className="text-xs text-gray-500 mt-2">
-                        Last updated: {ratesConfig?.updatedAt ? new Date(ratesConfig.updatedAt).toLocaleString() : "N/A"}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="mb-2 text-sm text-gray-700">Edit Rate Tiers & Minimum Charge:</div>
-                      <div className="mb-4 flex items-center gap-4">
-                        <label className="text-sm font-medium">
-                          Minimum Charge (₱):{" "}
-                          <input
-                            type="number"
-                            step="0.01"
-                            min={0}
-                            value={minimumCharge}
-                            onChange={e => setMinimumCharge(Number(e.target.value))}
-                            className="border rounded px-2 py-1 w-24"
-                          />
-                        </label>
-                      </div>
-                      <table className="w-full border text-sm mb-4">
-                        <thead>
-                          <tr className="bg-gray-100">
-                            <th className="px-3 py-2 border">Min</th>
-                            <th className="px-3 py-2 border">Max</th>
-                            <th className="px-3 py-2 border">Rate (₱/unit)</th>
-                            <th className="px-3 py-2 border">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {editTiers.map((tier, idx) => (
-                            <tr key={idx}>
-                              <td className="px-3 py-2 border">
+{/* --- ENHANCED: Manage Rates Tab --- */}
+<TabsContent value="manage-rates" className="space-y-6">
+  {/* Enhanced notification block */}
+          <div ref={manageRatesRef}></div>
+          {/* Enhanced notification block */}
+          {notification && (
+            <div className={`mb-6 p-4 rounded-lg shadow-sm border-l-4 ${
+              notification.type === 'success' 
+                ? 'bg-green-50 text-green-800 border-l-green-400 border border-green-200' :
+              notification.type === 'error' 
+                ? 'bg-red-50 text-red-800 border-l-red-400 border border-red-200' :
+                'bg-blue-50 text-blue-800 border-l-blue-400 border border-blue-200'
+            }`}>
+      <div className="flex items-start">
+        <div className="flex-shrink-0">
+          {notification.type === 'success' && <CheckCircle className="h-5 w-5 text-green-500" />}
+          {notification.type === 'error' && <AlertCircle className="h-5 w-5 text-red-500" />}
+          {notification.type === 'info' && <Info className="h-5 w-5 text-blue-500" />}
+        </div>
+        <div className="ml-3">
+          <p className="font-medium">{notification.message}</p>
+        </div>
+      </div>
+    </div>
+  )}
+
+  <Card className="shadow-sm border-0 bg-gradient-to-br from-white to-gray-50">
+    <CardHeader className="pb-6 border-b border-gray-100">
+      <div className="flex items-center justify-between">
+        <div>
+          <CardTitle className="text-2xl font-bold text-gray-900 flex items-center gap-3">
+            <div className="p-2 bg-blue-100 rounded-lg">
+              <Calculator className="h-6 w-6 text-blue-600" />
+            </div>
+            Water Rate Management
+          </CardTitle>
+          <CardDescription className="text-gray-600 mt-2">
+            Configure billing rates and tier structures for accurate water usage calculations
+          </CardDescription>
+        </div>
+        {!editRates && (
+          <Button 
+            onClick={() => setEditRates(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+            size="lg"
+          >
+            <Edit className="mr-2 h-4 w-4" />
+            Edit Rates
+          </Button>
+        )}
+      </div>
+    </CardHeader>
+
+    <CardContent className="p-6">
+      {ratesLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="flex items-center space-x-3">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+            <span className="text-gray-600 font-medium">Loading rates configuration...</span>
+          </div>
+        </div>
+      ) : (
+        <>
+          {!editRates ? (
+            <div className="space-y-6">
+              {/* Minimum Charge Display */}
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-100 rounded-full">
+                      <span className="text-blue-600 font-bold text-lg">₱</span>
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-gray-900">Minimum Charge</h3>
+                      <p className="text-sm text-gray-600">Base charge applied to all bills</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-blue-600">
+                      ₱{(ratesConfig?.minimumCharge ?? 94.70).toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Rates Table */}
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <BarChart className="h-5 w-5 text-gray-600" />
+                    Rate Tiers
+                  </h3>
+                  <p className="text-sm text-gray-600 mt-1">Current billing structure</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900 border-b border-gray-200">
+                          Usage Range (Min)
+                        </th>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900 border-b border-gray-200">
+                          Usage Range (Max)
+                        </th>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900 border-b border-gray-200">
+                          Rate per Unit (₱)
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {ratesConfig?.tiers?.map((tier, idx) => (
+                        <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4 text-sm font-medium text-gray-900">
+                            {tier.min}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {typeof tier.max === 'string' ? tier.max : tier.max}
+                          </td>
+                          <td className="px-6 py-4 text-sm font-mono text-green-600 font-semibold">
+                            ₱{tier.rate.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Last Updated */}
+              <div className="flex items-center justify-between pt-4 border-t border-gray-100">
+                <div className="flex items-center text-sm text-gray-500">
+                  <Clock className="mr-2 h-4 w-4" />
+                  Last updated: {ratesConfig?.updatedAt ? new Date(ratesConfig.updatedAt).toLocaleString() : "Never"}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Edit Header */}
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="flex items-start">
+                  <Edit className="h-5 w-5 text-amber-600 mt-0.5" />
+                  <div className="ml-3">
+                    <h3 className="text-sm font-semibold text-amber-800">Editing Mode</h3>
+                    <p className="text-sm text-amber-700 mt-1">
+                      Modify rate tiers and minimum charge. Changes will affect future billing calculations.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Minimum Charge Editor */}
+              <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                  <span className="text-blue-600 font-bold text-xl">₱</span>
+                  Minimum Charge Configuration
+                </h3>
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-3">
+                    <span className="text-sm font-medium text-gray-700 min-w-fit">
+                      Base charge amount (₱):
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      value={minimumCharge}
+                      onChange={e => setMinimumCharge(Number(e.target.value))}
+                      className="border border-gray-300 rounded-lg px-4 py-2 w-32 text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Tiers Editor */}
+              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <BarChart className="h-5 w-5 text-gray-600" />
+                    Rate Tiers Configuration
+                  </h3>
+                </div>
+                <div className="p-6">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200">
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">
+                            Min Usage
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">
+                            Max Usage
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900">
+                            Rate (₱/unit)
+                          </th>
+                          <th className="px-4 py-3 text-center text-sm font-semibold text-gray-900">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {editTiers.map((tier, idx) => (
+                          <tr key={idx} className="hover:bg-gray-50">
+                            <td className="px-4 py-4">
                               <input
                                 type="number"
                                 value={tier.min}
@@ -3041,10 +3182,10 @@ const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
                                     tiers.map((t, i) => i === idx ? { ...t, min: val } : t)
                                   );
                                 }}
-                                className="w-16 border rounded px-1"
+                                className="w-20 border border-gray-300 rounded-md px-3 py-2 text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                               />
                             </td>
-                            <td className="px-3 py-2 border">
+                            <td className="px-4 py-4">
                               <input
                                 type="text"
                                 value={tier.max}
@@ -3056,10 +3197,10 @@ const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
                                     tiers.map((t, i) => i === idx ? { ...t, max: val } : t)
                                   );
                                 }}
-                                className="w-16 border rounded px-1"
+                                className="w-20 border border-gray-300 rounded-md px-3 py-2 text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                               />
                             </td>
-                            <td className="px-3 py-2 border">
+                            <td className="px-4 py-4">
                               <input
                                 type="number"
                                 step="0.01"
@@ -3070,44 +3211,78 @@ const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
                                     tiers.map((t, i) => i === idx ? { ...t, rate: val } : t)
                                   );
                                 }}
-                                className="w-20 border rounded px-1"
+                                className="w-24 border border-gray-300 rounded-md px-3 py-2 text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                               />
                             </td>
-                            <td className="px-3 py-2 border">
+                            <td className="px-4 py-4 text-center">
                               <Button
                                 variant="destructive"
                                 size="sm"
                                 onClick={() => setEditTiers(tiers => tiers.filter((_, i) => i !== idx))}
                                 disabled={editTiers.length <= 1}
+                                className="hover:bg-red-600"
                               >
+                                <Trash2 className="h-4 w-4 mr-1" />
                                 Remove
                               </Button>
                             </td>
                           </tr>
                         ))}
-                        </tbody>
-                      </table>
-                      <div className="flex gap-2 mb-4">
-                        <Button
-                          onClick={() => setEditTiers([...editTiers, { min: 0, max: "above", rate: 0 }])}
-                          variant="outline"
-                        >
-                          Add Tier
-                        </Button>
-                        <Button onClick={saveRatesConfig} disabled={ratesLoading}>
-                          Save Rates
-                        </Button>
-                        <Button variant="secondary" onClick={() => { setEditRates(false); setEditTiers(ratesConfig?.tiers || []); }}>
-                          Cancel
-                        </Button>
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex flex-wrap gap-3 mt-6 pt-6 border-t border-gray-200">
+                    <Button
+                      onClick={() => setEditTiers([...editTiers, { min: 0, max: "above", rate: 0 }])}
+                      variant="outline"
+                      className="border-dashed border-2 hover:border-solid"
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add New Tier
+                    </Button>
+                    
+                    <div className="flex gap-3 ml-auto">
+                      <Button 
+                        variant="outline" 
+                        onClick={() => { 
+                          setEditRates(false); 
+                          setEditTiers(ratesConfig?.tiers || []); 
+                        }}
+                        className="hover:bg-gray-50"
+                      >
+                        <X className="mr-2 h-4 w-4" />
+                        Cancel
+                      </Button>
+                      <Button 
+                        onClick={saveRatesConfig} 
+                        disabled={ratesLoading}
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        {ratesLoading ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            Saving...
+                          </>
+                        ) : (
+                          <>
+                            <Save className="mr-2 h-4 w-4" />
+                            Save Changes
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </CardContent>
+  </Card>
+</TabsContent>
       </Tabs>
       <BillDisplay 
         open={dialogOpen}

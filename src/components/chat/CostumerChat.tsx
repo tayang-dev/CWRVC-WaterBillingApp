@@ -424,15 +424,16 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
                             {fileUrls[msg.id] && isImageFile(fileInfo.displayName) && (
                               <div className="space-y-2">
                                 <div className="relative group/image">
+                                <a href={fileUrls[msg.id]} target="_blank" rel="noopener noreferrer" className="relative group/image block">
                                   <img
                                     src={fileUrls[msg.id]}
                                     alt={fileInfo.displayName}
                                     className="max-w-[250px] rounded-lg cursor-pointer transition-all duration-200 hover:scale-105 shadow-md"
-                                    onClick={() => window.open(fileUrls[msg.id], '_blank')}
                                   />
-                                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover/image:bg-opacity-20 transition-all duration-200 rounded-lg flex items-center justify-center">
+                                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover/image:bg-opacity-20 transition-all duration-200 rounded-lg flex items-center justify-center pointer-events-none">
                                     <Eye className="h-6 w-6 text-white opacity-0 group-hover/image:opacity-100 transition-opacity duration-200" />
                                   </div>
+                                </a>
                                 </div>
                                 <p className={`text-xs ${isAdminOrSystem ? 'text-blue-100' : 'text-gray-500'}`}>
                                   {fileInfo.displayName}

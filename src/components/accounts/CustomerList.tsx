@@ -159,6 +159,7 @@ interface Customer {
   isSenior?: boolean;
   phone?: string;
   hasSCF: boolean;
+  scfAmount?: number;
 }
 
 interface CustomerListProps {
@@ -272,6 +273,8 @@ const fetchCustomers = async () => {
         hasSCF: hasSCF, // Will only be true if SCF exists for current month
         lastBillingDate: customerData.lastBillingDate || "",
         amountDue: customerData.amountDue ?? 0,
+        scfAmount: customerData.scfAmount ?? 0, // <-- ADD THIS LINE
+
       };
     });
 
@@ -456,23 +459,17 @@ const handleDeleteCustomer = async () => {
   }
 };
 
-  // SCF Schema for Special Collection Fee dialog
-  const scfSchema = z.object({
-    description: z.string()
-      .min(2, { message: "Description must be at least 2 characters." })
-      .max(100, { message: "Description cannot exceed 100 characters." }),
-    date: z.date({
-      required_error: "Date is required."
-    }),
-  });
+// Update SCF schema to include amount
+const scfSchema = z.object({
+  amount: z.number().min(1, { message: "SCF amount must be at least ₱1." }),
+});
 
   // SCF Dialog Component
   const ScfDialog = () => {
     const form = useForm<z.infer<typeof scfSchema>>({
       resolver: zodResolver(scfSchema),
       defaultValues: {
-        description: "",
-        date: new Date(),
+        amount: 1,
       },
     });
 
@@ -485,40 +482,17 @@ const handleDeleteCustomer = async () => {
       setShowConfirm(true);
     };
 
-  const handleConfirmedSubmit = async () => {
+const handleConfirmedSubmit = async () => {
   if (!pendingData || !scfCustomer) return;
-  
+
   setIsScfSubmitting(true);
   setScfError("");
-  
-  try {
-    // Check if SCF already exists for this date
-    const scfQuery = query(
-      collection(db, "scf"),
-      where("accountNumber", "==", scfCustomer.accountNumber),
-      where("date", "==", format(pendingData.date, "yyyy-MM-dd"))
-    );
-    
-    const existingScf = await getDocs(scfQuery);
-    
-    if (!existingScf.empty) {
-      setScfError("An SCF entry already exists for this date. Please choose a different date.");
-      setIsScfSubmitting(false);
-      return;
-    }
 
-    // If no duplicate, proceed with adding the SCF
-    await setDoc(doc(collection(db, "scf")), {
-      customerId: scfCustomer.id,
-      accountNumber: scfCustomer.accountNumber,
-      name: scfCustomer.name,
-      description: pendingData.description,
-      date: format(pendingData.date, "yyyy-MM-dd"),
-      site: scfCustomer.site,
-      block: scfCustomer.block,
-      lot: scfCustomer.lot,
-      createdAt: new Date().toISOString(),
-      status: "pending"
+  try {
+    // Update customer's scfAmount field only (no SCF collection)
+    const customerRef = doc(db, "customers", scfCustomer.id);
+    await updateDoc(customerRef, {
+      scfAmount: (scfCustomer.scfAmount ?? 0) + pendingData.amount
     });
 
     // Reset everything
@@ -526,7 +500,7 @@ const handleDeleteCustomer = async () => {
     setScfCustomer(null);
     setShowConfirm(false);
     setPendingData(null);
-    
+
     await fetchCustomers();
   } catch (e: any) {
     setScfError(e.message || "Failed to add SCF");
@@ -534,6 +508,8 @@ const handleDeleteCustomer = async () => {
     setIsScfSubmitting(false);
   }
 };
+
+
 
 // Then, modify the table header and remove the SCF Status column
 
@@ -561,47 +537,28 @@ const handleDeleteCustomer = async () => {
             
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="description"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Description <span className="text-red-500">*</span></FormLabel>
-                      <FormControl>
-                        <textarea 
-                          {...field}
-                          className="flex min-h-[200px] resize-y w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                          placeholder="Enter detailed description of the service..."
-                          disabled={isScfSubmitting}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+
                 
-                <FormField
-                  control={form.control}
-                  name="date"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Date <span className="text-red-500">*</span></FormLabel>
-                      <FormControl>
-                        <Input
-                          type="date"
-                          max={format(new Date(), "yyyy-MM-dd")}
-                          value={field.value ? format(field.value, "yyyy-MM-dd") : ""}
-                          onChange={e => {
-                            const date = e.target.value ? new Date(e.target.value) : new Date();
-                            field.onChange(date);
-                          }}
-                          disabled={isScfSubmitting}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+
+
+            <FormField
+              control={form.control}
+              name="amount"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>SCF Amount (₱) <span className="text-red-500">*</span></FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={field.value}
+                      onChange={e => field.onChange(Number(e.target.value))}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
                 
                 <div className="flex justify-end space-x-2">
                   <Button
@@ -636,8 +593,7 @@ const handleDeleteCustomer = async () => {
               <AlertDialogDescription>
                 Are you sure you want to add this SCF for {scfCustomer?.name}?
                 <div className="mt-4 space-y-2">
-                  <p><strong>Description:</strong> {pendingData?.description}</p>
-                  <p><strong>Date:</strong> {pendingData?.date ? format(pendingData.date, "MMMM d, yyyy") : ""}</p>
+
                 </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
@@ -1047,7 +1003,8 @@ const handleDeleteCustomer = async () => {
         <TableHead>Name</TableHead>
         <TableHead>Email/Phone</TableHead>
         <TableHead>Block & Lot</TableHead>
-        
+        <TableHead>SCF Amount</TableHead>
+
         <TableHead>Status</TableHead>
         <TableHead className="text-right">Actions</TableHead>
       </TableRow>
@@ -1067,6 +1024,11 @@ const handleDeleteCustomer = async () => {
             </TableCell>
             <TableCell>
               Block {customer.block} Lot {customer.lot}
+            </TableCell>
+            <TableCell>
+              {typeof customer.scfAmount === "number"
+                ? `₱${customer.scfAmount}`
+                : "₱0"}
             </TableCell>
             <TableCell>
               <Badge

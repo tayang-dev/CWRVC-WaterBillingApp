@@ -176,8 +176,14 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills, custo
               const arrears = parseFloat(bill.arrears || 0);
               const customer = getCustomerForBill(bill);
 
-              const scf = parseFloat(bill.scffee || bill.scf || bill.scfFee || bill.serviceConnectionFee || 0);
-
+              const scf = parseFloat(
+                bill.scfApplied ??
+                bill.scffee ??
+                bill.scf ??
+                bill.scfFee ??
+                bill.serviceConnectionFee ??
+                0
+              );
               const billsForAccount = selectedBills.filter(
                 b => b.accountNumber === bill.accountNumber
               );
