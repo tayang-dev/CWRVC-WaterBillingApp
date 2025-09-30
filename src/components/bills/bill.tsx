@@ -3132,10 +3132,17 @@ const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
                     </span>
                     <input
                       type="number"
-                      step="0.01"
                       min={0}
+                      max={999.99}
+                      step={0.01}
                       value={minimumCharge}
-                      onChange={e => setMinimumCharge(Number(e.target.value))}
+                      onChange={e => {
+                        let val = e.target.value.replace(/^0+/, '');
+                        // Only allow up to 3 digits before decimal and 2 after
+                        if (/^\d{0,3}(\.\d{0,2})?$/.test(val)) {
+                          setMinimumCharge(Number(val));
+                        }
+                      }}
                       className="border border-gray-300 rounded-lg px-4 py-2 w-32 text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </label>
@@ -3175,12 +3182,16 @@ const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
                             <td className="px-4 py-4">
                               <input
                                 type="number"
+                                min={0}
+                                max={999.99}
                                 value={tier.min}
                                 onChange={e => {
-                                  const val = Number(e.target.value);
-                                  setEditTiers(tiers =>
-                                    tiers.map((t, i) => i === idx ? { ...t, min: val } : t)
-                                  );
+                                  let val = e.target.value.replace(/^0+/, '');
+                                  if (/^\d{0,3}$/.test(val)) {
+                                    setEditTiers(tiers =>
+                                      tiers.map((t, i) => i === idx ? { ...t, min: Number(val) } : t)
+                                    );
+                                  }
                                 }}
                                 className="w-20 border border-gray-300 rounded-md px-3 py-2 text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                               />
@@ -3188,14 +3199,24 @@ const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
                             <td className="px-4 py-4">
                               <input
                                 type="text"
+                                min={0}
+                                max={999}
                                 value={tier.max}
                                 onChange={e => {
-                                  const val = e.target.value === "above" || e.target.value === "over"
-                                    ? e.target.value
-                                    : Number(e.target.value);
-                                  setEditTiers(tiers =>
-                                    tiers.map((t, i) => i === idx ? { ...t, max: val } : t)
-                                  );
+                                  const raw = e.target.value.trim();
+                                  // Allow "above" or "over"
+                                  if (raw === "above" || raw === "over") {
+                                    setEditTiers(tiers =>
+                                      tiers.map((t, i) => i === idx ? { ...t, max: raw } : t)
+                                    );
+                                  }
+                                  // Allow only up to 3 digits
+                                  else if (/^\d{0,3}$/.test(raw)) {
+                                    setEditTiers(tiers =>
+                                      tiers.map((t, i) => i === idx ? { ...t, max: Number(raw) } : t)
+                                    );
+                                  }
+                                  // Otherwise, ignore input
                                 }}
                                 className="w-20 border border-gray-300 rounded-md px-3 py-2 text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                               />
@@ -3203,13 +3224,20 @@ const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
                             <td className="px-4 py-4">
                               <input
                                 type="number"
-                                step="0.01"
+                                min={0}
+                                max={999.99}
+                                step={0.01}
                                 value={tier.rate}
                                 onChange={e => {
-                                  const val = Number(e.target.value);
-                                  setEditTiers(tiers =>
-                                    tiers.map((t, i) => i === idx ? { ...t, rate: val } : t)
-                                  );
+                                  let val = e.target.value;
+                                  // Remove leading zeros
+                                  val = val.replace(/^0+/, '');
+                                  // Limit to 3 digits before decimal and 2 after
+                                  if (/^\d{0,3}(\.\d{0,2})?$/.test(val)) {
+                                    setEditTiers(tiers =>
+                                      tiers.map((t, i) => i === idx ? { ...t, rate: Number(val) } : t)
+                                    );
+                                  }
                                 }}
                                 className="w-24 border border-gray-300 rounded-md px-3 py-2 text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                               />

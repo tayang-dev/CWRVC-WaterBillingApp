@@ -1098,10 +1098,14 @@ const fetchCustomers = async () => {
   
       // If verification is rejected (via admin action), handle that case.
       if (verificationStatus === "rejected") {
-        // Delete the verification document since it is rejected
-        await deleteDoc(doc(db, "paymentVerifications", selectedVerification.id));
-        console.log("❌ Payment verification deleted (rejected).");
-  
+        // Update the verification document status to "rejected" instead of deleting
+        await updateDoc(doc(db, "paymentVerifications", selectedVerification.id), {
+          status: "rejected",
+          notes: verificationNotes,
+          rejectedAt: new Date().toISOString(),
+        });
+        console.log("❌ Payment verification marked as rejected.");
+
         // Create a notification with the appropriate status and description
         await addDoc(
           collection(db, "notifications", accountNumber, "records"),
@@ -1116,16 +1120,16 @@ const fetchCustomers = async () => {
             createdAt: formatNotificationTimestamp(),
           }
         );
-  
+
         alert("Payment has been rejected and notification created.");
         setSelectedVerification(null);
-        // Reset verification status back to a default value if needed
         setVerificationStatus("verified");
         setVerificationNotes("");
         setIsVerificationDialogOpen(false);
         setIsProcessing(false);
         return;
       }
+
   
       // Process verified payment.
       // Update updatedPayments document.
