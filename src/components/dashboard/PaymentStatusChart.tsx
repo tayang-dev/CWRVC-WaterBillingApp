@@ -30,6 +30,8 @@ interface Bill {
   amount: number;
   originalAmount: number;
   dueDate: string; // Assuming dueDate is a string in "DD/MM/YYYY" format
+  status?: string; // <-- Add this line
+
 }
 
 const PaymentStatusChart = ({
@@ -102,24 +104,24 @@ const PaymentStatusChart = ({
 
         // Process each bill
         bills.forEach((bill) => {
-          console.log(`🔍 Bill Data (${bill.id}):`, bill);
-
-          const amount = bill.amount;
-          const originalAmount = bill.originalAmount;
-          const dueDate = new Date(
-            bill.dueDate.split("/").reverse().join("-")
-          ); // Convert to YYYY-MM-DD format
-          const currentDate = new Date();
-
-          // Determine payment status
-          if (amount === 0) {
-            paymentStatusCounts.Paid += 1;
-          } else if (amount > 0 && amount < originalAmount) {
-            paymentStatusCounts["Partially Paid"] += 1;
-          } else if (amount > 0 && dueDate < currentDate) {
-            paymentStatusCounts.Overdue += 1;
-          } else {
-            paymentStatusCounts.Pending += 1;
+          // Use the status field directly for accurate counting
+          const status = (bill.status || "").toLowerCase();
+          switch (status) {
+            case "paid":
+              paymentStatusCounts.Paid += 1;
+              break;
+            case "pending":
+              paymentStatusCounts.Pending += 1;
+              break;
+            case "overdue":
+              paymentStatusCounts.Overdue += 1;
+              break;
+            case "partially paid":
+              paymentStatusCounts["Partially Paid"] += 1;
+              break;
+            default:
+              paymentStatusCounts.Pending += 1; // fallback if status is missing
+              break;
           }
         });
 

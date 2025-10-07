@@ -38,9 +38,13 @@ const WaterLeakagePerSite = ({
         // Count leaks per site
         leaksSnapshot.docs.forEach((doc) => {
           const leak = doc.data();
-          const site = leak.address.split(",")[1].trim(); // Extract site from address
-          if (siteCounts[site] !== undefined) {
-            siteCounts[site] += 1;
+          // Extract "Site 1", "Site 2", or "Site 3" from the address
+          const match = leak.address.match(/Site\s*([1-3])/i);
+          if (match) {
+            const siteKey = `site${match[1]}`;
+            if (siteCounts[siteKey] !== undefined) {
+              siteCounts[siteKey] += 1;
+            }
           }
         });
 

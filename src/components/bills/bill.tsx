@@ -14,6 +14,7 @@ import {
   getDoc,
   updateDoc,
   setDoc,
+  deleteDoc,
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { AlertCircle, FileText, RefreshCw, Filter, BarChart, Calculator, CheckCircle, Clock, Edit, Info, Plus, Save, Trash2, X } from "lucide-react";
@@ -50,12 +51,14 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog"; 
 import BillDisplay from "./BillDisplay"; 
+import DisconnectionNoticeDisplay from "./DisconnectionNoticeDisplay";
 import jsPDF from "jspdf"; // Import jsPDF for PDF generation
 import "jspdf-autotable"; // Optional for table formatting
 import html2canvas from "html2canvas"; // Import html2canvas for rendering HTML to canvas
 import QRCode from "qrcode";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
+import { useReactToPrint } from "react-to-print";
 
 // Utility function to format currency
 const formatCurrency = (amount: number) => {
@@ -616,12 +619,11 @@ const handleCreateBills = async (readings: MeterReading[]) => {
     let successCount = 0;
     let errorCount = 0;
 
-    const { collection, addDoc, doc, updateDoc, getDoc, setDoc, getDocs, Timestamp, query, where, orderBy, limit, collectionGroup } =
+    const { collection, doc, updateDoc, getDoc, getDocs, Timestamp, query, where, orderBy, limit, collectionGroup, writeBatch } =
       await import("firebase/firestore");
     const { db } = await import("../../lib/firebase");
 
     let currentGlobalBillNumber = await getLatestGlobalBillNumber();
-
     const processedReadingIds: string[] = [];
 
     // Sort readings by due date (oldest first)
@@ -633,7 +635,7 @@ const handleCreateBills = async (readings: MeterReading[]) => {
       return dateA.getTime() - dateB.getTime();
     });
 
-    // Check for missing previous bills
+    // Check for missing previous bills (keep as is)
     const accountsWithMissingPreviousBills = new Map<string, MeterReading[]>();
     for (const reading of sortedReadings) {
       const customer = customers.find((c) => c.accountNumber === reading.accountNumber);
@@ -698,57 +700,50 @@ const handleCreateBills = async (readings: MeterReading[]) => {
       return;
     }
 
-    // Bill creation with SCF fee logic
-    for (const reading of sortedReadings) {
-      const result = await processSingleBill(reading, currentGlobalBillNumber);
-      if (result) {
-        currentGlobalBillNumber++;
-        successCount++;
-        processedReadingIds.push(reading.id!);
-      } else {
-        errorCount++;
-      }
-    }
+    // --- BATCHED BILL CREATION ---
+    let batch = writeBatch(db);
+    let batchCount = 0;
 
-    // Helper function to process a single bill
-    async function processSingleBill(reading: MeterReading, billNumberCounter: number): Promise<boolean> {
+    for (const reading of sortedReadings) {
       try {
         const customer = customers.find((c) => c.accountNumber === reading.accountNumber);
-        if (!customer) return false;
+        if (!customer) {
+          errorCount++;
+          continue;
+        }
 
         const usage = reading.currentReading - reading.previousReading;
-        if (usage < 0) return false;
+        if (usage < 0) {
+          errorCount++;
+          continue;
+        }
 
         const billingPeriod = calculateBillingPeriodFromDueDate(reading.dueDate);
 
-// --- NEW SCF LOGIC ---
-    // Fetch latest customer data to get scfAmount
-    const customerRef = doc(db, "customers", customer.id);
-    const customerSnap = await getDoc(customerRef);
-    const customerData = customerSnap.data();
-    let scfAmount = customerData?.scfAmount ?? 0;
+        // Fetch latest customer data to get scfAmount
+        const customerRef = doc(db, "customers", customer.id);
+        const customerSnap = await getDoc(customerRef);
+        const customerData = customerSnap.data();
+        let scfAmount = customerData?.scfAmount ?? 0;
 
-    // Determine SCF to apply (max ₱500, or remaining scfAmount)
-    let scfToApply = 0;
-    if (scfAmount > 0) {
-      scfToApply = Math.min(500, scfAmount);
-    }
+        // Determine SCF to apply (max ₱500, or remaining scfAmount)
+        let scfToApply = 0;
+        if (scfAmount > 0) {
+          scfToApply = Math.min(500, scfAmount);
+        }
 
         const isSenior = customer.isSenior || false;
         const billCalc = calculateBillAmount(usage, isSenior);
-        
+
         if (usage === 0 && billCalc.waterCharge === 0) {
           billCalc.waterCharge = ratesConfig?.minimumCharge ?? 94.70;
           billCalc.totalAmountDue = billCalc.waterCharge + billCalc.tax - billCalc.discount;
         }
 
-
-
         // Add SCF to bill
         const baseWaterCharge = billCalc.waterCharge;
         const totalChargeIncludingSCF = baseWaterCharge + scfToApply;
 
-            
         // Calculate tax, discount, penalty on total
         const tax = totalChargeIncludingSCF * billingData.taxRate;
         const discount = isSenior ? totalChargeIncludingSCF * billingData.seniorDiscountRate : 0;
@@ -758,28 +753,35 @@ const handleCreateBills = async (readings: MeterReading[]) => {
 
         // Calculate arrears - Sum of all pending bills
         let arrears = 0;
-        // You may need to fetch unpaidBillsSnapshot here if not already available
-        // unpaidBillsSnapshot.forEach((doc) => {
-        //   const bill = doc.data();
-        //   arrears += parseFloat(bill.amount) || 0;
-        // });
+        const billsRef = collection(db, "bills", reading.accountNumber, "records");
+        const unpaidBillsSnapshot = await getDocs(billsRef);
+        unpaidBillsSnapshot.forEach((doc) => {
+          const bill = doc.data();
+          if (
+            (bill.status === "pending" || bill.status === "partially paid") &&
+            bill.billingPeriod !== billingPeriod &&
+            parseFloat(bill.amount) > 0
+          ) {
+            arrears += parseFloat(bill.amount) || 0;
+          }
+        });
         arrears = Number(arrears.toFixed(2));
 
         // Retrieve the latest bill to check for any overpayment
         let previousBillNumber = "";
         let availableOverpayment = 0;
-        // You may need to fetch billsCollectionRef here if not already available
-        // const latestBillQuery = query(
-        //   billsCollectionRef,
-        //   orderBy("createdAt", "desc"),
-        //   limit(1)
-        // );
-        // const latestBillSnap = await getDocs(latestBillQuery);
-        // if (!latestBillSnap.empty) {
-        //   const latestBillData = latestBillSnap.docs[0].data();
-        //   availableOverpayment = parseFloat(latestBillData.overPayment || 0);
-        //   previousBillNumber = latestBillData.billNumber || "";
-        // }
+        const billsCollectionRef = collection(db, "bills", reading.accountNumber, "records");
+        const latestBillQuery = query(
+          billsCollectionRef,
+          orderBy("date", "desc"),
+          limit(1)
+        );
+        const latestBillSnap = await getDocs(latestBillQuery);
+        if (!latestBillSnap.empty) {
+          const latestBillData = latestBillSnap.docs[0].data();
+          availableOverpayment = parseFloat(latestBillData.overPayment || 0);
+          previousBillNumber = latestBillData.billNumber || "";
+        }
 
         let appliedOverpayment = 0;
         let currentAmountDue = totalAmountDue;
@@ -802,19 +804,18 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           remainingOverpayment = Number(remainingOverpayment.toFixed(2));
         }
 
-        const billNumber = String(billNumberCounter + 1).padStart(10, "0");
+        const billNumber = String(currentGlobalBillNumber + 1).padStart(10, "0");
         const formattedAddress = customer.block && customer.lot
           ? `BLK ${customer.block}, LOT ${customer.lot}, ${customer.address || ""}`
           : customer.address || "";
         const amountWithArrears = Number((currentAmountDue + arrears).toFixed(2));
-
 
         const billData = {
           customerId: customer.id,
           customerName: customer.name,
           customerAddress: formattedAddress,
           date: Timestamp.now(),
-          amount: currentAmountDue,
+          amount: Number(currentAmountDue.toFixed(2)),
           originalAmount: Number(totalAmountDue.toFixed(2)),
           status: currentAmountDue === 0 ? "paid" : "pending",
           dueDate: reading.dueDate,
@@ -828,13 +829,13 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           },
           accountNumber: reading.accountNumber,
           meterNumber: customer.meterNumber || "Meter-Default",
-          waterCharge: Number(baseWaterCharge.toFixed(2)), // Keep original water charge separate
-          waterChargeBeforeTax: Number(baseWaterCharge.toFixed(2)), // Keep original water charge separate
+          waterCharge: Number(baseWaterCharge.toFixed(2)),
+          waterChargeBeforeTax: Number(baseWaterCharge.toFixed(2)),
           tax: Number(tax.toFixed(2)),
           seniorDiscount: Number(discount.toFixed(2)),
           penalty: Number(penalty.toFixed(2)),
           amountAfterDue: Number((currentAmountDue + penalty).toFixed(2)),
-          currentAmountDue: currentAmountDue,
+          currentAmountDue: Number(currentAmountDue.toFixed(2)),
           arrears: arrears,
           billNumber: billNumber,
           overPayment: remainingOverpayment,
@@ -842,26 +843,38 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           overpaymentSourceBill: overpaymentSourceBill,
           rawCalculatedAmount: Number(totalAmountDue.toFixed(2)),
           amountWithArrears: amountWithArrears,
-          scfApplied: scfToApply, // Save SCF applied
+          scfApplied: scfToApply,
         };
 
-        // Save billData to Firestore
-        await addDoc(collection(db, "bills", reading.accountNumber, "records"), billData);
+        // Use batch.set for bill creation
+        const billRef = doc(collection(db, "bills", reading.accountNumber, "records"));
+        batch.set(billRef, billData);
+        batchCount++;
+        currentGlobalBillNumber++;
+        processedReadingIds.push(reading.id!);
+        successCount++;
 
-        // Subtract SCF from customer if applied
+        // Subtract SCF from customer if applied (must be outside batch, as batch only supports one doc per collection)
         if (scfToApply > 0) {
           await updateDoc(customerRef, {
             scfAmount: scfAmount - scfToApply
           });
         }
 
-        // ...rest of your update logic (overpayment, notifications, etc)...
-
-        return true;
+        // Commit batch every 500 writes
+        if (batchCount === 500) {
+          await batch.commit();
+          batch = writeBatch(db);
+          batchCount = 0;
+        }
       } catch (error) {
-        console.error(`Error creating bill for account ${reading.accountNumber}:`, error);
-        return false;
+        console.error("Error creating bill:", error);
+        errorCount++;
       }
+    }
+
+    if (batchCount > 0) {
+      await batch.commit();
     }
 
     setMeterReadings((prev) => prev.filter((reading) => !processedReadingIds.includes(reading.id!)));
@@ -879,6 +892,7 @@ const handleCreateBills = async (readings: MeterReading[]) => {
     setIsProcessing(false);
   }
 };
+
   const handleViewBills = async (accountNumber: string) => {
     setSelectedAccount(accountNumber);
     setDialogOpen(true);
@@ -1014,7 +1028,339 @@ const fetchBillsData = async () => {
     showNotification("Failed to load bills data.", "error");
   }
 };
+// ...existing code...
+const handleExportDisconnectionToExcel = async () => {
+  try {
+    showNotification("Preparing disconnection list export...", "info");
 
+    // Create a new workbook
+    const workbook = new ExcelJS.Workbook();
+    const currentDate = new Date().toLocaleDateString();
+
+    // Color palette (reuse from bills export)
+    const colors = {
+      darkBlue: { argb: 'FF1A5980' },
+      mediumBlue: { argb: 'FF1E88E5' },
+      lightBlue: { argb: 'FFB3E0FF' },
+      paleBlue: { argb: 'FFE1F5FE' },
+      accentTeal: { argb: 'FF00ACC1' },
+      accentYellow: { argb: 'FFFFAB40' },
+      white: { argb: 'FFFFFFFF' },
+      lightRed: { argb: 'FFF2DEDE' },
+      lightYellow: { argb: 'FFFFF9E6' },
+    };
+
+    // Styling helpers
+    const applyTitleStyle = (row) => {
+      row.font = { bold: true, size: 18, color: { argb: 'FFFFFFFF' } };
+      row.alignment = { horizontal: 'center', vertical: 'middle' };
+      row.height = 36;
+      row.eachCell((cell) => {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: colors.darkBlue
+        };
+        cell.border = {
+          top: { style: 'thin', color: colors.mediumBlue },
+          left: { style: 'thin', color: colors.mediumBlue },
+          bottom: { style: 'thin', color: colors.mediumBlue },
+          right: { style: 'thin', color: colors.mediumBlue }
+        };
+      });
+    };
+    const applyHeaderStyle = (row) => {
+      row.height = 24;
+      row.eachCell(cell => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: colors.mediumBlue
+        };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = {
+          top: { style: 'thin', color: colors.darkBlue },
+          left: { style: 'thin', color: colors.darkBlue },
+          bottom: { style: 'thin', color: colors.darkBlue },
+          right: { style: 'thin', color: colors.darkBlue }
+        };
+      });
+    };
+    const applyDataRowStyle = (row, isAlternate = false) => {
+      row.height = 20;
+      row.eachCell(cell => {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: isAlternate ? colors.paleBlue : colors.white
+        };
+        cell.border = {
+          top: { style: 'hair', color: colors.lightBlue },
+          left: { style: 'hair', color: colors.lightBlue },
+          bottom: { style: 'hair', color: colors.lightBlue },
+          right: { style: 'hair', color: colors.lightBlue }
+        };
+        cell.alignment = {
+          horizontal: 'left',
+          vertical: 'middle',
+          indent: 1
+        };
+      });
+    };
+    const setFixedColumnWidths = (sheet, columnWidths) => {
+      columnWidths.forEach((width, index) => {
+        sheet.getColumn(index + 1).width = width;
+      });
+    };
+    const addFooter = (sheet, columnCount) => {
+      sheet.addRow(['']);
+      sheet.addRow(['']);
+      const footerRow = sheet.addRow(['Generated by Water Billing System']);
+      sheet.mergeCells(sheet.rowCount, 1, sheet.rowCount, columnCount);
+      footerRow.getCell(1).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: colors.lightBlue
+      };
+      footerRow.getCell(1).font = {
+        italic: true,
+        color: colors.darkBlue,
+        size: 10
+      };
+      footerRow.getCell(1).alignment = {
+        horizontal: 'center',
+        vertical: 'middle'
+      };
+      const dateRow = sheet.addRow([`Report generated on: ${currentDate}`]);
+      sheet.mergeCells(sheet.rowCount, 1, sheet.rowCount, columnCount);
+      dateRow.getCell(1).font = {
+        italic: true,
+        color: colors.darkBlue,
+        size: 8
+      };
+      dateRow.getCell(1).alignment = { horizontal: 'right' };
+    };
+
+    // 1. Cover Sheet
+    const coverSheet = workbook.addWorksheet('Disconnection Overview');
+    setFixedColumnWidths(coverSheet, [25, 25, 25, 25, 25]);
+    coverSheet.addRow(['']);
+    coverSheet.addRow(['']);
+    const logoRow = coverSheet.addRow(['🔌']);
+    logoRow.height = 40;
+    logoRow.getCell(1).font = { size: 36, color: colors.mediumBlue };
+    logoRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+    coverSheet.mergeCells(logoRow.number, 1, logoRow.number, 5);
+    const coverTitle = coverSheet.addRow(['DISCONNECTION NOTICE REPORT']);
+    applyTitleStyle(coverTitle);
+    coverSheet.mergeCells(coverTitle.number, 1, coverTitle.number, 5);
+    coverSheet.addRow(['']);
+    coverSheet.addRow(['']);
+    const infoRows = [
+      ['Generated on:', currentDate],
+      ['Report Type:', 'Disconnection Notices'],
+      ['Total Customers:', disconnectionList.length.toString()],
+      ['Purpose:', 'List of customers with 2 or more months unpaid bills'],
+    ];
+    infoRows.forEach((rowData, index) => {
+      const row = coverSheet.addRow(rowData);
+      applyDataRowStyle(row, index % 2 === 0);
+      row.getCell(1).font = { bold: true, color: colors.darkBlue };
+      coverSheet.mergeCells(row.number, 2, row.number, 5);
+    });
+    coverSheet.addRow(['']);
+    const tipRow = coverSheet.addRow(['Customers with 4+ months unpaid are highlighted for urgent action.']);
+    tipRow.getCell(1).font = { italic: true, color: colors.accentTeal };
+    coverSheet.mergeCells(tipRow.number, 1, tipRow.number, 5);
+    addFooter(coverSheet, 5);
+
+    // 2. Disconnection List Sheet
+    const sheet = workbook.addWorksheet('Disconnection List');
+    setFixedColumnWidths(sheet, [18, 25, 18, 18, 18]);
+    const titleRow = sheet.addRow(['DISCONNECTION NOTICE LIST']);
+    applyTitleStyle(titleRow);
+    sheet.mergeCells(1, 1, 1, 5);
+    sheet.addRow(['']);
+    const headerRow = sheet.addRow([
+      'Account #',
+      'Name',
+      'Site',
+      'Unpaid Months',
+      'Total Due (₱)'
+    ]);
+    applyHeaderStyle(headerRow);
+
+    // Data rows
+    disconnectionList.forEach((item, idx) => {
+      const row = sheet.addRow([
+        item.accountNumber,
+        item.name,
+        formatSiteName(item.site),
+        item.unpaidCount,
+        Number(item.totalDue).toFixed(2)
+      ]);
+      applyDataRowStyle(row, idx % 2 === 0);
+
+      // Highlight urgent (4+ months) in red
+      if (item.unpaidCount >= 4) {
+        row.getCell(4).fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: colors.lightRed
+        };
+        row.getCell(4).font = { color: { argb: 'FFB91C1C' }, bold: true };
+      } else if (item.unpaidCount === 3) {
+        row.getCell(4).fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: colors.lightYellow
+        };
+        row.getCell(4).font = { color: { argb: 'FFCC8400' }, bold: true };
+      }
+      // Amount right-aligned
+      row.getCell(5).alignment = { horizontal: 'right' };
+    });
+
+    addFooter(sheet, 5);
+
+    // Print settings
+    [coverSheet, sheet].forEach(sheet => {
+      sheet.pageSetup.paperSize = 9;
+      sheet.pageSetup.orientation = 'landscape';
+      sheet.pageSetup.fitToPage = true;
+      sheet.pageSetup.fitToWidth = 1;
+      sheet.pageSetup.fitToHeight = 0;
+      sheet.pageSetup.margins = {
+        left: 0.7,
+        right: 0.7,
+        top: 0.75,
+        bottom: 0.75,
+        header: 0.3,
+        footer: 0.3
+      };
+    });
+
+    // Save the Excel file
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveAs(
+      new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      }),
+      `Disconnection_Notice_Report_${new Date().toISOString().slice(0, 10)}.xlsx`
+    );
+
+    showNotification("Disconnection list exported successfully!", "success");
+  } catch (error) {
+    console.error("Error exporting disconnection list:", error);
+    showNotification("Failed to export disconnection list.", "error");
+  }
+};
+
+const handlePrintAllDisconnectionNotices = async () => {
+  // Filter the list based on current filters
+  const filtered = disconnectionList.filter(item =>
+    (disconnectionSiteFilter === "all" || item.site === disconnectionSiteFilter) &&
+    (
+      !disconnectionSearch ||
+      item.accountNumber.toLowerCase().includes(disconnectionSearch.toLowerCase()) ||
+      item.name.toLowerCase().includes(disconnectionSearch.toLowerCase())
+    )
+  );
+  if (filtered.length === 0) {
+    showNotification("No disconnection notices to print.", "info");
+    return;
+  }
+
+  // Create a new window for printing
+  const printWindow = window.open("", "_blank", "width=900,height=1200");
+  if (!printWindow) {
+    showNotification("Unable to open print window. Please allow pop-ups.", "error");
+    return;
+  }
+
+  // Prepare the HTML for all notices
+  const noticesHtml = filtered.map(item => {
+    return `
+      <div style="max-width:600px;margin:40px auto 60px auto;border:2px solid #000;padding:32px 28px 28px 28px;background:#fff;page-break-after:always;">
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:18px;">
+          <img src="${logoImage}" alt="Logo" style="width:64px;height:64px;object-fit:contain;" />
+          <div>
+            <div style="font-size:18px;font-weight:bold;">CENTENNIAL WATER RESOURCE VENTURE CORPORATION</div>
+            <div style="font-size:12px;">Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna</div>
+          </div>
+        </div>
+        <div style="text-align:center;margin-bottom:32px;">
+          <div style="font-size:22px;font-weight:bold;color:#b91c1c;">DISCONNECTION NOTICE</div>
+          <div style="font-size:16px;margin-top:10px;">Account #: <b>${item.accountNumber}</b></div>
+          <div style="font-size:16px;">Name: <b>${item.name}</b></div>
+          ${item.site ? `<div style="font-size:16px;">Site: <b>${formatSiteName(item.site)}</b></div>` : ""}
+          <div style="font-size:16px;">Unpaid Months: <b>${item.unpaidCount}</b></div>
+          <div style="font-size:16px;">Total Due: <b>₱${item.totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</b></div>
+        </div>
+        <div style="background:#dc2626;color:#fff;padding:18px 0 10px 0;margin-bottom:18px;text-align:center;">
+          <div style="font-size:20px;font-weight:bold;letter-spacing:1px;">⚠ PLEASE PAY FULL AMOUNT ⚠</div>
+          <div style="font-size:18px;font-weight:bold;margin-top:4px;">₱${item.totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+        </div>
+        <div style="background:#fef9c3;border-left:6px solid #eab308;padding:16px 18px 16px 18px;margin-bottom:32px;">
+          <div style="font-weight:600;color:#92400e;">
+            Our records show that your account has unpaid water bills for ${item.unpaidCount} months.<br>
+            Please settle your outstanding balance within <b>5 days</b> from receipt of this notice to avoid service disconnection.
+          </div>
+          <ul style="margin-left:20px;margin-top:10px;font-size:14px;color:#92400e;">
+            <li>Payment after the due date may result in penalties.</li>
+            <li>Disconnection will be done without further notice if payment is not received.</li>
+            <li>For questions, please contact our office immediately.</li>
+          </ul>
+        </div>
+        <div style="text-align:center;margin-top:40px;">
+          <div style="font-weight:bold;font-size:18px;color:#b91c1c;">
+            THIS IS AN OFFICIAL NOTICE. PLEASE DISREGARD IF PAYMENT HAS BEEN MADE.
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // Print styles
+  const printStyles = `
+    <style>
+      @media print {
+        body { background: #fff; }
+        .print-hidden { display: none !important; }
+        div[style*="page-break-after:always"] { page-break-after: always; }
+      }
+      body { margin: 0; padding: 0; background: #f3f4f6; }
+    </style>
+  `;
+
+  // Write content to print window
+  printWindow.document.write(`
+    <html>
+      <head>
+        <title>Disconnection Notices</title>
+        ${printStyles}
+      </head>
+      <body>
+        <div style="margin:0;padding:0;">
+          ${noticesHtml}
+        </div>
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+              window.close();
+            }, 400);
+          }
+        </script>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+
+  showNotification("All disconnection notices sent to printer.", "success");
+};
+// ...existing code...
   const handlePrintAllReceipts = async (printFilterMonth?: string,printFilterYear?: string, filterSite?: string) => {
 
     try {
@@ -1145,11 +1491,10 @@ function calculateDefaultRates(waterUsage) {
     const tierMax = tiers[i].max;
     const tierRange = tierMax === Infinity ? remainingUsage : tierMax - tierMin + 1;
     const tierUsage = Math.min(remainingUsage, tierRange);
-
     if (tierUsage > 0) {
       activeTiers.push({
         min: tierMin,
-        max: tierMax === Infinity ? "above" : tierMax,
+        max: tiers[i].max,
         rate: tiers[i].rate,
         usage: tierUsage,
         amount: parseFloat((tierUsage * tiers[i].rate).toFixed(2)),
@@ -1804,6 +2149,8 @@ const showLoginCredentials = isEarliestBill;
     const monthNames = ["January", "February", "March", "April", "May", "June", 
                         "July", "August", "September", "October", "November", "December"];
     
+
+    
     // Handle different formats
     if (billingPeriod.includes(" - ")) {
       // Format like "dd/mm/yyyy - dd/mm/yyyy"
@@ -1845,8 +2192,8 @@ function calculateTiers(waterUsage: number) {
   const tiers = ratesConfig.tiers;
   const minCharge = ratesConfig.minimumCharge ?? 94.70;
   const minTier = tiers[0];
-  const minTierMin = typeof minTier.min === "number" ? minTier.min : 0;
-  const minTierMax = typeof minTier.max === "number" ? minTier.max : 5;
+  const minTierMin = typeof minTier?.min === "number" ? minTier.min : 0;
+  const minTierMax = typeof minTier?.max === "number" ? minTier.max : 5;
 
   let remainingUsage = waterUsage;
   let activeTiers: any[] = [];
@@ -1878,7 +2225,6 @@ function calculateTiers(waterUsage: number) {
     const tierMax = tiers[i].max === "above" || tiers[i].max === "over" ? Infinity : Number(tiers[i].max);
     const tierRange = tierMax === Infinity ? remainingUsage : tierMax - tierMin + 1;
     const tierUsage = Math.min(remainingUsage, tierRange);
-
     if (tierUsage > 0) {
       activeTiers.push({
         min: tierMin,
@@ -2522,13 +2868,150 @@ const paginatedBills = sortedFilteredBills.slice((currentPage - 1) * itemsPerPag
 const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
 
 
-  return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+  // --- BEGIN: Disconnection List Logic ---
+  interface DisconnectionItem {
+    accountNumber: string;
+    name: string;
+    site?: string;
+    unpaidCount: number;
+    totalDue: number;
+  }
+  
+  const [disconnectionList, setDisconnectionList] = useState<DisconnectionItem[]>([]);
+  
+  // Helper to fetch and compute disconnection list
+ // ...existing code...
+useEffect(() => {
+  const computeDisconnectionList = async () => {
+    try {
+      // Fetch all customers once
+      const customersSnapshot = await getDocs(collection(db, "customers"));
+      const customersData = customersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as Customer[];
+
+      // Fetch all unpaid bills in one query
+      const unpaidBillsSnapshot = await getDocs(
+        query(
+          collectionGroup(db, "records"),
+          where("status", "in", ["pending", "partially paid"])
+        )
+      );
+
+      // Group unpaid bills by accountNumber
+      const billsByAccount: Record<string, any[]> = {};
+      unpaidBillsSnapshot.docs.forEach(doc => {
+        const bill = doc.data();
+        const account = bill.accountNumber;
+        if (!account) return;
+        if (!billsByAccount[account]) billsByAccount[account] = [];
+        // Only count bills with amount > 0
+        if (parseFloat(bill.amount ?? bill.currentAmountDue ?? "0") > 0) {
+          billsByAccount[account].push(bill);
+        }
+      });
+
+      // Build disconnection list
+      const result: DisconnectionItem[] = [];
+      for (const customer of customersData) {
+        if (!customer.accountNumber) continue;
+        const bills = billsByAccount[customer.accountNumber] || [];
+        const unpaidPeriods = new Set<string>();
+        let totalDue = 0;
+        bills.forEach(bill => {
+          if (bill.billingPeriod) unpaidPeriods.add(bill.billingPeriod);
+          totalDue += parseFloat(bill.amount) || 0;
+        });
+        if (unpaidPeriods.size >= 2) {
+          result.push({
+            accountNumber: customer.accountNumber,
+            name: customer.name || `${customer.firstName || ""} ${customer.lastName || ""}`,
+            site: customer.site || "",
+            unpaidCount: unpaidPeriods.size,
+            totalDue: Number(totalDue.toFixed(2)),
+          });
+        }
+      }
+      setDisconnectionList(result);
+    } catch (err) {
+      setDisconnectionList([]);
+    }
+  };
+
+  computeDisconnectionList();
+}, [bills, customers]);
+// ...existing code...
+  const [disconnectionSiteFilter, setDisconnectionSiteFilter] = useState("all");
+const [disconnectionSearch, setDisconnectionSearch] = useState("");
+  const [noticeDialogOpen, setNoticeDialogOpen] = useState(false);
+const [selectedNotice, setSelectedNotice] = useState<DisconnectionItem | null>(null);
+const noticeRef = useRef<HTMLDivElement>(null);
+
+// Save to Firestore and open modal
+// ...existing code...
+const handleShowNotice = async (item: DisconnectionItem) => {
+  setSelectedNotice(item);
+  setNoticeDialogOpen(true);
+
+  // Reference to the disconnection_notices collection
+  const noticesRef = collection(db, "disconnection_notices");
+
+  // 1. Check if a notice already exists for this account
+  const existingNoticeQuery = query(
+    noticesRef,
+    where("accountNumber", "==", item.accountNumber)
+  );
+  const existingNoticeSnap = await getDocs(existingNoticeQuery);
+
+  // 2. Check if the customer is already paid (no more unpaid bills)
+  // You may already have this logic elsewhere, but here's a quick check:
+  const billsRef = collection(db, "bills", item.accountNumber, "records");
+  const unpaidBillsSnap = await getDocs(
+    query(billsRef, where("status", "in", ["pending", "partially paid"]))
+  );
+  const hasUnpaid = unpaidBillsSnap.docs.some(
+    doc => parseFloat(doc.data().amount ?? doc.data().currentAmountDue ?? "0") > 0
+  );
+
+  if (!hasUnpaid) {
+    // If already paid, remove any existing notice
+    if (!existingNoticeSnap.empty) {
+      for (const docSnap of existingNoticeSnap.docs) {
+        await deleteDoc(doc(db, "disconnection_notices", docSnap.id));
+      }
+    }
+    return; // Do not add a new notice
+  }
+
+  // If not paid and no existing notice, add a new one
+  if (existingNoticeSnap.empty) {
+    await addDoc(noticesRef, {
+      accountNumber: item.accountNumber,
+      name: item.name,
+      site: item.site,
+      unpaidCount: item.unpaidCount,
+      totalDue: item.totalDue,
+      noticeDate: Timestamp.now(),
+      status: "served"
+    });
+  }
+};
+// ...existing code...
+
+// Print handler
+const printDisconnectionNotice = (item: DisconnectionItem) => {
+  handleShowNotice(item);
+};
+
+    return (
+      <div className="p-6 max-w-6xl mx-auto">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="mb-6">
           <TabsTrigger value="customer-billing">Customer Billing</TabsTrigger>
           <TabsTrigger value="view-bills" onClick={fetchBillsData}>View Bills</TabsTrigger>
           <TabsTrigger value="manage-rates" onClick={fetchRatesConfig}>Manage Rates</TabsTrigger>
+          <TabsTrigger value="disconnection">Disconnection</TabsTrigger> {/* NEW TAB */}
         </TabsList>
 
         {/* Customer Billing Tab */}
@@ -3042,7 +3525,7 @@ const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
                     </div>
                     <div>
                       <h3 className="font-semibold text-gray-900">Minimum Charge</h3>
-                      <p className="text-sm text-gray-600">Base charge applied to all bills</p>
+                      <p className="text-sm text-gray-600 mt-1">Base charge applied to all bills</p>
                     </div>
                   </div>
                   <div className="text-right">
@@ -3178,7 +3661,7 @@ const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                         {editTiers.map((tier, idx) => (
-                          <tr key={idx} className="hover:bg-gray-50">
+                          <tr key={idx} className="hover:bg-gray-50 transition-colors">
                             <td className="px-4 py-4">
                               <input
                                 type="number"
@@ -3311,12 +3794,190 @@ const totalPages = Math.ceil(sortedFilteredBills.length / itemsPerPage);
     </CardContent>
   </Card>
 </TabsContent>
+
+
+<TabsContent value="disconnection" className="space-y-6">
+  <Card>
+    <CardHeader>
+      <CardTitle>Disconnection Notices</CardTitle>
+      <CardDescription>
+        Customers with unpaid bills for <span className="font-bold text-red-600">2 or more months</span>. Select to print disconnection notices.
+      </CardDescription>
+    </CardHeader>
+    <CardContent>
+      {/* --- Filter Controls --- */}
+      <div className="flex flex-col md:flex-row md:items-center gap-4 mb-6">
+        <div>
+          <label className="text-sm font-medium mr-2">Site:</label>
+          <select
+            value={disconnectionSiteFilter}
+            onChange={e => setDisconnectionSiteFilter(e.target.value)}
+            className="border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">All Sites</option>
+            {siteOptions
+              .filter(site => site && site !== "All")
+              .map(site => (
+                <option key={site} value={site}>
+                  {formatSiteName(site)}
+                </option>
+              ))}
+          </select>
+        </div>
+        <div className="flex-1">
+          <input
+            type="text"
+            placeholder="Search by Account # or Name"
+            value={disconnectionSearch}
+            onChange={e => setDisconnectionSearch(e.target.value)}
+            className="border border-gray-300 rounded-md px-3 py-2 w-full focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        <div className="flex gap-2">
+          <Button
+            className="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white shadow-lg"
+            onClick={handlePrintAllDisconnectionNotices}
+            disabled={
+              disconnectionList.filter(item =>
+                (disconnectionSiteFilter === "all" || item.site === disconnectionSiteFilter) &&
+                (
+                  !disconnectionSearch ||
+                  item.accountNumber.toLowerCase().includes(disconnectionSearch.toLowerCase()) ||
+                  item.name.toLowerCase().includes(disconnectionSearch.toLowerCase())
+                )
+              ).length === 0
+            }
+          >
+            Print All Notices
+          </Button>
+          <Button
+            className="bg-blue-600 hover:bg-green-700 text-white"
+            onClick={handleExportDisconnectionToExcel}
+            disabled={disconnectionList.length === 0}
+          >
+            <FileSpreadsheet className="mr-2 h-4 w-4" />
+            Export to Excel
+          </Button>
+        </div>
+      </div>
+      {/* --- Enhanced Table --- */}
+      <div className="overflow-x-auto rounded-lg shadow border border-gray-200 bg-white">
+        <table className="min-w-full divide-y divide-gray-100">
+          <thead className="bg-gradient-to-r from-blue-50 to-blue-100">
+            <tr>
+              <th className="px-6 py-4 text-left text-xs font-bold text-blue-700 uppercase tracking-wider border-b border-gray-200">Account #</th>
+              <th className="px-6 py-4 text-left text-xs font-bold text-blue-700 uppercase tracking-wider border-b border-gray-200">Name</th>
+              <th className="px-6 py-4 text-left text-xs font-bold text-blue-700 uppercase tracking-wider border-b border-gray-200">Site</th>
+              <th className="px-6 py-4 text-center text-xs font-bold text-blue-700 uppercase tracking-wider border-b border-gray-200">Unpaid Months</th>
+              <th className="px-6 py-4 text-right text-xs font-bold text-blue-700 uppercase tracking-wider border-b border-gray-200">Total Due</th>
+              <th className="px-6 py-4 text-center text-xs font-bold text-blue-700 uppercase tracking-wider border-b border-gray-200">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {disconnectionList
+              .filter(item =>
+                (disconnectionSiteFilter === "all" || item.site === disconnectionSiteFilter) &&
+                (
+                  !disconnectionSearch ||
+                  item.accountNumber.toLowerCase().includes(disconnectionSearch.toLowerCase()) ||
+                  item.name.toLowerCase().includes(disconnectionSearch.toLowerCase())
+                )
+              )
+              .map((item, idx, arr) =>
+                arr.length > 0 ? (
+                  <tr
+                    key={idx}
+                    className={`hover:bg-blue-50 transition-colors ${item.unpaidCount >= 4 ? "bg-red-50" : ""}`}
+                  >
+                    <td className="px-6 py-3 font-mono text-sm text-gray-900">{item.accountNumber}</td>
+                    <td className="px-6 py-3 text-sm font-semibold text-gray-800">{item.name}</td>
+                    <td className="px-6 py-3 text-sm text-gray-700">{formatSiteName(item.site)}</td>
+                    <td className="px-6 py-3 text-center">
+                      <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold
+                        ${item.unpaidCount >= 4
+                          ? "bg-red-600 text-white"
+                          : item.unpaidCount === 3
+                          ? "bg-yellow-400 text-white"
+                          : "bg-blue-100 text-blue-800"
+                        }`}>
+                        {item.unpaidCount}
+                      </span>
+                    </td>
+                    <td className="px-6 py-3 text-right font-mono text-base font-bold text-blue-700">
+                      ₱{formatCurrency(item.totalDue)}
+                    </td>
+                    <td className="px-6 py-3 text-center">
+                      <Button
+                        className="bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white shadow"
+                        onClick={() => printDisconnectionNotice(item)}
+                      >
+                        Print Notice
+                      </Button>
+                    </td>
+                  </tr>
+                ) : null
+              )
+            }
+            {/* Show message if no results */}
+            {disconnectionList.filter(item =>
+              (disconnectionSiteFilter === "all" || item.site === disconnectionSiteFilter) &&
+              (
+                !disconnectionSearch ||
+                item.accountNumber.toLowerCase().includes(disconnectionSearch.toLowerCase()) ||
+                item.name.toLowerCase().includes(disconnectionSearch.toLowerCase())
+              )
+            ).length === 0 && (
+              <tr>
+                <td colSpan={6} className="text-center py-8 text-gray-500">
+                  No customers eligible for disconnection.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {/* --- Legend --- */}
+      <div className="mt-4 flex flex-wrap gap-4 items-center text-xs">
+        <span className="inline-flex items-center gap-2">
+          <span className="inline-block w-4 h-4 rounded-full bg-blue-100 border border-blue-300"></span>
+          2 months unpaid
+        </span>
+        <span className="inline-flex items-center gap-2">
+          <span className="inline-block w-4 h-4 rounded-full bg-yellow-400 border border-yellow-500"></span>
+          3 months unpaid
+        </span>
+        <span className="inline-flex items-center gap-2">
+          <span className="inline-block w-4 h-4 rounded-full bg-red-600 border border-red-700"></span>
+          4+ months unpaid (urgent)
+        </span>
+      </div>
+    </CardContent>
+  </Card>
+</TabsContent>
+
+
       </Tabs>
       <BillDisplay 
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         selectedAccount={selectedAccount}
         selectedBills={selectedBills} customersCollection={customers}      />
+    
+<Dialog open={noticeDialogOpen} onOpenChange={setNoticeDialogOpen}>
+  <DialogContent className="max-w-3xl">
+    <DialogHeader>
+      <DialogTitle>
+        Disconnection Notice for {selectedNotice?.accountNumber}
+      </DialogTitle>
+    </DialogHeader>
+    {selectedNotice && (
+      <div className="py-4">
+        <DisconnectionNoticeDisplay ref={noticeRef} item={selectedNotice} />
+      </div>
+    )}
+  </DialogContent>
+</Dialog>
+    
     </div>
   );
 };

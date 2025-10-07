@@ -341,12 +341,6 @@ const handleCreateCashReceipt = async () => {
 // Add to paymentVerifications as verified
 await addDoc(collection(db, "paymentVerifications"), paymentData);
 
-// Update updatedPayments
-const updatedPaymentsRef = doc(db, "updatedPayments", selectedCashCustomer.accountNumber);
-const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
-const prevPaymentsAmount = parseFloat(updatedPaymentsSnap?.data()?.amount ?? 0);
-const newUpdatedAmount = Math.max(0, prevPaymentsAmount - cashAmount);
-await updateDoc(updatedPaymentsRef, { amount: newUpdatedAmount, customerId: selectedCashCustomer.id });
 
 // Optionally, update bills as in handleVerifyPayment if needed
 
@@ -702,10 +696,8 @@ const fetchCustomers = async () => {
     const { collection, onSnapshot, getDocs, query, where } = await import("firebase/firestore");
     const { db } = await import("../../lib/firebase");
     const customersCollection = collection(db, "customers");
-    const updatedPaymentsCollection = collection(db, "updatedPayments");
 
     let customersData: Customer[] = [];
-    let updatedPaymentsMap = new Map<string, number>();
 
     const unsubscribeCustomers = onSnapshot(customersCollection, async (snapshot) => {
       customersData = await Promise.all(snapshot.docs.map(async (doc) => {
@@ -758,24 +750,10 @@ const fetchCustomers = async () => {
       setCustomers(customersData);
     });
 
-    const unsubscribeUpdatedPayments = onSnapshot(updatedPaymentsCollection, (snapshot) => {
-      updatedPaymentsMap = new Map();
-      snapshot.docs.forEach((doc) => {
-        const data = doc.data();
-        updatedPaymentsMap.set(doc.id, data.amount || 0);
-      });
-      customersData.forEach((customer) => {
-        const acct = customer.accountNumber;
-        if (acct) {
-          // amountDue is already set above using bills logic
-        }
-      });
-      setCustomers(customersData);
-    });
+
 
     return () => {
       unsubscribeCustomers();
-      unsubscribeUpdatedPayments();
     };
   } catch (error) {
     console.error("Error fetching customers and updated payments:", error);
@@ -962,415 +940,406 @@ const fetchCustomers = async () => {
 
 
 
-  const handleVerifyPayment = async () => {
-    // Disable the button immediately
-    setIsProcessing(true);
-  
-    try {
-      if (!selectedVerification) {
-        console.error("❌ Error: No selected verification.");
-        alert("No verification selected. Please choose a payment to verify.");
-        setIsProcessing(false);
-        return;
-      }
-  
-      const {
-        doc,
-        updateDoc,
-        getDoc,
-        deleteDoc,
-        collection,
-        getDocs,
-        where,
-        query,
-        addDoc,
-        orderBy,
-        limit
-      } = await import("firebase/firestore");
-      const { db } = await import("../../lib/firebase");
-  
-      console.log("🔄 Processing payment verification:", selectedVerification);
-  
-      // Determine account number and customerId
-      let { accountNumber, customerId } = selectedVerification;
-      if (!accountNumber && customerId) {
-        const customerRef = doc(db, "customers", customerId);
-        const customerSnap = await getDoc(customerRef);
-        if (customerSnap.exists()) {
-          accountNumber = customerSnap.data().accountNumber;
-          console.log(`✅ Retrieved accountNumber: ${accountNumber}`);
-        }
-      }
-  
-      // Check if accountNumber is valid
-      if (!accountNumber) {
-        console.error("❌ Error: No account number found.");
-        alert("No account number found. Please check the verification details.");
-        setIsProcessing(false);
-        return;
-      }
-  
-      // Check if the customer exists with the given account number
-      const customersCollection = collection(db, "customers");
-      const customerQuery = query(
-        customersCollection,
-        where("accountNumber", "==", accountNumber)
-      );
-      const customerSnapshot = await getDocs(customerQuery);
-      if (customerSnapshot.empty) {
-        console.error(`❌ No customer found with accountNumber: ${accountNumber}`);
-        // Reject the verification if the account number is wrong
-        await deleteDoc(doc(db, "paymentVerifications", selectedVerification.id));
-        alert(
-          "No customer found with the provided account number. Payment verification has been rejected."
-        );
-        setSelectedVerification(null);
-        setVerificationStatus("rejected");
-        setVerificationNotes("");
-        setIsVerificationDialogOpen(false);
-        setIsProcessing(false);
-        return;
-      }
-  
-      // If customer is found, retrieve customerId
-      const customerDoc = customerSnapshot.docs[0];
-      customerId = customerDoc.id;
-      console.log(`✅ Found customerId: ${customerId} for accountNumber: ${accountNumber}`);
-  
-      // Compute paymentAmount early so it can be used in the duplicate check notification.
-      const paymentAmount =
-        typeof selectedVerification.amount === "string"
-          ? parseFloat(selectedVerification.amount)
-          : selectedVerification.amount;
-      if (isNaN(paymentAmount)) {
-        console.error("❌ Error: Invalid payment amount.");
-        alert("Invalid payment amount. Please check the payment details.");
-        setIsProcessing(false);
-        return;
-      }
-  
-      // Check for duplicate payment verification with the same reference number that is already verified.
-      const paymentVerificationsCollection = collection(db, "paymentVerifications");
-      const referenceQuery = query(
-        paymentVerificationsCollection,
-        where("referenceNumber", "==", selectedVerification.referenceNumber)
-      );
-      const refVerificationSnap = await getDocs(referenceQuery);
-  
-      let alreadyVerified = false;
-      refVerificationSnap.forEach((docSnap) => {
-        // Skip the current verification document.
-        if (docSnap.id !== selectedVerification.id) {
-          const data = docSnap.data();
-          if (data.status === "verified") {
-            alreadyVerified = true;
-          }
-        }
-      });
-  
-      if (alreadyVerified) {
-        // Delete the current verification doc and create a rejected notification.
-        await deleteDoc(doc(db, "paymentVerifications", selectedVerification.id));
-        console.log("❌ Payment verification deleted due to duplicate verified reference.");
-  
-        await addDoc(
-          collection(db, "notifications", accountNumber, "records"),
-          {
-            type: "payment",
-            verificationId: selectedVerification.id,
-            accountNumber: accountNumber,
-            customerId: customerId,
-            status: "rejected",
-            paymentAmount: paymentAmount,
-            description: `Payment verification rejected because reference number ${selectedVerification.referenceNumber} is already verified.`,
-            createdAt: formatNotificationTimestamp(),
-          }
-        );
-  
-        alert("Payment verification rejected because this reference number has already been verified.");
-        setSelectedVerification(null);
-        setVerificationStatus("rejected");
-        setVerificationNotes("");
-        setIsVerificationDialogOpen(false);
-        setIsProcessing(false);
-        return;
-      }
-  
-      // If verification is rejected (via admin action), handle that case.
-      if (verificationStatus === "rejected") {
-        // Update the verification document status to "rejected" instead of deleting
-        await updateDoc(doc(db, "paymentVerifications", selectedVerification.id), {
-          status: "rejected",
-          notes: verificationNotes,
-          rejectedAt: new Date().toISOString(),
-        });
-        console.log("❌ Payment verification marked as rejected.");
+const handleVerifyPayment = async () => {
+  // Disable the button immediately
+  setIsProcessing(true);
 
-        // Create a notification with the appropriate status and description
-        await addDoc(
-          collection(db, "notifications", accountNumber, "records"),
-          {
-            type: "payment",
-            verificationId: selectedVerification.id,
-            customerId: customerId,
-            accountNumber: accountNumber,
-            status: "rejected",
-            paymentAmount: paymentAmount,
-            description: "Your payment verification has been rejected.",
-            createdAt: formatNotificationTimestamp(),
-          }
-        );
+  try {
+    if (!selectedVerification) {
+      console.error("❌ Error: No selected verification.");
+      alert("No verification selected. Please choose a payment to verify.");
+      setIsProcessing(false);
+      return;
+    }
 
-        alert("Payment has been rejected and notification created.");
-        setSelectedVerification(null);
-        setVerificationStatus("verified");
-        setVerificationNotes("");
-        setIsVerificationDialogOpen(false);
-        setIsProcessing(false);
-        return;
-      }
+    const {
+      doc,
+      updateDoc,
+      getDoc,
+      deleteDoc,
+      collection,
+      getDocs,
+      where,
+      query,
+      addDoc,
+      orderBy,
+    } = await import("firebase/firestore");
+    const { db } = await import("../../lib/firebase");
 
-  
-      // Process verified payment.
-      // Update updatedPayments document.
-      const updatedPaymentsRef = doc(db, "updatedPayments", accountNumber);
-      const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
-      if (!updatedPaymentsSnap.exists()) {
-        console.error(`❌ Error: No updatedPayments record found for account ${accountNumber}.`);
-        alert(`No payment record found for account ${accountNumber}.`);
-        setIsProcessing(false);
-        return;
-      }
-      const updatedPaymentsData = updatedPaymentsSnap.data();
-      const prevPaymentsAmount = parseFloat(updatedPaymentsData?.amount ?? 0);
-      const newUpdatedAmount = Math.max(0, prevPaymentsAmount - paymentAmount);
-  
-      // Update both the amount and the customerId.
-      await updateDoc(updatedPaymentsRef, { amount: newUpdatedAmount, customerId: customerId });
-      console.log(`✅ updatedPayments updated for account ${accountNumber}: amount = ${newUpdatedAmount}`);
-  
-      // Process pending bills in the bills collection.
-      const billsCollectionRef = collection(db, "bills", accountNumber, "records");
-      
-      // Get all bills sorted by billNumber in ascending order (oldest first)
-      const billsQueryOrderedByNumber = query(
-        billsCollectionRef,
-        orderBy("billNumber", "asc")
-      );
-      
-      const billsSnap = await getDocs(billsQueryOrderedByNumber);
-      
-      // Extract bills with positive amounts (unpaid bills)
-      const pendingBills = billsSnap.docs
-        .filter(doc => doc.data().amount > 0)
-        .map((doc) => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            ref: doc.ref,
-            billNumber: data.billNumber || "",
-            amount: data.amount || 0,
-            currentAmountDue: data.currentAmountDue || 0,
-            dueDate: data.dueDate,
-            overPayment: data.overPayment || 0,
-            penaltyApplied: data.penaltyApplied || false,
-            originalAmount: data.originalAmount || 0,
-            status: data.status || "pending"
-          };
-        });
-  
-      // Save the original payment amount for later calculation.
-      let remainingPayment = paymentAmount;
-      let currentBillPaid = null; // Track which bill was just paid (for overpayment)
-  
-      // Process each pending bill in order of billNumber (oldest first).
-      for (const bill of pendingBills) {
-        if (remainingPayment <= 0) break;
-  
-        // Check if penalty should be applied
-        let billAmount = bill.amount;
-        let penaltyApplied = bill.penaltyApplied || false;
-        
-        // Apply penalty if needed (due date passed and not yet applied)
-        if (billAmount > 0 && !penaltyApplied) {
-          // Parse the due date correctly
-          let dueDate;
-          
-          if (bill.dueDate && typeof bill.dueDate === 'string') {
-            if (bill.dueDate.includes('/')) {
-              const [day, month, year] = bill.dueDate.split('/');
-              dueDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-            } 
-            else if (bill.dueDate.includes('-')) {
-              dueDate = new Date(bill.dueDate);
-            }
-            else {
-              dueDate = new Date(bill.dueDate);
-            }
-          } else {
-            dueDate = new Date(bill.dueDate);
-          }
-          
-          const currentDate = new Date();
-          
-          console.log(`Checking bill ${bill.billNumber}: Due date ${dueDate.toISOString()}, Current date ${currentDate.toISOString()}`);
-          
-          if (dueDate < currentDate) {
-            // Apply 10% penalty to the bill amount
-            const penaltyAmount = billAmount * 0.1;
-            billAmount += penaltyAmount;
-            penaltyApplied = true;
-            
-            console.log(`✅ Applied penalty of ${penaltyAmount.toFixed(2)} to bill ${bill.billNumber}. New amount: ${billAmount.toFixed(2)}`);
-            
-            // Update the bill with the new amount and penaltyApplied status
-            await updateDoc(bill.ref, {
-              amount: billAmount,
-              currentAmountDue: billAmount,
-              penaltyApplied: true
-            });
-          }
-        }
-        
-        // Process payment for this bill
-        if (remainingPayment >= billAmount) {
-          // Full payment
-          await updateDoc(bill.ref, {
-            amount: 0,
-            currentAmountDue: 0,
-            paidAt: new Date().toISOString(),
-            penaltyApplied: penaltyApplied,
-            status: "paid"
-          });
-          
-          remainingPayment -= billAmount;
-          currentBillPaid = bill; // Track this bill for potential overpayment
-          
-          console.log(`✅ Bill ${bill.billNumber} fully paid. Remaining payment: ${remainingPayment.toFixed(2)}`);
-        } else {
-          // Partial payment
-          const newRemaining = billAmount - remainingPayment;
-          await updateDoc(bill.ref, {
-            amount: newRemaining,
-            currentAmountDue: newRemaining,
-            penaltyApplied: penaltyApplied,
-            status: newRemaining < bill.originalAmount ? "partially paid" : "pending"
-          });
-          
-          console.log(`✅ Bill ${bill.billNumber} partially paid. Remaining bill amount: ${newRemaining.toFixed(2)}`);
-          remainingPayment = 0;
-        }
-      }
-  
-      // Handle overpayment: apply to the last bill that was fully paid
-      if (remainingPayment > 0 && currentBillPaid) {
-        // Record overpayment on the bill that was just paid
-        await updateDoc(currentBillPaid.ref, {
-          overPayment: remainingPayment,
-          status: "paid" // Ensure status is marked as paid
-        });
-        
-        console.log(`✅ Overpayment of ${remainingPayment.toFixed(2)} recorded on bill ${currentBillPaid.billNumber}`);
-        
-        // Send a notification about the overpayment
-        await addDoc(collection(db, "notifications", accountNumber, "records"), {
-          type: "payment",
-          verificationId: selectedVerification.id,
-          customerId: customerId,
-          accountNumber: accountNumber,
-          status: "overpayment",
-          paymentAmount: remainingPayment,
-          description: `An overpayment of ₱${remainingPayment.toFixed(2)} has been recorded for your account. The amount will be applied to future bills.`,
-          createdAt: formatNotificationTimestamp(),
-        });
-      }
-  
-      // Update the payment verification document as verified.
-      await updateDoc(doc(db, "paymentVerifications", selectedVerification.id), {
-        status: "verified",
-        verifiedAt: new Date().toISOString(),
-      });
-      console.log(`✅ Payment verified for customer ${customerId}`);
-  
-      // Send email receipt.
+    console.log("🔄 Processing payment verification:", selectedVerification);
+
+    // Determine account number and customerId
+    let { accountNumber, customerId } = selectedVerification;
+    if (!accountNumber && customerId) {
       const customerRef = doc(db, "customers", customerId);
       const customerSnap = await getDoc(customerRef);
-      if (!customerSnap.exists()) {
-        console.error(`❌ Error: Customer with ID ${customerId} not found.`);
-        setIsProcessing(false);
-        return;
+      if (customerSnap.exists()) {
+        accountNumber = customerSnap.data().accountNumber;
+        console.log(`✅ Retrieved accountNumber: ${accountNumber}`);
       }
-      const customerData = customerSnap.data();
-      const customerEmail = customerData.email;
-      if (customerEmail) {
-        console.log(`📧 Sending receipt to ${customerEmail}...`);
-        await sendEmailToCustomer(
-          customerEmail,
-          "Payment Receipt - Centennial Water",
-          `<h2>Payment Receipt</h2>
-           <p>Dear ${customerData.name},</p>
-           <p>Thank you for your payment of <strong>₱${paymentAmount.toFixed(2)}</strong> for your water bill.</p>
-           <p><strong>Reference Number:</strong> ${selectedVerification.referenceNumber}</p>
-           <p><strong>Payment Date:</strong> ${new Date().toLocaleDateString("en-GB")}</p>
-           <p><strong>Remaining Balance:</strong> ₱${newUpdatedAmount.toFixed(2)}</p>
-           ${remainingPayment > 0 ? `<p><strong>Overpayment:</strong> ₱${remainingPayment.toFixed(2)}</p>` : ''}
-           <p>If you have any questions, feel free to contact us.</p>
-           <br>
-           <p>Best regards,</p>
-           <p>Centennial Water Billing</p>`
-        );
-        console.log(`✅ Receipt sent to ${customerEmail}`);
-      } else {
-        console.warn("⚠️ No email found for customer.");
+    }
+
+    // Check if accountNumber is valid
+    if (!accountNumber) {
+      console.error("❌ Error: No account number found.");
+      alert("No account number found. Please check the verification details.");
+      setIsProcessing(false);
+      return;
+    }
+
+    // Check if the customer exists with the given account number
+    const customersCollection = collection(db, "customers");
+    const customerQuery = query(
+      customersCollection,
+      where("accountNumber", "==", accountNumber)
+    );
+    const customerSnapshot = await getDocs(customerQuery);
+    if (customerSnapshot.empty) {
+      console.error(`❌ No customer found with accountNumber: ${accountNumber}`);
+      // Reject the verification if the account number is wrong
+      await deleteDoc(doc(db, "paymentVerifications", selectedVerification.id));
+      alert(
+        "No customer found with the provided account number. Payment verification has been rejected."
+      );
+      setSelectedVerification(null);
+      setVerificationStatus("rejected");
+      setVerificationNotes("");
+      setIsVerificationDialogOpen(false);
+      setIsProcessing(false);
+      return;
+    }
+
+    // If customer is found, retrieve customerId
+    const customerDoc = customerSnapshot.docs[0];
+    customerId = customerDoc.id;
+    console.log(`✅ Found customerId: ${customerId} for accountNumber: ${accountNumber}`);
+
+    // Compute paymentAmount early so it can be used in the duplicate check notification.
+    const paymentAmount =
+      typeof selectedVerification.amount === "string"
+        ? parseFloat(selectedVerification.amount)
+        : selectedVerification.amount;
+    if (isNaN(paymentAmount)) {
+      console.error("❌ Error: Invalid payment amount.");
+      alert("Invalid payment amount. Please check the payment details.");
+      setIsProcessing(false);
+      return;
+    }
+
+    // Check for duplicate payment verification with the same reference number that is already verified.
+    const paymentVerificationsCollection = collection(db, "paymentVerifications");
+    const referenceQuery = query(
+      paymentVerificationsCollection,
+      where("referenceNumber", "==", selectedVerification.referenceNumber)
+    );
+    const refVerificationSnap = await getDocs(referenceQuery);
+
+    let alreadyVerified = false;
+    refVerificationSnap.forEach((docSnap) => {
+      // Skip the current verification document.
+      if (docSnap.id !== selectedVerification.id) {
+        const data = docSnap.data();
+        if (data.status === "verified") {
+          alreadyVerified = true;
+        }
       }
-  
-      alert(`✅ Payment of ₱${paymentAmount.toFixed(2)} verified successfully.`);
+    });
+
+    if (alreadyVerified) {
+      // Delete the current verification doc and create a rejected notification.
+      await deleteDoc(doc(db, "paymentVerifications", selectedVerification.id));
+      console.log("❌ Payment verification deleted due to duplicate verified reference.");
+
       await addDoc(
         collection(db, "notifications", accountNumber, "records"),
         {
           type: "payment",
           verificationId: selectedVerification.id,
-          customerId: customerId,
           accountNumber: accountNumber,
-          status: "verified",
+          customerId: customerId,
+          status: "rejected",
           paymentAmount: paymentAmount,
-          description: `Your payment verification has been successfully verified. Payment Amount: ₱${paymentAmount.toFixed(2)}.`,
+          description: `Payment verification rejected because reference number ${selectedVerification.referenceNumber} is already verified.`,
           createdAt: formatNotificationTimestamp(),
         }
       );
-  
-      // Remove disconnection notice if less than 3 unpaid bills remain
-      const unpaidBillsQuery = query(
-        collection(db, "bills", accountNumber, "records"),
-        where("amount", ">", 0)
-      );
-      const unpaidBillsSnapshot = await getDocs(unpaidBillsQuery);
-  
-      if (unpaidBillsSnapshot.size < 3) {
-        const noticeQuery = query(
-          collection(db, "notice"),
-          where("accountNumber", "==", accountNumber)
-        );
-        const noticeSnapshot = await getDocs(noticeQuery);
-        for (const docSnap of noticeSnapshot.docs) {
-          await deleteDoc(doc(db, "notice", docSnap.id));
-          console.log(`🗑️ Deleted disconnection notice: ${docSnap.id}`);
-        }
-      }
-  
-      // Reset state and close the dialog.
+
+      alert("Payment verification rejected because this reference number has already been verified.");
       setSelectedVerification(null);
-      setVerificationStatus("verified");
+      setVerificationStatus("rejected");
       setVerificationNotes("");
       setIsVerificationDialogOpen(false);
-    } catch (error) {
-      console.error("❌ Error verifying payment:", error);
-      alert("An error occurred while verifying the payment. Please try again.");
-    } finally {
-      // Always re-enable the button, regardless of success or failure
       setIsProcessing(false);
+      return;
     }
-  };
+
+    // If verification is rejected (via admin action), handle that case.
+  // ...existing code...
+// If verification is rejected (via admin action), handle that case.
+if (verificationStatus === "rejected") {
+  // Update the verification document status to "rejected" instead of deleting
+  await updateDoc(doc(db, "paymentVerifications", selectedVerification.id), {
+    status: "rejected",
+    notes: verificationNotes,
+    rejectedAt: new Date().toISOString(),
+  });
+  console.log("❌ Payment verification marked as rejected.");
+
+  // Create a notification with the appropriate status and description
+  await addDoc(
+    collection(db, "notifications", accountNumber, "records"),
+    {
+      type: "payment",
+      verificationId: selectedVerification.id,
+      customerId: customerId,
+      accountNumber: accountNumber,
+      status: "rejected",
+      paymentAmount: paymentAmount,
+      description: "Your payment verification has been rejected.",
+      reason: verificationNotes, // <-- Add this line to include the rejection reason
+      createdAt: formatNotificationTimestamp(),
+    }
+  );
+
+  alert("Payment has been rejected and notification created.");
+  setSelectedVerification(null);
+  setVerificationStatus("verified");
+  setVerificationNotes("");
+  setIsVerificationDialogOpen(false);
+  setIsProcessing(false);
+  return;
+}
+// ...existing code...
+
+    // Process verified payment - work directly with bills
+    const billsCollectionRef = collection(db, "bills", accountNumber, "records");
+    
+    // Get all bills sorted by billNumber in ascending order (oldest first)
+    const billsQueryOrderedByNumber = query(
+      billsCollectionRef,
+      orderBy("billNumber", "asc")
+    );
+    
+    const billsSnap = await getDocs(billsQueryOrderedByNumber);
+    
+    // Extract bills with positive amounts (unpaid bills)
+    const pendingBills = billsSnap.docs
+      .filter(doc => doc.data().amount > 0)
+      .map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ref: doc.ref,
+          billNumber: data.billNumber || "",
+          amount: data.amount || 0,
+          currentAmountDue: data.currentAmountDue || 0,
+          dueDate: data.dueDate,
+          overPayment: data.overPayment || 0,
+          penaltyApplied: data.penaltyApplied || false,
+          originalAmount: data.originalAmount || 0,
+          status: data.status || "pending"
+        };
+      });
+
+    // Save the original payment amount for later calculation.
+    let remainingPayment = paymentAmount;
+    let currentBillPaid = null; // Track which bill was just paid (for overpayment)
+
+    // Process each pending bill in order of billNumber (oldest first).
+    for (const bill of pendingBills) {
+      if (remainingPayment <= 0) break;
+
+      // Check if penalty should be applied
+      let billAmount = bill.amount;
+      let penaltyApplied = bill.penaltyApplied || false;
+      
+      // Apply penalty if needed (due date passed and not yet applied)
+      if (billAmount > 0 && !penaltyApplied) {
+        // Parse the due date correctly
+        let dueDate;
+        
+        if (bill.dueDate && typeof bill.dueDate === 'string') {
+          if (bill.dueDate.includes('/')) {
+            const [day, month, year] = bill.dueDate.split('/');
+            dueDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+          } 
+          else if (bill.dueDate.includes('-')) {
+            dueDate = new Date(bill.dueDate);
+          }
+          else {
+            dueDate = new Date(bill.dueDate);
+          }
+        } else {
+          dueDate = new Date(bill.dueDate);
+        }
+        
+        const currentDate = new Date();
+        
+        console.log(`Checking bill ${bill.billNumber}: Due date ${dueDate.toISOString()}, Current date ${currentDate.toISOString()}`);
+        
+        if (dueDate < currentDate) {
+          // Apply 10% penalty to the bill amount
+          const penaltyAmount = billAmount * 0.1;
+          billAmount += penaltyAmount;
+          penaltyApplied = true;
+          
+          console.log(`✅ Applied penalty of ${penaltyAmount.toFixed(2)} to bill ${bill.billNumber}. New amount: ${billAmount.toFixed(2)}`);
+          
+          // Update the bill with the new amount and penaltyApplied status
+          await updateDoc(bill.ref, {
+            amount: billAmount,
+            currentAmountDue: billAmount,
+            penaltyApplied: true
+          });
+        }
+      }
+      
+      // Process payment for this bill
+      if (remainingPayment >= billAmount) {
+        // Full payment
+        await updateDoc(bill.ref, {
+          amount: 0,
+          currentAmountDue: 0,
+          paidAt: new Date().toISOString(),
+          penaltyApplied: penaltyApplied,
+          status: "paid"
+        });
+        
+        remainingPayment -= billAmount;
+        currentBillPaid = bill; // Track this bill for potential overpayment
+        
+        console.log(`✅ Bill ${bill.billNumber} fully paid. Remaining payment: ${remainingPayment.toFixed(2)}`);
+      } else {
+        // Partial payment
+        const newRemaining = billAmount - remainingPayment;
+        await updateDoc(bill.ref, {
+          amount: newRemaining,
+          currentAmountDue: newRemaining,
+          penaltyApplied: penaltyApplied,
+          status: newRemaining < bill.originalAmount ? "partially paid" : "pending"
+        });
+        
+        console.log(`✅ Bill ${bill.billNumber} partially paid. Remaining bill amount: ${newRemaining.toFixed(2)}`);
+        remainingPayment = 0;
+      }
+    }
+
+    // Calculate total remaining balance from all unpaid bills
+    const updatedBillsSnap = await getDocs(billsCollectionRef);
+    const totalRemainingBalance = updatedBillsSnap.docs.reduce((sum, doc) => {
+      const amount = doc.data().amount || 0;
+      return sum + amount;
+    }, 0);
+
+    // Handle overpayment: apply to the last bill that was fully paid
+    if (remainingPayment > 0 && currentBillPaid) {
+      // Record overpayment on the bill that was just paid
+      await updateDoc(currentBillPaid.ref, {
+        overPayment: remainingPayment,
+        status: "paid" // Ensure status is marked as paid
+      });
+      
+      console.log(`✅ Overpayment of ${remainingPayment.toFixed(2)} recorded on bill ${currentBillPaid.billNumber}`);
+      
+      // Send a notification about the overpayment
+      await addDoc(collection(db, "notifications", accountNumber, "records"), {
+        type: "payment",
+        verificationId: selectedVerification.id,
+        customerId: customerId,
+        accountNumber: accountNumber,
+        status: "overpayment",
+        paymentAmount: remainingPayment,
+        description: `An overpayment of ₱${remainingPayment.toFixed(2)} has been recorded for your account. The amount will be applied to future bills.`,
+        createdAt: formatNotificationTimestamp(),
+      });
+    }
+
+    // Update the payment verification document as verified.
+    await updateDoc(doc(db, "paymentVerifications", selectedVerification.id), {
+      status: "verified",
+      verifiedAt: new Date().toISOString(),
+    });
+    console.log(`✅ Payment verified for customer ${customerId}`);
+
+    // Send email receipt.
+    const customerRef = doc(db, "customers", customerId);
+    const customerSnap = await getDoc(customerRef);
+    if (!customerSnap.exists()) {
+      console.error(`❌ Error: Customer with ID ${customerId} not found.`);
+      setIsProcessing(false);
+      return;
+    }
+    const customerData = customerSnap.data();
+    const customerEmail = customerData.email;
+    if (customerEmail) {
+      console.log(`📧 Sending receipt to ${customerEmail}...`);
+      await sendEmailToCustomer(
+        customerEmail,
+        "Payment Receipt - Centennial Water",
+        `<h2>Payment Receipt</h2>
+         <p>Dear ${customerData.name},</p>
+         <p>Thank you for your payment of <strong>₱${paymentAmount.toFixed(2)}</strong> for your water bill.</p>
+         <p><strong>Reference Number:</strong> ${selectedVerification.referenceNumber}</p>
+         <p><strong>Payment Date:</strong> ${new Date().toLocaleDateString("en-GB")}</p>
+         <p><strong>Remaining Balance:</strong> ₱${totalRemainingBalance.toFixed(2)}</p>
+         ${remainingPayment > 0 ? `<p><strong>Overpayment:</strong> ₱${remainingPayment.toFixed(2)}</p>` : ''}
+         <p>If you have any questions, feel free to contact us.</p>
+         <br>
+         <p>Best regards,</p>
+         <p>Centennial Water Billing</p>`
+      );
+      console.log(`✅ Receipt sent to ${customerEmail}`);
+    } else {
+      console.warn("⚠️ No email found for customer.");
+    }
+
+    alert(`✅ Payment of ₱${paymentAmount.toFixed(2)} verified successfully.`);
+    await addDoc(
+      collection(db, "notifications", accountNumber, "records"),
+      {
+        type: "payment",
+        verificationId: selectedVerification.id,
+        customerId: customerId,
+        accountNumber: accountNumber,
+        status: "verified",
+        paymentAmount: paymentAmount,
+        description: `Your payment verification has been successfully verified. Payment Amount: ₱${paymentAmount.toFixed(2)}.`,
+        createdAt: formatNotificationTimestamp(),
+      }
+    );
+
+    // Remove disconnection notice if less than 3 unpaid bills remain
+    const unpaidBillsQuery = query(
+      collection(db, "bills", accountNumber, "records"),
+      where("amount", ">", 0)
+    );
+    const unpaidBillsSnapshot = await getDocs(unpaidBillsQuery);
+
+    if (unpaidBillsSnapshot.size < 3) {
+      const noticeQuery = query(
+        collection(db, "notice"),
+        where("accountNumber", "==", accountNumber)
+      );
+      const noticeSnapshot = await getDocs(noticeQuery);
+      for (const docSnap of noticeSnapshot.docs) {
+        await deleteDoc(doc(db, "notice", docSnap.id));
+        console.log(`🗑️ Deleted disconnection notice: ${docSnap.id}`);
+      }
+    }
+
+    // Reset state and close the dialog.
+    setSelectedVerification(null);
+    setVerificationStatus("verified");
+    setVerificationNotes("");
+    setIsVerificationDialogOpen(false);
+  } catch (error) {
+    console.error("❌ Error verifying payment:", error);
+    alert("An error occurred while verifying the payment. Please try again.");
+  } finally {
+    // Always re-enable the button, regardless of success or failure
+    setIsProcessing(false);
+  }
+};
   
 
 
@@ -2455,7 +2424,9 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
                                   size="sm"
                                   onClick={() => {
                                     setSelectedCashCustomer(customer);
-                                    setCashAmount(customer.amountDue > 0 ? customer.amountDue : 0);
+                                    setCashAmount(
+                                      Math.round((customer.amountDue > 0 ? customer.amountDue : 0) * 100) / 100
+                                    );
                                     setCashPaymentDate(formatPaymentDate(new Date()));
                                     setCashReferenceNumber(generateReferenceNumber());
                                     setIsCashReceiptDialogOpen(true);
@@ -2581,12 +2552,6 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
                         // Add to paymentVerifications as verified
                         await addDoc(collection(db, "paymentVerifications"), paymentVerification);
 
-                        // Update updatedPayments
-                        const updatedPaymentsRef = doc(db, "updatedPayments", selectedCashCustomer.accountNumber);
-                        const updatedPaymentsSnap = await getDoc(updatedPaymentsRef);
-                        const prevPaymentsAmount = parseFloat(updatedPaymentsSnap?.data()?.amount ?? 0);
-                        const newUpdatedAmount = Math.max(0, prevPaymentsAmount - cashAmount);
-                        await updateDoc(updatedPaymentsRef, { amount: newUpdatedAmount, customerId: selectedCashCustomer.id });
 
                         // --- Apply payment to bills (like handleVerifyPayment) ---
                         const billsCollectionRef = collection(db, "bills", selectedCashCustomer.accountNumber, "records");
