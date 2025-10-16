@@ -20,29 +20,58 @@ interface Customer {
 
 const CustomerWaterUsageRanking = ({
   onData,
+  selectedMonth,
+  selectedYear,
 }: {
   onData: (data: Customer[]) => void;
+  selectedMonth: string;
+  selectedYear: string;
 }) => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
   const [siteFilter, setSiteFilter] = useState("All");
   const [sortOrder, setSortOrder] = useState("highest");
 
-  const fetchTotalWaterUsage = async (accountNumber: string) => {
-    let totalUsage = 0;
-    try {
-      const billsSnapshot = await getDocs(collection(db, "bills", accountNumber, "records"));
-      billsSnapshot.forEach((billDoc) => {
-        const billData = billDoc.data();
-        if (typeof billData.waterUsage === "number") {
+const fetchTotalWaterUsage = async (accountNumber: string) => {
+  let totalUsage = 0;
+  try {
+    const billsSnapshot = await getDocs(collection(db, "bills", accountNumber, "records"));
+    billsSnapshot.forEach((billDoc) => {
+      const billData = billDoc.data();
+      if (typeof billData.waterUsage === "number") {
+        let billMonth = null;
+        let billYear = null;
+
+        // Firestore Timestamp
+        if (billData.date && typeof billData.date === "object" && billData.date.toDate) {
+          const billDate = billData.date.toDate();
+          billMonth = (billDate.getMonth() + 1).toString().padStart(2, "0");
+          billYear = billDate.getFullYear().toString();
+        }
+        // dueDate as string "DD/MM/YYYY"
+        else if (billData.dueDate) {
+          const [day, month, year] = billData.dueDate.split("/");
+          billMonth = month;
+          billYear = year;
+        }
+        // date as string
+        else if (billData.date && typeof billData.date === "string") {
+          const billDate = new Date(billData.date);
+          billMonth = (billDate.getMonth() + 1).toString().padStart(2, "0");
+          billYear = billDate.getFullYear().toString();
+        }
+        const matchesMonth = selectedMonth === "All" || selectedMonth === billMonth;
+        const matchesYear = selectedYear === "All" || selectedYear === billYear;
+        if (matchesMonth && matchesYear) {
           totalUsage += billData.waterUsage;
         }
-      });
-    } catch (error) {
-      console.error(`❌ Error fetching bills for account ${accountNumber}:`, error);
-    }
-    return totalUsage;
-  };
+      }
+    });
+  } catch (error) {
+    console.error(`❌ Error fetching bills for account ${accountNumber}:`, error);
+  }
+  return totalUsage;
+};
 
   useEffect(() => {
     const fetchCustomers = async () => {
@@ -60,7 +89,7 @@ const CustomerWaterUsageRanking = ({
     };
 
     fetchCustomers();
-  }, []);
+  }, [selectedMonth, selectedYear]);;
 
   useEffect(() => {
     let filtered = [...customers];

@@ -19,8 +19,12 @@ import {
 
 const WaterLeakagePerSite = ({
   onData,
+  selectedMonth,
+  selectedYear,
 }: {
   onData: (data: { name: string; value: number; color: string }[]) => void;
+  selectedMonth: string;
+  selectedYear: string;
 }) => {
   const [leakageData, setLeakageData] = useState(getDefaultChartData());
 
@@ -35,12 +39,21 @@ const WaterLeakagePerSite = ({
         // Initialize counts
         let siteCounts = { site1: 0, site2: 0, site3: 0 };
 
-        // Count leaks per site
+        // Count leaks per site, filtered by date
         leaksSnapshot.docs.forEach((doc) => {
           const leak = doc.data();
           // Extract "Site 1", "Site 2", or "Site 3" from the address
           const match = leak.address.match(/Site\s*([1-3])/i);
           if (match) {
+            // Filter by date if available
+            if (leak.timestamp) {
+              const leakDate = leak.timestamp.toDate ? leak.timestamp.toDate() : new Date(leak.timestamp);
+              const leakMonth = (leakDate.getMonth() + 1).toString().padStart(2, "0");
+              const leakYear = leakDate.getFullYear().toString();
+              const matchesMonth = selectedMonth === "All" || selectedMonth === leakMonth;
+              const matchesYear = selectedYear === "All" || selectedYear === leakYear;
+              if (!(matchesMonth && matchesYear)) return;
+            }
             const siteKey = `site${match[1]}`;
             if (siteCounts[siteKey] !== undefined) {
               siteCounts[siteKey] += 1;
@@ -75,7 +88,7 @@ const WaterLeakagePerSite = ({
     };
 
     fetchLeakageData();
-  }, [onData]);
+  }, [onData, selectedMonth, selectedYear]);
 
   return (
     <Card className="w-full h-full bg-white">
@@ -89,6 +102,11 @@ const WaterLeakagePerSite = ({
       </CardHeader>
 
       <CardContent>
+          {leakageData.every(d => d.value === 0) ? (
+          <div className="text-center text-gray-400 py-20">
+            No leakage data available for the selected period.
+          </div>
+        ) : (
         <ResponsiveContainer width="100%" height={300}>
           <PieChart>
             <Pie
@@ -113,6 +131,7 @@ const WaterLeakagePerSite = ({
             <Legend layout="horizontal" verticalAlign="bottom" align="center" />
           </PieChart>
         </ResponsiveContainer>
+        )}
       </CardContent>
     </Card>
   );
@@ -120,9 +139,9 @@ const WaterLeakagePerSite = ({
 
 // Default chart values in case of no data
 const getDefaultChartData = () => [
-  { name: "Site 1", value: 1, color: "#4ade80" },
-  { name: "Site 2", value: 1, color: "#facc15" },
-  { name: "Site 3", value: 1, color: "#60a5fa" },
+  { name: "Site 1", value: 0, color: "#4ade80" },
+  { name: "Site 2", value: 0, color: "#facc15" },
+  { name: "Site 3", value: 0, color: "#60a5fa" },
 ];
 
 export default WaterLeakagePerSite;

@@ -36,10 +36,14 @@ interface Bill {
 
 const PaymentStatusChart = ({
   onData,
+  selectedMonth,
+  selectedYear,
 }: {
   onData: (data: { name: string; value: number; color: string }[]) => void;
+  selectedMonth: string;
+  selectedYear: string;
 }) => {
-  const [selectedSite, setSelectedSite] = useState("site1");
+  const [selectedSite, setSelectedSite] = useState("All");
   const [chartData, setChartData] = useState(getDefaultChartData());
 
   useEffect(() => {
@@ -47,11 +51,16 @@ const PaymentStatusChart = ({
       try {
         console.log(`🚀 Fetching customers for site: ${selectedSite}`);
 
-        const customersQuery = query(
-          collection(db, "customers"),
-          where("site", "==", selectedSite)
-        );
-        const customersSnapshot = await getDocs(customersQuery);
+        let customersSnapshot;
+        if (selectedSite === "All") {
+          customersSnapshot = await getDocs(collection(db, "customers"));
+        } else {
+          const customersQuery = query(
+            collection(db, "customers"),
+            where("site", "==", selectedSite)
+          );
+          customersSnapshot = await getDocs(customersQuery);
+        }
 
         const customers = customersSnapshot.docs.map((doc) => ({
           id: doc.id,
@@ -104,6 +113,14 @@ const PaymentStatusChart = ({
 
         // Process each bill
         bills.forEach((bill) => {
+          // Filter by date
+          if (bill.dueDate) {
+            // Assume dueDate is "DD/MM/YYYY"
+            const [day, month, year] = bill.dueDate.split("/");
+            const matchesMonth = selectedMonth === "All" || selectedMonth === month.padStart(2, "0");
+            const matchesYear = selectedYear === "All" || selectedYear === year;
+            if (!(matchesMonth && matchesYear)) return;
+          }
           // Use the status field directly for accurate counting
           const status = (bill.status || "").toLowerCase();
           switch (status) {
@@ -167,7 +184,7 @@ const PaymentStatusChart = ({
     };
 
     fetchPaymentsBySite();
-  }, [selectedSite, onData]);
+  }, [selectedSite, onData, selectedMonth, selectedYear]);
 
   return (
     <Card className="w-full h-full bg-white">
@@ -177,13 +194,14 @@ const PaymentStatusChart = ({
             <CardTitle className="text-xl font-semibold">
               Payment Status by Site
             </CardTitle>
-            <CardDescription>View payments for each site</CardDescription>
+            <CardDescription>View payments status for each site</CardDescription>
           </div>
           <Select value={selectedSite} onValueChange={setSelectedSite}>
             <SelectTrigger className="w-[150px]">
               <SelectValue placeholder="Select Site" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="All">All Sites</SelectItem>
               <SelectItem value="site1">Site 1</SelectItem>
               <SelectItem value="site2">Site 2</SelectItem>
               <SelectItem value="site3">Site 3</SelectItem>
@@ -193,6 +211,11 @@ const PaymentStatusChart = ({
       </CardHeader>
 
       <CardContent>
+          {chartData.every(d => d.value === 0) ? (
+          <div className="text-center text-gray-400 py-20">
+            No payment data available for the selected period and site.
+          </div>
+        ) : (
         <ResponsiveContainer width="100%" height={300}>
           <PieChart>
             <Pie
@@ -217,6 +240,7 @@ const PaymentStatusChart = ({
             <Legend layout="horizontal" verticalAlign="bottom" align="center" />
           </PieChart>
         </ResponsiveContainer>
+        )}
       </CardContent>
     </Card>
   );
@@ -224,10 +248,10 @@ const PaymentStatusChart = ({
 
 // Helper function for default chart values
 const getDefaultChartData = () => [
-  { name: "Paid", value: 1, color: "#4ade80" },
-  { name: "Pending", value: 1, color: "#facc15" },
-  { name: "Overdue", value: 1, color: "#f87171" },
-  { name: "Partially Paid", value: 1, color: "#60a5fa" },
+  { name: "Paid", value: 0, color: "#4ade80" },
+  { name: "Pending", value: 0, color: "#facc15" },
+  { name: "Overdue", value: 0, color: "#f87171" },
+  { name: "Partially Paid", value: 0, color: "#60a5fa" },
 ];
 
 export default PaymentStatusChart;

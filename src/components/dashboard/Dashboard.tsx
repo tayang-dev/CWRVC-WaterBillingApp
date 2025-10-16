@@ -104,15 +104,33 @@ useEffect(() => {
 
         // Process bills with better error handling
         billsSnapshots.forEach((billsSnapshot) => {
-          if (!billsSnapshot.docs) return; // Skip if no docs property
+          if (!billsSnapshot.docs) return;
           
           if (Array.isArray(billsSnapshot.docs)) {
             billsSnapshot.docs.forEach((billDoc) => {
               try {
                 const billData = billDoc.data();
-                if (!billData.date) return; // Skip if no date
+                if (!billData.date) return;
                 
-                const billDate = new Date(billData.date);
+                // Convert Firestore timestamp to Date object
+                let billDate;
+                if (billData.date.toDate) {
+                  // Firestore Timestamp object
+                  billDate = billData.date.toDate();
+                } else if (billData.date instanceof Date) {
+                  // Already a Date object
+                  billDate = billData.date;
+                } else {
+                  // Try parsing as string
+                  billDate = new Date(billData.date);
+                }
+                
+                // Validate the date
+                if (isNaN(billDate.getTime())) {
+                  debug.push(`⚠️ Invalid date format for bill: ${billData.billNumber}`);
+                  return;
+                }
+                
                 const billMonth = billDate.getMonth() + 1;
                 const billYear = billDate.getFullYear();
 
@@ -302,9 +320,9 @@ useEffect(() => {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
             <BillingTrendsChart onData={setBillingData} />
-            <PaymentStatusChart onData={setPaymentStatusData} />
-            <CustomerWaterUsageRanking onData={setFilteredCustomers} />
-            <WaterLeakagePerSite onData={setLeakageData} />
+            <PaymentStatusChart onData={setPaymentStatusData} selectedMonth={selectedMonth} selectedYear={selectedYear} />
+            <CustomerWaterUsageRanking onData={setFilteredCustomers} selectedMonth={selectedMonth} selectedYear={selectedYear} />
+            <WaterLeakagePerSite onData={setLeakageData} selectedMonth={selectedMonth} selectedYear={selectedYear} />
           </div>
         </>
       )}
