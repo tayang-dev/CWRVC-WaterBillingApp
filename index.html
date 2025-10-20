@@ -4,8 +4,38 @@
     <meta charset="UTF-8" />
     <!-- Use logo.png as the favicon -->
     <link rel="icon" type="image/png" href="/src/assets/logo.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Improved viewport and mobile meta -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <link rel="apple-touch-icon" href="/src/assets/logo.png" />
+
     <title>CWRVC - Water Billing App</title>
+
+    <!-- Minimal responsive safeguards while layout CSS is adjusted -->
+    <style>
+      /* base / reset to avoid mobile zooming & overflow */
+      html, body, #root {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        -webkit-text-size-adjust: 100%;
+        -ms-text-size-adjust: 100%;
+      }
+      *, *::before, *::after { box-sizing: inherit; }
+
+      /* make media scale down */
+      img, svg, video { max-width: 100%; height: auto; display: block; }
+
+      /* Prevent accidental horizontal scrolling from children */
+      body { overflow-x: hidden; }
+
+      /* small helper: ensure root layout flex items can shrink on narrow screens */
+      #root > * { min-width: 0; }
+    </style>
   </head>
   <body>
     <div id="root"></div>

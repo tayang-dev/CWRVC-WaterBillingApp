@@ -420,53 +420,71 @@ const itemsPerPage = 10; // Number of items per page
   const [cashError, setCashError] = useState("");
 
 
+
 useEffect(() => {
-  const fetchPaymentHistory = async () => {
+  let unsubscribePayments: (() => void) | null = null;
+  let unsubscribeCustomers: (() => void) | null = null;
+
+  const initRealtimePayments = async () => {
     try {
-      const { collection, query, where, getDocs, orderBy } = await import("firebase/firestore");
+      const {
+        collection,
+        query,
+        where,
+        orderBy,
+        onSnapshot,
+        getDocs,
+      } = await import("firebase/firestore");
       const { db } = await import("../../lib/firebase");
 
-      const paymentVerificationsCollection = collection(db, "paymentVerifications");
-      const customersCollection = collection(db, "customers");
+      // Build initial customer map so we can attach site info to payments
+      const customersCol = collection(db, "customers");
+      const customerSnapshot = await getDocs(customersCol);
+      const customerMap = new Map<string, any>();
+      customerSnapshot.docs.forEach((doc) => {
+        const data = doc.data() as any;
+        customerMap.set(data.accountNumber, { ...data, id: doc.id });
+      });
 
-      const verifiedPaymentsQuery = query(
-        paymentVerificationsCollection,
+      // Keep customer map in sync
+      unsubscribeCustomers = onSnapshot(customersCol, (custSnap) => {
+        customerMap.clear();
+        custSnap.docs.forEach((doc) => {
+          const data = doc.data() as any;
+          customerMap.set(data.accountNumber, { ...data, id: doc.id });
+        });
+      });
+
+      const paymentsCol = collection(db, "paymentVerifications");
+      const verifiedQuery = query(
+        paymentsCol,
         where("status", "==", "verified"),
         orderBy("verifiedAt", "desc")
       );
 
-      const snapshot = await getDocs(verifiedPaymentsQuery);
-      const payments = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as PaymentVerification[];
-
-      // Fetch all customers once
-      const customerSnapshot = await getDocs(customersCollection);
-      const customerMap = new Map<string, Customer>();
-      customerSnapshot.docs.forEach((doc) => {
-        const data = doc.data() as Customer;
-        customerMap.set(data.accountNumber, { ...data, id: doc.id });
+      unsubscribePayments = onSnapshot(verifiedQuery, (snapshot) => {
+        const payments = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as PaymentVerification[];
+        const paymentsWithSite = payments.map((p) => ({
+          ...p,
+          site: customerMap.get(p.accountNumber || "")?.site || "unknown",
+        }));
+        setPaymentHistory(paymentsWithSite);
+        setFilteredHistory(paymentsWithSite);
       });
-
-      // Attach the 'site' info from customer data
-      const paymentsWithSite = payments.map((payment) => {
-        const customer = customerMap.get(payment.accountNumber || "");
-        return {
-          ...payment,
-          site: customer?.site || "unknown",
-        };
-      });
-
-      setPaymentHistory(paymentsWithSite);
-      setFilteredHistory(paymentsWithSite);
     } catch (error) {
-      console.error("Error fetching payment history:", error);
+      console.error("Error setting up realtime payment history:", error);
     }
   };
 
-  fetchPaymentHistory();
+  initRealtimePayments();
+
+  return () => {
+    if (unsubscribePayments) unsubscribePayments();
+    if (unsubscribeCustomers) unsubscribeCustomers();
+  };
 }, []);
+
+
 
 // Inside your payment verification component
 useEffect(() => {
@@ -717,23 +735,29 @@ const fetchCustomers = async () => {
             (bill.status === "pending" || bill.status === "partially paid") &&
             parseFloat(bill.amount) > 0
           ) {
-            // Parse due date (dd/mm/yyyy)
+              const billCurrent = Number(
+              bill.currentAmountDue ?? bill.amountAfterDue ?? bill.amount ?? bill.originalAmount ?? 0
+            );
+            // Parse dueDate as dd/mm/yyyy into a date-only value
             let isOverdue = false;
-            if (bill.dueDate) {
-              const [day, month, year] = bill.dueDate.split("/").map(Number);
-              const dueDateObj = new Date(year, month - 1, day);
-              const now = new Date();
-              if (dueDateObj < now) {
-                isOverdue = true;
-                totalPenalty += parseFloat(bill.penalty || 0);
+            if (bill.dueDate && typeof bill.dueDate === "string") {
+              const parts = bill.dueDate.split("/").map(Number);
+              if (parts.length === 3) {
+                const [day, month, year] = parts;
+                const dueDateOnly = new Date(year, month - 1, day);
+                const today = new Date();
+                const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                if (todayOnly > dueDateOnly) {
+                  isOverdue = true;
+                }
               }
             }
-            totalAmountDue += parseFloat(bill.amount) || 0;
+            totalAmountDue += billCurrent;
             pendingBills.push({
               id: billDoc.id,
               billNumber: bill.billNumber,
               dueDate: bill.dueDate,
-              amount: bill.amount,
+              amount: billCurrent,
               penalty: bill.penalty || 0,
               isOverdue,
               status: bill.status,
@@ -742,7 +766,8 @@ const fetchCustomers = async () => {
           }
         });
 
-        customer.amountDue = Number(totalAmountDue) + Number(totalPenalty);
+        // Use only the canonical total (do NOT add totalPenalty on top of amount if currentAmountDue already includes penalty)
+        customer.amountDue = Number(totalAmountDue);
         customer.pendingBills = pendingBills;
         return customer;
       }));
@@ -1149,39 +1174,37 @@ if (verificationStatus === "rejected") {
     for (const bill of pendingBills) {
       if (remainingPayment <= 0) break;
 
-      // Check if penalty should be applied
-      let billAmount = bill.amount;
-      let penaltyApplied = bill.penaltyApplied || false;
+        // Ensure bill.amount is numeric and rounded
+        let billAmount = Number(bill.amount) || 0;
+        billAmount = Number(billAmount.toFixed(2));
+        let penaltyApplied = bill.penaltyApplied || false;
       
       // Apply penalty if needed (due date passed and not yet applied)
       if (billAmount > 0 && !penaltyApplied) {
         // Parse the due date correctly
-        let dueDate;
+let dueDate;
+if (bill.dueDate && typeof bill.dueDate === "string") {
+  if (bill.dueDate.includes("/")) {
+    const [day, month, year] = bill.dueDate.split("/");
+    dueDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+  } else {
+    dueDate = new Date(bill.dueDate);
+  }
+} else {
+  dueDate = new Date(bill.dueDate);
+}
+
+// Normalize to date-only (remove time) so same-day payments are not treated as late
+const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+const today = new Date();
+const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
         
-        if (bill.dueDate && typeof bill.dueDate === 'string') {
-          if (bill.dueDate.includes('/')) {
-            const [day, month, year] = bill.dueDate.split('/');
-            dueDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-          } 
-          else if (bill.dueDate.includes('-')) {
-            dueDate = new Date(bill.dueDate);
-          }
-          else {
-            dueDate = new Date(bill.dueDate);
-          }
-        } else {
-          dueDate = new Date(bill.dueDate);
-        }
-        
-        const currentDate = new Date();
-        
-        console.log(`Checking bill ${bill.billNumber}: Due date ${dueDate.toISOString()}, Current date ${currentDate.toISOString()}`);
-        
-        if (dueDate < currentDate) {
-          // Apply 10% penalty to the bill amount
-          const penaltyAmount = billAmount * 0.1;
-          billAmount += penaltyAmount;
-          penaltyApplied = true;
+if (todayOnly > dueDateOnly) {
+            // Calculate and persist penalty without overwriting original principal
+            const penaltyAmount = Number((billAmount * 0.1));
+            const newAmountAfterDue = Number((billAmount + penaltyAmount).toFixed(2));
+            penaltyApplied = true;
           
           console.log(`✅ Applied penalty of ${penaltyAmount.toFixed(2)} to bill ${bill.billNumber}. New amount: ${billAmount.toFixed(2)}`);
           
@@ -1191,9 +1214,16 @@ if (verificationStatus === "rejected") {
             currentAmountDue: billAmount,
             penaltyApplied: true
           });
+            // Use the rounded amount including penalty for payment calc
+            billAmount = newAmountAfterDue;
         }
       }
-      
+              // Round remainingPayment before comparisons
+        remainingPayment = Number(remainingPayment.toFixed(2));
+
+        // Treat tiny floating remainders as zero
+        if (Math.abs(remainingPayment) < 0.01) remainingPayment = 0;
+
       // Process payment for this bill
       if (remainingPayment >= billAmount) {
         // Full payment
@@ -1205,31 +1235,43 @@ if (verificationStatus === "rejected") {
           status: "paid"
         });
         
-        remainingPayment -= billAmount;
-        currentBillPaid = bill; // Track this bill for potential overpayment
+          remainingPayment = Number((remainingPayment - billAmount).toFixed(2));
+          currentBillPaid = bill;
         
         console.log(`✅ Bill ${bill.billNumber} fully paid. Remaining payment: ${remainingPayment.toFixed(2)}`);
       } else {
-        // Partial payment
-        const newRemaining = billAmount - remainingPayment;
-        await updateDoc(bill.ref, {
-          amount: newRemaining,
-          currentAmountDue: newRemaining,
-          penaltyApplied: penaltyApplied,
-          status: newRemaining < bill.originalAmount ? "partially paid" : "pending"
-        });
+          // Partial payment
+          const newRemaining = Number((billAmount - remainingPayment).toFixed(2));
+          await updateDoc(bill.ref, {
+            amount: newRemaining,
+            currentAmountDue: newRemaining,
+            penaltyApplied: penaltyApplied,
+            status: newRemaining < bill.originalAmount ? "partially paid" : "pending"
+          });
         
         console.log(`✅ Bill ${bill.billNumber} partially paid. Remaining bill amount: ${newRemaining.toFixed(2)}`);
         remainingPayment = 0;
       }
     }
-
+      // After loop normalize remainingPayment
+      remainingPayment = Number(remainingPayment.toFixed(2));
+      if (Math.abs(remainingPayment) < 0.01) remainingPayment = 0;
+ 
     // Calculate total remaining balance from all unpaid bills
     const updatedBillsSnap = await getDocs(billsCollectionRef);
     const totalRemainingBalance = updatedBillsSnap.docs.reduce((sum, doc) => {
       const amount = doc.data().amount || 0;
       return sum + amount;
     }, 0);
+        // ADD: update customer's amountDue so UI updates in realtime
+    try {
+      await updateDoc(doc(db, "customers", customerId), {
+        amountDue: totalRemainingBalance,
+      });
+      console.log(`✅ Updated customer (${customerId}) amountDue to ${totalRemainingBalance}`);
+    } catch (err) {
+      console.error("Failed to update customer's amountDue after verification:", err);
+    }
 
     // Handle overpayment: apply to the last bill that was fully paid
     if (remainingPayment > 0 && currentBillPaid) {
@@ -2586,37 +2628,53 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
                         for (const bill of pendingBills) {
                           if (remainingPayment <= 0) break;
 
-                          // Check if penalty should be applied
-                          let billAmount = bill.amount;
+                          // Ensure numeric and rounded
+                          let billAmount = Number(bill.amount) || 0;
+                          billAmount = Number(billAmount.toFixed(2));
                           let penaltyApplied = bill.penaltyApplied || false;
 
                           // Apply penalty if needed (due date passed and not yet applied)
                           if (billAmount > 0 && !penaltyApplied) {
                             let dueDate;
-                            if (bill.dueDate && typeof bill.dueDate === 'string') {
-                              if (bill.dueDate.includes('/')) {
-                                const [day, month, year] = bill.dueDate.split('/');
+                            if (bill.dueDate && typeof bill.dueDate === "string") {
+                              if (bill.dueDate.includes("/")) {
+                                const [day, month, year] = bill.dueDate.split("/");
                                 dueDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-                              } else if (bill.dueDate.includes('-')) {
-                                dueDate = new Date(bill.dueDate);
                               } else {
                                 dueDate = new Date(bill.dueDate);
                               }
                             } else {
                               dueDate = new Date(bill.dueDate);
                             }
-                            const currentDate = new Date();
-                            if (dueDate < currentDate) {
-                              const penaltyAmount = billAmount * 0.1;
-                              billAmount += penaltyAmount;
-                              penaltyApplied = true;
-                              await updateDoc(bill.ref, {
-                                amount: billAmount,
-                                currentAmountDue: billAmount,
-                                penaltyApplied: true
-                              });
-                            }
-                          }
+
+                            // Normalize to date-only (remove time) so same-day payments are not treated as late
+                            const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+                            const today = new Date();
+                            const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+                          if (todayOnly > dueDateOnly) {
+                          // Apply penalty (ensure numeric calculations)
+                          const penaltyAmount = Number(billAmount) * 0.1;
+                          const newAmountAfterDue = Number(billAmount) + penaltyAmount;
+                          penaltyApplied = true;
+
+                          console.log(`✅ Applied penalty of ${penaltyAmount.toFixed(2)} to bill ${bill.billNumber}. New amountAfterDue: ${newAmountAfterDue.toFixed(2)}`);
+
+                          // Persist penalty and amount-after-due without overwriting original 'amount' (principal)
+                          await updateDoc(bill.ref, {
+                            penalty: Number(penaltyAmount.toFixed(2)),
+                            amountAfterDue: Number(newAmountAfterDue.toFixed(2)),
+                            currentAmountDue: Number(newAmountAfterDue.toFixed(2)),
+                            penaltyApplied: true
+                          });
+                          // Use amount including penalty for payment calculations below
+                          billAmount = newAmountAfterDue;
+                                                    }
+                                                  }
+
+                          // Normalize remainingPayment and treat tiny remainders as zero
+                          remainingPayment = Number(remainingPayment.toFixed(2));
+                          if (Math.abs(remainingPayment) < 0.01) remainingPayment = 0;
 
                           // Process payment for this bill
                           if (remainingPayment >= billAmount) {
@@ -2628,11 +2686,11 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
                               penaltyApplied: penaltyApplied,
                               status: "paid"
                             });
-                            remainingPayment -= billAmount;
+                            remainingPayment = Number((remainingPayment - billAmount).toFixed(2));
                             currentBillPaid = bill;
                           } else {
                             // Partial payment
-                            const newRemaining = billAmount - remainingPayment;
+                            const newRemaining = Number((billAmount - remainingPayment).toFixed(2));
                             await updateDoc(bill.ref, {
                               amount: newRemaining,
                               currentAmountDue: newRemaining,
@@ -2642,6 +2700,9 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
                             remainingPayment = 0;
                           }
                         }
+                        // Final normalize
+                        remainingPayment = Number(remainingPayment.toFixed(2));
+                        if (Math.abs(remainingPayment) < 0.01) remainingPayment = 0;
 
                         // Handle overpayment: apply to the last bill that was fully paid
                         if (remainingPayment > 0 && currentBillPaid) {
@@ -2667,6 +2728,21 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
                           for (const docSnap of noticeSnapshot.docs) {
                             await deleteDoc(doc(db, "notice", docSnap.id));
                           }
+                        }
+                        // ADD: update customer's amountDue after applying cash payment
+                        try {
+                          const updatedBillsSnap = await getDocs(collection(db, "bills", selectedCashCustomer.accountNumber, "records"));
+                          const totalRemaining = updatedBillsSnap.docs.reduce((sum, d) => {
+                            const amt = d.data().amount || 0;
+                            return sum + Number(amt);
+                          }, 0);
+
+                          await updateDoc(doc(db, "customers", selectedCashCustomer.id), {
+                            amountDue: totalRemaining,
+                          });
+                          console.log(`✅ Updated customer (${selectedCashCustomer.accountNumber}) amountDue to ${totalRemaining}`);
+                        } catch (err) {
+                          console.error("Failed to update customer's amountDue after cash receipt:", err);
                         }
 
                         setIsCashReceiptDialogOpen(false);

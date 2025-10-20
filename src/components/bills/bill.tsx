@@ -989,24 +989,41 @@ const fetchBillsData = async () => {
 
         billsSnapshot.docs.forEach((billDoc) => {
           const bill = billDoc.data();
-          if (
-            (bill.status === "pending" || bill.status === "partially paid") &&
-            parseFloat(bill.amount) > 0
-          ) {
-            // Penalty if overdue
-            if (bill.dueDate) {
-              const [day, month, year] = bill.dueDate.split("/").map(Number);
-              const dueDateObj = new Date(year, month - 1, day);
-              const now = new Date();
-              if (dueDateObj < now) {
-                totalPenalty += parseFloat(bill.penalty || 0);
+          
+          // Prefer canonical current due value
+          const billCurrent = Number(bill.currentAmountDue ?? bill.amountAfterDue ?? bill.amount ?? 0);
+
+          // Only handle pending / partially paid bills with positive due
+          if ((bill.status === "pending" || bill.status === "partially paid") && billCurrent > 0) {
+            // Date-only overdue check (dd/mm/yyyy)
+            let isOverdue = false;
+            if (bill.dueDate && typeof bill.dueDate === "string") {
+              const parts = bill.dueDate.split("/").map(Number);
+              if (parts.length === 3) {
+                const [day, month, year] = parts;
+                const dueDateOnly = new Date(year, month - 1, day);
+                const todayOnly = new Date();
+                todayOnly.setHours(0, 0, 0, 0);
+                isOverdue = todayOnly > dueDateOnly;
               }
             }
-            totalAmountDue += parseFloat(bill.amount) || 0;
+
+            // Add canonical due once
+            totalAmountDue += billCurrent;
+
+            // Add penalty only if overdue and penalty is not already included in amountAfterDue/currentAmountDue
+            const amountAfterDueNum = Number(bill.amountAfterDue ?? 0);
+            const penaltyNum = Number(bill.penalty ?? 0);
+            if (isOverdue && penaltyNum > 0) {
+              const penaltyAlreadyIncluded = amountAfterDueNum > 0 && amountAfterDueNum >= billCurrent;
+              if (!penaltyAlreadyIncluded) {
+                totalPenalty += penaltyNum;
+              }
+            }
           }
         });
-
-        const totalDueWithPenalty = Number(totalAmountDue) + Number(totalPenalty);
+              // totalAmountDue = sum of canonical dues; totalPenalty = sum of additional penalties (only when applied)
+              const totalDueWithPenalty = Number(totalAmountDue) + Number(totalPenalty);
 
         return {
           accountNumber: customer.accountNumber,
