@@ -757,8 +757,8 @@ const handleCreateBills = async (readings: MeterReading[]) => {
         const unpaidBillsSnapshot = await getDocs(billsRef);
         unpaidBillsSnapshot.forEach((doc) => {
           const bill = doc.data();
-          if (
-            (bill.status === "pending" || bill.status === "partially paid") &&
+        if (
+            (bill.status !== "paid") &&
             bill.billingPeriod !== billingPeriod &&
             parseFloat(bill.amount) > 0
           ) {
@@ -978,7 +978,6 @@ const fetchBillsData = async () => {
         }
 
         const billsRef = collection(db, "bills", customer.accountNumber, "records");
-        let totalPenalty = 0;
         let totalAmountDue = 0;
         let billsSnapshot;
         try {
@@ -990,47 +989,21 @@ const fetchBillsData = async () => {
         billsSnapshot.docs.forEach((billDoc) => {
           const bill = billDoc.data();
           
-          // Prefer canonical current due value
+          // Use the canonical current due value (which already includes penalties from Cloud Function)
           const billCurrent = Number(bill.currentAmountDue ?? bill.amountAfterDue ?? bill.amount ?? 0);
 
-          // Only handle pending / partially paid bills with positive due
-          if ((bill.status === "pending" || bill.status === "partially paid") && billCurrent > 0) {
-            // Date-only overdue check (dd/mm/yyyy)
-            let isOverdue = false;
-            if (bill.dueDate && typeof bill.dueDate === "string") {
-              const parts = bill.dueDate.split("/").map(Number);
-              if (parts.length === 3) {
-                const [day, month, year] = parts;
-                const dueDateOnly = new Date(year, month - 1, day);
-                const todayOnly = new Date();
-                todayOnly.setHours(0, 0, 0, 0);
-                isOverdue = todayOnly > dueDateOnly;
-              }
-            }
-
-            // Add canonical due once
+          // Count any non-paid bills (pending, partially paid, overdue)
+          if ((bill.status !== "paid") && billCurrent > 0) {
             totalAmountDue += billCurrent;
-
-            // Add penalty only if overdue and penalty is not already included in amountAfterDue/currentAmountDue
-            const amountAfterDueNum = Number(bill.amountAfterDue ?? 0);
-            const penaltyNum = Number(bill.penalty ?? 0);
-            if (isOverdue && penaltyNum > 0) {
-              const penaltyAlreadyIncluded = amountAfterDueNum > 0 && amountAfterDueNum >= billCurrent;
-              if (!penaltyAlreadyIncluded) {
-                totalPenalty += penaltyNum;
-              }
-            }
-          }
-        });
-              // totalAmountDue = sum of canonical dues; totalPenalty = sum of additional penalties (only when applied)
-              const totalDueWithPenalty = Number(totalAmountDue) + Number(totalPenalty);
+           }
+          });
 
         return {
           accountNumber: customer.accountNumber,
           name: customer.name || `${customer.firstName || ""} ${customer.lastName || ""}`,
           email: customer.email || customer.phone || "N/A",
-          totalAmountDue: totalDueWithPenalty,
-          status: totalDueWithPenalty > 0 ? "pending" : "paid",
+          totalAmountDue: totalAmountDue,
+          status: totalAmountDue > 0 ? "pending" : "paid",
           site: customer.site || "",
           isSenior: customer.isSenior || false,
         };
@@ -1378,778 +1351,418 @@ const handlePrintAllDisconnectionNotices = async () => {
   showNotification("All disconnection notices sent to printer.", "success");
 };
 // ...existing code...
-  const handlePrintAllReceipts = async (printFilterMonth?: string,printFilterYear?: string, filterSite?: string) => {
+const handlePrintAllReceipts = async (printFilterMonth?: string, printFilterYear?: string, filterSite?: string) => {
+  try {
+    showNotification("Preparing bills for printing...", "info");
 
-    try {
-      // Show processing notification
-      showNotification("Preparing bills for printing...", "info");
-      
-      const allBillsSnapshot = await getDocs(collectionGroup(db, "records"));
-      if (allBillsSnapshot.empty) {
-        showNotification("No bills found to print.", "info");
-        return;
-      }
-  
-      let filteredDocs = allBillsSnapshot.docs.filter(
-        (doc) => doc.data().billNumber && doc.data().customerName
-      );
-      
-      if (printFilterMonth && printFilterYear) {
-        filteredDocs = filteredDocs.filter((doc) => {
-          const due = doc.data().dueDate; // format: dd/mm/yyyy
-          if (!due) return false;
-          const [day, month, year] = due.split("/");
-          // Fix: Allow "all" for month or year
-          const monthMatch = printFilterMonth === "all" || month === printFilterMonth;
-          const yearMatch = printFilterYear === "all" || year === printFilterYear;
-          return monthMatch && yearMatch;
-        });
-        console.log("Formatted filter due date:", printFilterDueDate);
-        console.log("Bill due date sample:", filteredDocs[0]?.data().dueDate);
-        if (filteredDocs.length === 0) {
-          alert("No bills found to print.");
-          return;
-        }
-      }
-      
-      if (filterSite && filterSite !== "all") {
-        filteredDocs = filteredDocs.filter((doc) => doc.data().site === filterSite);
-        console.log("Selected site:", filterSite);
-console.log("Bill site sample:", filteredDocs[0]?.data().site);
+    const allBillsSnapshot = await getDocs(collectionGroup(db, "records"));
+    if (allBillsSnapshot.empty) {
+      showNotification("No bills found to print.", "info");
+      return;
+    }
 
-      }
-      
-      const filteredBills = filteredDocs.map((doc) => ({
-        id: doc.id,
-        billNumber: doc.data().billNumber || "0000000000",
-        customerName: doc.data().customerName || "Unknown Customer",
-        customerAddress: doc.data().customerAddress || "Unknown Address",
-        meterReading: doc.data().meterReading || { current: 0, previous: 0 },
-        waterUsage: doc.data().waterUsage || 0,
-        billingPeriod: doc.data().billingPeriod || "N/A",
-        waterChargeBeforeTax: doc.data().waterChargeBeforeTax || 0,
-        tax: doc.data().tax || 0,
-        seniorDiscount: doc.data().seniorDiscount || 0,
-        arrears: doc.data().arrears || 0,
-        appliedOverpayment: doc.data().appliedOverpayment || 0,
-        amount: doc.data().amount || 0,
-        amountWithArrears: doc.data().amountWithArrears || 0,
-        accountNumber: doc.data().accountNumber || "00-00-0000",
-        meterNumber: doc.data().meterNumber || "00000000",
-        dueDate: doc.data().dueDate || "00/00/0000",
-        penalty: doc.data().penalty || 0,
-        amountAfterDue: doc.data().amountAfterDue || 0,
-        ratesBreakdown: doc.data().ratesBreakdown || calculateTiers(doc.data().waterUsage || 0),      
-        scfApplied: doc.data().scfApplied || 0,
-      }));
-      
-      console.log(filteredBills); // Debug filtered bills data
-      if (filteredBills.length === 0) {
-        showNotification("No valid bills found to print.", "info");
-        return;
-      }
-  // Fetch all customers for login credentials lookup
+        // Build a quick customer map for site fallback (accountNumber -> site)
     const customersSnapshot = await getDocs(collection(db, "customers"));
-    const customersList = customersSnapshot.docs.map(doc => ({
-      accountNumber: doc.data().accountNumber,
-      email: doc.data().email,
-      phone: doc.data().phone,
+    const customerSiteMap = new Map<string, string>();
+    customersSnapshot.docs.forEach(d => {
+      const cd: any = d.data();
+      if (cd?.accountNumber) {
+        customerSiteMap.set(cd.accountNumber, cd.site || "");
+      }
+    });
+
+    // Only keep docs that look like bills
+    let filteredDocs = allBillsSnapshot.docs.filter((doc) => {
+      const data = doc.data();
+      return data && data.billNumber && data.customerName;
+    });
+
+    // Apply Month / Year filters (apply if either is set and not "all")
+    const monthFilterActive = !!printFilterMonth && printFilterMonth !== "all";
+    const yearFilterActive = !!printFilterYear && printFilterYear !== "all";
+
+    if (monthFilterActive || yearFilterActive) {
+      filteredDocs = filteredDocs.filter((doc) => {
+        const data: any = doc.data();
+        // dueDate expected dd/mm/yyyy; if missing, try other fields
+        const due = typeof data.dueDate === "string" ? data.dueDate : "";
+        if (!due) return false;
+        const parts = due.split("/");
+        if (parts.length !== 3) return false;
+        const [, month, year] = parts;
+        if (monthFilterActive && month !== printFilterMonth) return false;
+        if (yearFilterActive && year !== printFilterYear) return false;
+        return true;
+      });
+
+      if (filteredDocs.length === 0) {
+        alert("No bills found to print for selected month/year.");
+        return;
+      }
+    }
+
+    // Apply Site Filter with fallback to customer map or customerAddress parsing
+    if (filterSite && filterSite !== "all") {
+      const normalizeSiteFromAddress = (addr: string) => {
+        if (!addr) return "";
+        const m = addr.match(/site\s*#?\s*(\d+)/i) || addr.match(/site\s*(\d+)/i);
+        return m ? `site${m[1]}` : "";
+      };
+
+      filteredDocs = filteredDocs.filter((doc) => {
+        const data: any = doc.data();
+        // direct site field
+        if (data.site) return data.site === filterSite;
+        // fallback to customer map (accountNumber key)
+        if (data.accountNumber) {
+          const custSite = customerSiteMap.get(data.accountNumber);
+          if (custSite) return custSite === filterSite;
+        }
+        // fallback to parsing address for "Site X"
+        const addr = data.customerAddress || "";
+        const parsed = normalizeSiteFromAddress(addr);
+        if (parsed) return parsed === filterSite;
+        return false;
+      });
+
+      if (filteredDocs.length === 0) {
+        alert("No bills found to print for selected site.");
+        return;
+      }
+    }
+
+    const filteredBills = filteredDocs.map((doc) => ({
+      id: doc.id,
+      billNumber: doc.data().billNumber || "0000000000",
+      customerName: doc.data().customerName || "Unknown Customer",
+      customerAddress: doc.data().customerAddress || "Unknown Address",
+      meterReading: doc.data().meterReading || { current: 0, previous: 0 },
+      waterUsage: doc.data().waterUsage || 0,
+      billingPeriod: doc.data().billingPeriod || "N/A",
+      waterChargeBeforeTax: doc.data().waterChargeBeforeTax || 0,
+      tax: doc.data().tax || 0,
+      seniorDiscount: doc.data().seniorDiscount || 0,
+      arrears: doc.data().arrears || 0,
+      appliedOverpayment: doc.data().appliedOverpayment || 0,
+      amountWithArrears: doc.data().amountWithArrears || 0,
+      accountNumber: doc.data().accountNumber || "00-00-0000",
+      meterNumber: doc.data().meterNumber || "00000000",
+      dueDate: doc.data().dueDate || "00/00/0000",
+      penalty: doc.data().penalty || 0,
+      amountAfterDue: doc.data().amountAfterDue || 0,
+      scfApplied: doc.data().scfApplied || 0,
     }));
 
-    // Helper to get login credentials for a bill
+    if (filteredBills.length === 0) {
+      showNotification("No valid bills found to print.", "info");
+      return;
+    }
+
+    // Fetch customers for credentials
+    const customersList = customersSnapshot.docs.map((d) => ({
+      accountNumber: d.data().accountNumber,
+      email: d.data().email,
+      phone: d.data().phone,
+    }));
+
     const getLoginCredentials = (accountNumber: string) => {
-      const customer = customersList.find(c => c.accountNumber === accountNumber);
+      const customer = customersList.find((c) => c.accountNumber === accountNumber);
       return {
         username: customer?.email || customer?.phone || "N/A",
         password: accountNumber || "N/A",
       };
     };
-      // Helper function to calculate default rates if not available
-// ...existing code...
-function calculateDefaultRates(waterUsage) {
-  if (!waterUsage || waterUsage <= 0) return [];
 
-  const tiers = [
-    { min: 0, max: 5, rate: 0.00 },
-    { min: 6, max: 10, rate: 20.70 },
-    { min: 11, max: 20, rate: 22.50 },
-    { min: 21, max: 30, rate: 24.40 },
-    { min: 31, max: 40, rate: 26.30 },
-    { min: 41, max: Infinity, rate: 28.10 },
-  ];
-
-  let remainingUsage = waterUsage;
-  let activeTiers = [];
-
-  // Always show 5 units and minimum charge for first tier
-  if (waterUsage <= 5) {
-    activeTiers.push({
-      min: 0,
-      max: 5,
-      rate: 0.00,
-      usage: waterUsage,
-      amount: 94.70,
+    // Earliest bill per account for showing credentials
+    const billsByAccount: Record<string, { id: string; dueDate: string }[]> = {};
+    filteredDocs.forEach((d) => {
+      const acct = d.data().accountNumber || "N/A";
+      billsByAccount[acct] = billsByAccount[acct] || [];
+      billsByAccount[acct].push({ id: d.id, dueDate: d.data().dueDate || "00/00/0000" });
     });
-    return activeTiers;
-  } else {
-    activeTiers.push({
-      min: 0,
-      max: 5,
-      rate: 0.00,
-      usage: 5,
-      amount: 94.70,
+    const earliestBillIdByAccount: Record<string, string> = {};
+    Object.keys(billsByAccount).forEach((acct) => {
+      const arr = billsByAccount[acct];
+      arr.sort((a, b) => {
+        const [da, ma, ya] = a.dueDate.split("/").map(Number);
+        const [db, mb, yb] = b.dueDate.split("/").map(Number);
+        return new Date(ya, ma - 1, da).getTime() - new Date(yb, mb - 1, db).getTime();
+      });
+      earliestBillIdByAccount[acct] = arr[0]?.id;
     });
-    remainingUsage -= 5;
-  }
 
-  // Distribute remaining usage to other tiers
-  for (let i = 1; i < tiers.length && remainingUsage > 0; i++) {
-    const tierMin = tiers[i].min;
-    const tierMax = tiers[i].max;
-    const tierRange = tierMax === Infinity ? remainingUsage : tierMax - tierMin + 1;
-    const tierUsage = Math.min(remainingUsage, tierRange);
-    if (tierUsage > 0) {
-      activeTiers.push({
-        min: tierMin,
-        max: tiers[i].max,
-        rate: tiers[i].rate,
-        usage: tierUsage,
-        amount: parseFloat((tierUsage * tiers[i].rate).toFixed(2)),
-      });
-      remainingUsage -= tierUsage;
-    }
-  }
-
-  return activeTiers;
-}
-// ...existing code...
-      
-  
-      // Create PDF document - landscape for better layout
-      const pdf = new jsPDF({
-        orientation: "landscape",
-        unit: "mm",
-        format: "a4"
-      });
-      
-      // Convert logo to base64 for jsPDF
-      let logoBase64 = "";
-      try {
-        const img = new Image();
-        img.src = logoImage; // Use the imported logo path
-  
-        await new Promise((resolve, reject) => {
-          img.onload = () => {
-            const canvas = document.createElement("canvas");
-            const ctx = canvas.getContext("2d");
-            canvas.width = img.width;
-            canvas.height = img.height;
-            ctx?.drawImage(img, 0, 0);
-            logoBase64 = canvas.toDataURL("image/png");
-            resolve(null);
-          };
-          img.onerror = reject;
-        });
-      } catch (error) {
-        console.error("Error converting logo to base64:", error);
-        // Continue without logo if there's an error
-      }
-      
-      // Format currency helper
-      const formatCurrency = (value) => {
-        return (parseFloat(value) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-      };
-      
-      // Helper to calculate text width
-      const getTextWidth = (text, fontSize, fontStyle = "normal") => {
-        pdf.setFont("helvetica", fontStyle);
-        pdf.setFontSize(fontSize);
-        return pdf.getStringUnitWidth(text) * fontSize / pdf.internal.scaleFactor;
-      };
-      
-      // For each bill
-      // Track which customers have already had their credentials printed
-      const printedCredentialsAccounts = new Set();
-
-      for (let i = 0; i < filteredBills.length; i++) {
-        if (i > 0) pdf.addPage(); // <-- Add this line
-        const bill = filteredBills[i];
-
-        // ...inside handlePrintAllReceipts, before drawing each bill...
-
-// Fetch all bills for this account (you can cache this for performance)
-const allBillsForAccount = filteredDocs
-  .filter(d => d.data().accountNumber === bill.accountNumber)
-  .map(d => ({
-    dueDate: d.data().dueDate,
-    billNumber: d.data().billNumber,
-    id: d.id
-  }));
-
-// Find the earliest bill (by dueDate or billNumber)
-const isEarliestBill = (() => {
-  if (allBillsForAccount.length === 0) return false;
-  // Compare by dueDate (format: dd/mm/yyyy)
-  const sorted = [...allBillsForAccount].sort((a, b) => {
-    const [da, ma, ya] = a.dueDate.split("/").map(Number);
-    const [db, mb, yb] = b.dueDate.split("/").map(Number);
-    const dateA = new Date(ya, ma - 1, da);
-    const dateB = new Date(yb, mb - 1, db);
-    return dateA.getTime() - dateB.getTime();
-  });
-  return sorted[0].id === bill.id;
-})();
-
-const showLoginCredentials = isEarliestBill;
-
-        // Get page dimensions
-        const pageWidth = pdf.internal.pageSize.getWidth();
-        const pageHeight = pdf.internal.pageSize.getHeight();
-        
-        // Dynamic margins
-        const marginX = 15;
-        const marginY = 15;
-        const contentWidth = pageWidth - (marginX * 2);
-        const contentHeight = pageHeight - (marginY * 2);
-        
-        // Draw outer border for the entire receipt
-        pdf.setLineWidth(0.3);
-        pdf.rect(marginX, marginY, contentWidth, contentHeight);
-        
-        // --- HEADER SECTION ---
-        // Calculate header height based on content
-        const companyName1 = "CENTENNIAL WATER RESOURCE VENTURE";
-        const companyName2 = "CORPORATION";
-        const companyAddress = "Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna";
-        
-        const headerHeight = 30; // Reduced from 35
-        
-        // Add logo if available
-        if (logoBase64) {
-          const logoSize = 22; // Reduced from 25
-          pdf.addImage(logoBase64, 'PNG', marginX + 20, marginY + 4, logoSize, logoSize);
-        }
-        
-        // Company name - center aligned
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(16);
-        pdf.text(companyName1, marginX + contentWidth / 2, marginY + 10, { align: "center" });
-        pdf.text(companyName2, marginX + contentWidth / 2, marginY + 20, { align: "center" });
-        
-        // Company address
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(10);
-        pdf.text(companyAddress, marginX + contentWidth / 2, marginY + 28, { align: "center" });
-        
-        // --- QR CODE SECTION ---
-        const qrCodeData = {
+    // Pre-generate QR and build rates breakdown HTML for each bill
+    const billsWithQr = await Promise.all(
+      filteredBills.map(async (bill) => {
+        const qrPayload = JSON.stringify({
           billNumber: bill.billNumber,
           customerName: bill.customerName,
           amount: bill.amountWithArrears,
           dueDate: bill.dueDate,
           accountNumber: bill.accountNumber,
-          amountAfterDue: bill.amountAfterDue,
-        };
-
-        const qrCodeString = JSON.stringify(qrCodeData);
-
-        // Generate QR code as a base64 image
-        const qrCodeBase64 = await QRCode.toDataURL(qrCodeString);
-
-
-        // Right side - "BILLING STATEMENT NO."
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(12);
-        pdf.text("BILLING STATEMENT", marginX + contentWidth - 15, marginY + 10, { align: "right" });
-        pdf.text("NO.", marginX + contentWidth - 15, marginY + 20, { align: "right" });
-        
-        // Bill Number in large font
-        pdf.setFontSize(16);
-        pdf.text(bill.billNumber, marginX + contentWidth - 15, marginY + 28, { align: "right" });
-        
-        // Draw horizontal line under header
-        pdf.setLineWidth(0.3);
-        pdf.line(marginX, marginY + headerHeight, marginX + contentWidth, marginY + headerHeight);
-        
-        // --- CUSTOMER INFO SECTION ---
-        const customerInfoY = marginY + headerHeight + 5;
-        // Adjust customer info height based on address length
-        const addressLines = pdf.splitTextToSize(bill.customerAddress, contentWidth * 0.4);
-        const customerInfoHeight = Math.max(30, 15 + (addressLines.length * 6)); 
-        
-        // Customer name
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(14);
-        pdf.text(bill.customerName, marginX + 10, customerInfoY + 10);
-        
-        // Customer address - handle text wrapping if needed
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(10); // Reduced from 11
-        pdf.text(addressLines, marginX + 10, customerInfoY + 18);
-        
-        // --- METER READING TABLE ---
-        const meterTableWidth = contentWidth * 0.6;
-        const meterTableX = marginX + contentWidth - meterTableWidth;
-        const meterTableHeight = 22; // Reduced from 25
-        const meterTableY = customerInfoY + 5;
-        
-        // Draw meter table border
-        pdf.rect(meterTableX, meterTableY, meterTableWidth, meterTableHeight);
-        
-        // Draw meter table columns
-        const meterColumnCount = 4;
-        const meterColumnWidth = meterTableWidth / meterColumnCount;
-        
-        for (let col = 1; col < meterColumnCount; col++) {
-          pdf.line(
-            meterTableX + col * meterColumnWidth,
-            meterTableY,
-            meterTableX + col * meterColumnWidth,
-            meterTableY + meterTableHeight
-          );
+        });
+        let qrDataUrl = "";
+        try {
+          qrDataUrl = await QRCode.toDataURL(qrPayload, { errorCorrectionLevel: "H", margin: 1, width: 300 });
+        } catch (err) {
+          console.warn("QR generation failed for", bill.billNumber, err);
         }
-        
-        // Draw horizontal divider
-        pdf.line(
-          meterTableX,
-          meterTableY + meterTableHeight / 2,
-          meterTableX + meterTableWidth,
-          meterTableY + meterTableHeight / 2
-        );
-        
-        // Meter table headers
-        const meterHeaders = ["Current Reading", "Previous Reading", "Consumption", "Billing Month"];
-        
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(10);
-        
-        meterHeaders.forEach((header, idx) => {
-          pdf.text(
-            header,
-            meterTableX + idx * meterColumnWidth + meterColumnWidth / 2,
-            meterTableY + meterTableHeight / 4 + 2,
-            { align: "center" }
-          );
-        });
-        
-        // Meter table values
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(11); // Reduced from 12
-        
-        const meterValues = [
-          bill.meterReading?.current || 0,
-          bill.meterReading?.previous || 0,
-          bill.waterUsage || 0,
-          formatBillingMonth(bill.billingPeriod || "01/04/2025 - 01/05/2025")
-        ];
-        
-        meterValues.forEach((value, idx) => {
-          pdf.text(
-            value.toString(),
-            meterTableX + idx * meterColumnWidth + meterColumnWidth / 2,
-            meterTableY + meterTableHeight * 3/4 + 2,
-            { align: "center" }
-          );
-        });
-        
-        // --- BILLING TABLES SECTION ---
-        const billingTablesY = customerInfoY + customerInfoHeight;
-        
-        // Determine billing tables height based on number of rate tiers
-        const rateTiers = bill.ratesBreakdown || [];
-        const minTablesHeight = 50; // Minimum height
-        const tierRowHeight = 8; // Height per tier row
-        const extraHeight = Math.max(0, (rateTiers.length - 4) * tierRowHeight);
-        const billingTablesHeight = minTablesHeight + extraHeight;
-        
-        // Define amountDueHeight before using it
-        const amountDueHeight = 12; // Reduced from 15
-        
-        // Left table - billing info
-        const leftTableWidth = contentWidth * 0.48;
-        pdf.rect(marginX, billingTablesY, leftTableWidth, billingTablesHeight);
-        
-        // Columns for left table
-        const leftColumnTitles = ["Billing Period", "Water", "Tax", "SCF", "Senior Discount", "Arrears", "Over Payment"];
-        const leftColumnCount = leftColumnTitles.length;
-        const leftColumnWidth = leftTableWidth / leftColumnCount;
-        
-        // Draw column separators
-        for (let col = 1; col < leftColumnCount; col++) {
-          pdf.line(
-            marginX + col * leftColumnWidth,
-            billingTablesY,
-            marginX + col * leftColumnWidth,
-            billingTablesY + billingTablesHeight
-          );
-        }
-        
-        // Header row
-        const headerRowHeight = 12; // Reduced from 15
-        pdf.setFillColor(240, 240, 240);
-        pdf.rect(marginX, billingTablesY, leftTableWidth, headerRowHeight, 'F');
-        
-        // Left table column headers
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(8);
-        
-        leftColumnTitles.forEach((title, idx) => {
-          pdf.text(
-            title,
-            marginX + idx * leftColumnWidth + leftColumnWidth / 2,
-            billingTablesY + headerRowHeight / 2 + 2,
-            { align: "center" }
-          );
-        });
-        
-        // Left table values
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(9); // Reduced from 10
-        
-        const formatBillingPeriod = (billingPeriod) => {
-          // Check if the billing period is in the format "01/04/2025 - 01/05/2025"
-          if (billingPeriod && billingPeriod.includes(" - ")) {
-            // Split the dates
-            const [startDate, endDate] = billingPeriod.split(" - ");
-            // Format with line breaks and centered dash
-            return `${startDate}\n          -\n${endDate}`;
-          }
-          // If not in the expected format, return as is (fallback)
-          return billingPeriod || "4-2025";
-        };
 
-        const leftColumnValues = [
-          formatBillingPeriod(bill.billingPeriod || "01/04/2025 - 01/05/2025"),
-          formatCurrency(bill.waterChargeBeforeTax || 517.50),
-          formatCurrency(bill.tax || 10.35),
-          formatCurrency(bill.scfApplied), // SCF
-          formatCurrency(bill.seniorDiscount || 0.00),
-          formatCurrency(bill.arrears || 0.00),
-          formatCurrency(bill.appliedOverpayment || 0.00)
-        ];
-        
-        leftColumnValues.forEach((value, idx) => {
-          pdf.text(
-            value,
-            marginX + idx * leftColumnWidth + leftColumnWidth / 2,
-            billingTablesY + headerRowHeight + (billingTablesHeight - headerRowHeight - amountDueHeight) / 2,
-            { align: "center" }
-          );
-        });
-        
-        // Draw amount due row at bottom
-        const amountDueY = billingTablesY + billingTablesHeight - amountDueHeight;
-        
-        pdf.setFillColor(240, 240, 240);
-        pdf.rect(marginX, amountDueY, leftTableWidth, amountDueHeight, 'F');
-        
-        // Amount Due label and value
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(11); // Reduced from 12
-        
-        // Position Amount Due label at right side of cell that spans first 6 columns
-        const amountDueLabelX = marginX + (leftColumnWidth * 6) - 5;
-        pdf.text("Amount Due", amountDueLabelX, amountDueY + amountDueHeight / 2 + 2, { align: "right" });
-        
-        // Amount value in last column
-        pdf.setFontSize(12); // Reduced from 14
-        pdf.text(
-          formatCurrency(bill.amountWithArrears || 527.85),
-          marginX + leftTableWidth - leftColumnWidth / 2,
-          amountDueY + amountDueHeight / 2 + 2,
-          { align: "center" }
-        );
-        
-        // Right table - rates breakdown
-        const rightTableX = marginX + leftTableWidth + 5;
-        const rightTableWidth = contentWidth - leftTableWidth - 5;
-        
-        pdf.rect(rightTableX, billingTablesY, rightTableWidth, billingTablesHeight);
-        
-        // Header for rates breakdown
-        pdf.setFillColor(240, 240, 240);
-        pdf.rect(rightTableX, billingTablesY, rightTableWidth, headerRowHeight, 'F');
-        
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(10); // Reduced from 11
-        pdf.text(
-          "Rates Breakdown",
-          rightTableX + rightTableWidth / 2,
-          billingTablesY + headerRowHeight / 2 + 2,
-          { align: "center" }
-        );
-        
-        // Rates breakdown columns
-        const ratesColumnTitles = ["Min", "Max", "Rate", "Value", "Amount"];
-        const ratesColumnCount = ratesColumnTitles.length;
-        const ratesColumnWidth = rightTableWidth / ratesColumnCount;
-        
-        // Sub-header row
-        const subHeaderY = billingTablesY + headerRowHeight;
-        const subHeaderHeight = 8; // Reduced from 10
-        
-        pdf.setFillColor(230, 230, 230);
-        pdf.rect(rightTableX, subHeaderY, rightTableWidth, subHeaderHeight, 'F');
-        
-        // Draw column separators
-        for (let col = 1; col < ratesColumnCount; col++) {
-          pdf.line(
-            rightTableX + col * ratesColumnWidth,
-            subHeaderY,
-            rightTableX + col * ratesColumnWidth,
-            billingTablesY + billingTablesHeight
-          );
-        }
-        
-        // Column headers
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(9); // Reduced from 10
-        
-        ratesColumnTitles.forEach((title, idx) => {
-          pdf.text(
-            title,
-            rightTableX + idx * ratesColumnWidth + ratesColumnWidth / 2,
-            subHeaderY + subHeaderHeight / 2 + 2,
-            { align: "center" }
-          );
-        });
-        
-        // Rates breakdown data rows
-        const ratesDataY = subHeaderY + subHeaderHeight;
-        const ratesDataHeight = billingTablesHeight - headerRowHeight - subHeaderHeight - 12; // Reduced total row height
-        
-        if (rateTiers.length > 0) {
-          const tierRowHeight = Math.min(10, ratesDataHeight / rateTiers.length);
-          
-          rateTiers.forEach((tier, idx) => {
-            const tierY = ratesDataY + idx * tierRowHeight;
-            
-            // Draw horizontal line between tiers (except before first tier)
-            if (idx > 0) {
-              pdf.line(rightTableX, tierY, rightTableX + rightTableWidth, tierY);
-            }
-            
-            // Tier data
-            pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(9); // Reduced from 10
-            
-            const tierData = [
-              tier.min.toString(),
-              tier.max === "above" ? tier.max : tier.max.toString(),
-              tier.rate.toFixed(2),
-              tier.usage.toString(),
-              formatCurrency(tier.amount)
-            ];
-            
-            tierData.forEach((value, colIdx) => {
-              pdf.text(
-                value,
-                rightTableX + colIdx * ratesColumnWidth + ratesColumnWidth / 2,
-                tierY + tierRowHeight / 2 + 2,
-                { align: "center" }
-              );
-            });
-          });
-        } else {
-          // No tiers available
-          pdf.setFont("helvetica", "normal");
-          pdf.setFontSize(10);
-          pdf.text(
-            "No rate tiers available",
-            rightTableX + rightTableWidth / 2,
-            ratesDataY + ratesDataHeight / 2,
-            { align: "center" }
-          );
-        }
-        
-        // Total row
-        const totalRowY = billingTablesY + billingTablesHeight - 12; // Reduced from 15
-        pdf.line(rightTableX, totalRowY, rightTableX + rightTableWidth, totalRowY);
-        
-        // Calculate total amount from rates
-        const totalRatesAmount = rateTiers.reduce((sum, tier) => sum + tier.amount, 0);
-        
-        // Total label
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(9); // Reduced from 10
-        pdf.text(
-          "Total:",
-          rightTableX + ratesColumnWidth * 4 - 5,
-          totalRowY + 12 / 2 + 2, // Adjusted for new height
-          { align: "right" }
-        );
-        
-        // Total amount
-        pdf.setFontSize(11); // Reduced from 12
-        pdf.text(
-          formatCurrency(totalRatesAmount || bill.waterChargeBeforeTax || 517.50),
-          rightTableX + ratesColumnWidth * 4 + ratesColumnWidth / 2,
-          totalRowY + 12 / 2 + 2, // Adjusted for new height
-          { align: "center" }
-        );
-        
-        // --- ACCOUNT DETAILS ROW ---
-        const accountRowY = billingTablesY + billingTablesHeight + 5;
-        const accountRowHeight = 20; // Reduced from 25
-        
-        pdf.rect(marginX, accountRowY, contentWidth, accountRowHeight);
-        
-        // Account details columns
-        const accountColumnTitles = ["Account#", "Meter#", "Due Date", "Penalty", "Amount After Due Date"];
-        const accountColumnCount = accountColumnTitles.length;
-        const accountColumnWidth = contentWidth / accountColumnCount;
-        
-        // Draw column separators
-        for (let col = 1; col < accountColumnCount; col++) {
-          pdf.line(
-            marginX + col * accountColumnWidth, 
-            accountRowY,
-            marginX + col * accountColumnWidth,
-            accountRowY + accountRowHeight
-          );
-        }
-        
-        // Header part
-        const accountHeaderHeight = accountRowHeight * 0.4; // Reduced from 0.5
-        pdf.setFillColor(240, 240, 240);
-        pdf.rect(marginX, accountRowY, contentWidth, accountHeaderHeight, 'F');
-        
-        // Draw line between header and values
-        pdf.line(marginX, accountRowY + accountHeaderHeight, marginX + contentWidth, accountRowY + accountHeaderHeight);
-        
-        // Column headers
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(9); // Reduced from 10
-        
-        accountColumnTitles.forEach((title, idx) => {
-          pdf.text(
-            title,
-            marginX + idx * accountColumnWidth + accountColumnWidth / 2,
-            accountRowY + accountHeaderHeight / 2 + 2,
-            { align: "center" }
-          );
-        });
-        
-        // Column values
-        const accountValues = [
-          bill.accountNumber || "13-15-1326a",
-          bill.meterNumber || "17101481", 
-          bill.dueDate || "20/05/2025",
-          formatCurrency(bill.penalty || 52.79),
-          formatCurrency(bill.amountAfterDue || 580.63)
-        ];
-        
-        accountValues.forEach((value, idx) => {
-          // Make the last column bold
-          if (idx === accountColumnCount - 1) {
-            pdf.setFont("helvetica", "bold");
-            pdf.setFontSize(11); // Reduced from 12
+        // Build Rates Breakdown HTML using calculateTiers()
+        let ratesTableHtml = "";
+        try {
+          const tiers = calculateTiers(Number(bill.waterUsage || 0));
+          if (tiers && tiers.length > 0) {
+            ratesTableHtml = `
+              <div style="border:1px solid #000; background:#fff;">
+                <div style="font-weight:700;text-align:center;padding:5px;border-bottom:1px solid #000;background:#efefef;font-size:11px;">Rates Breakdown</div>
+                <table style="width:100%;border-collapse:collapse;font-size:9px;">
+                  <thead>
+                    <tr>
+                      <th style="border:1px solid #000;padding:4px;background:#efefef;">Min</th>
+                      <th style="border:1px solid #000;padding:4px;background:#efefef;">Max</th>
+                      <th style="border:1px solid #000;padding:4px;background:#efefef;">Rate</th>
+                      <th style="border:1px solid #000;padding:4px;background:#efefef;">Value</th>
+                      <th style="border:1px solid #000;padding:4px;background:#efefef;">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${tiers
+                      .map((t: any) => {
+                        const maxLabel = typeof t.max === "number" ? t.max : String(t.max);
+                        const usage = t.usage ?? 0;
+                        const amount = t.amount !== undefined ? Number(t.amount).toFixed(2) : Number((usage * (t.rate || 0)).toFixed(2));
+                        return `<tr>
+                                  <td style="border:1px solid #000;padding:4px;text-align:center;">${t.min}</td>
+                                  <td style="border:1px solid #000;padding:4px;text-align:center;">${maxLabel}</td>
+                                  <td style="border:1px solid #000;padding:4px;text-align:center;">${Number(t.rate).toFixed(2)}</td>
+                                  <td style="border:1px solid #000;padding:4px;text-align:center;">${usage}</td>
+                                  <td style="border:1px solid #000;padding:4px;text-align:right;padding-right:6px;">${amount}</td>
+                                </tr>`;
+                      })
+                      .join("")}
+                    <tr>
+                      <td colspan="4" style="border:1px solid #000;padding:5px;text-align:right;font-weight:700;background:#fafafa;">Total:</td>
+                      <td style="border:1px solid #000;padding:5px;text-align:right;font-weight:700;background:#fafafa;padding-right:6px;">${Number(bill.waterChargeBeforeTax || 0).toFixed(2)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            `;
           } else {
-            pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(9); // Reduced from 10
+            ratesTableHtml = `<div style="text-align:right;font-weight:700;padding:6px;border:1px solid #000;">Total: ${Number(bill.waterChargeBeforeTax || 0).toFixed(2)}</div>`;
           }
-          
-          pdf.text(
-            value,
-            marginX + idx * accountColumnWidth + accountColumnWidth / 2,
-            accountRowY + accountHeaderHeight + (accountRowHeight - accountHeaderHeight) / 2 + 2,
-            { align: "center" }
-          );
-        });
-        
-        // --- FOOTER AND LOGIN/QR SECTION ---
-
-        const login = getLoginCredentials(bill.accountNumber);
-        const qrCodeSize = 20;
-        const sectionTopY = accountRowY + accountRowHeight + 5;
-
-        // Column widths
-        const colGap = 10;
-        const rightColWidth = 70;
-        const leftColWidth = contentWidth - rightColWidth - colGap;
-
-        // --- LEFT COLUMN (Footer Notes) ---
-        const leftX = marginX;
-        const leftY = sectionTopY;
-
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(9);
-        pdf.text("MAHALAGANG PAALALA TUNGKOL SA INYONG WATER BILL:", leftX, leftY);
-
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(8);
-
-        const notes = [
-          "HUWAG PONG KALILIMUTAN DALHIN ANG INYONG BILLING STATEMENT KAPAG KAYO AY MAGBABAYAD",
-          "PARA MAIWASAN ANG PAGBABAYAD NG MULTA, MAGBAYAD PO NG INYONG BILLING STATEMENT NG MAS MAAGA O DI LALAGPAS SA INYONG DUE DATE.",
-          "ANG SERBISYO PO NG INYONG TUBIG AY PUPUTULIN NG WALANG PAALALA KUNG DI KAYO MAKAPAGBAYAD SA LOOB NG LIMANG(5) ARAW PAGKATAPOS NG DUE DATE."
-        ];
-
-        notes.forEach((note, idx) => {
-          const noteY = leftY + 8 + (idx * 6);
-          pdf.text(`${idx + 1}. ${note}`, leftX + 5, noteY, {
-            maxWidth: leftColWidth - 10
-          });
-        });
-
-        // --- RIGHT COLUMN (Login + QR Code) ---
-        const rightX = marginX + leftColWidth + colGap;
-        const rightY = sectionTopY;
-
-        const credentialsBoxWidth = rightColWidth;
-        const credentialsBoxHeight = 32;
-
-        if (showLoginCredentials) {
-          // Draw background block for credentials + QR code
-          pdf.setFillColor(245, 245, 245);
-          pdf.rect(rightX - 3, rightY, credentialsBoxWidth, credentialsBoxHeight, 'F');
-
-          // --- Draw login credentials (left side of box) ---
-          const credentialsPadding = 4;
-          const credentialsTextX = rightX + credentialsPadding;
-          const credentialsTextY = rightY + 6;
-          const qrCodeMargin = 6;
-
-          // Text
-          pdf.setFont("helvetica", "bold");
-          pdf.setFontSize(9);
-          pdf.text("INITIAL LOGIN CREDENTIALS", credentialsTextX, credentialsTextY);
-
-          pdf.setFont("helvetica", "normal");
-          pdf.setFontSize(8);
-          pdf.text(`username: ${login.username}`, credentialsTextX, credentialsTextY + 6);
-          pdf.text(`password: ${login.password}`, credentialsTextX, credentialsTextY + 11);
-
-          pdf.setFontSize(7);
-          pdf.setTextColor(120);
-          pdf.text("Please change your password after \nyour first login.", credentialsTextX, credentialsTextY + 16);
-
-          // --- Draw QR code (right side of box, vertically centered) ---
-          pdf.setTextColor(0, 0, 0); // Reset text color
-
-          const qrCodeX = rightX + credentialsBoxWidth - qrCodeSize - qrCodeMargin;
-          const qrCodeY = rightY + (credentialsBoxHeight - qrCodeSize) / 2;
-
-          pdf.addImage(qrCodeBase64, "PNG", qrCodeX, qrCodeY, qrCodeSize, qrCodeSize);
-        } else {
-          // Only show QR code (no credentials)
-          const qrCodeX = rightX + (credentialsBoxWidth - qrCodeSize) / 2;
-          const qrCodeY = rightY + (credentialsBoxHeight - qrCodeSize) / 2;
-          pdf.addImage(qrCodeBase64, "PNG", qrCodeX, qrCodeY, qrCodeSize, qrCodeSize);
+        } catch (e) {
+          console.warn("Failed to build rates breakdown for", bill.billNumber, e);
+          ratesTableHtml = `<div style="text-align:right;font-weight:700;padding:6px;border:1px solid #000;">Total: ${Number(bill.waterChargeBeforeTax || 0).toFixed(2)}</div>`;
         }
 
-      }
-      console.log("Saving PDF with", filteredBills.length, "bills");
+        return { ...bill, qrDataUrl, ratesTableHtml };
+      })
+    );
 
-      // Save the PDF
-      pdf.save("All_Water_Bills.pdf");
-      showNotification("All bills have been printed successfully.", "success");
-      
-    } catch (error) {
-      console.error("Error printing all receipts:", error);
-      showNotification("Failed to print all receipts. Please try again.", "error");
+    // Styles - A4 portrait, compact layout matching reference image
+    const styles = `
+      <style>
+        @page { size: A4 portrait; margin: 0.5cm; }
+        html, body { height:100%; margin:0; padding:0; background:#fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        body { font-family: Arial, Helvetica, sans-serif; font-size:11px; color:#000; }
+        .bill { width:100%; max-width:21cm; margin:0 auto; border:2px solid #000; padding:12px; box-sizing:border-box; page-break-after:always; background:#fff; }
+        .top { display:flex; align-items:center; justify-content:space-between; gap:10px; border-bottom:2px solid #000; padding-bottom:10px; margin-bottom:12px; }
+        .brand { display:flex; align-items:center; gap:10px; flex:1; }
+        .logo { width:70px; height:70px; object-fit:contain; }
+        .company { text-align:center; font-weight:700; font-size:14px; flex:1; }
+        .meta { text-align:right; font-weight:700; min-width:180px; }
+        .customer-readings-row { display:flex; gap:10px; margin-bottom:10px; align-items:flex-start; }
+        .customer-info { flex:1; }
+        .readings-table { width:420px; }
+        table { border-collapse:collapse; width:100%; }
+        th, td { border:1px solid #000; padding:5px; font-size:10px; vertical-align:middle; text-align:center; }
+        th { background:#efefef; font-weight:700; }
+        .billing-main { margin-bottom:10px; display:flex; gap:10px; align-items:flex-start; }
+        .billing-left { flex:1; }
+        .rates-box { width:320px; }
+        .small { font-size:10px; }
+        .bottom-credentials { display:flex; gap:10px; margin-top:10px; align-items:center; justify-content:space-between; }
+        .credentials-box { text-align:center; padding:8px; border:1px solid #000; flex:1; }
+        .qr-box { text-align:center; }
+        .qr { width:120px; height:120px; object-fit:contain; }
+        .note { font-size:10px; line-height:1.3; }
+        .receipt-note { text-align:center; font-weight:700; margin:8px 0; padding:6px; border-top:1px solid #000; border-bottom:1px solid #000; }
+        @media print {
+          body { margin:0; padding:0; }
+          .bill { margin:0; max-width:100%; }
+        }
+      </style>
+    `;
+
+    // Build bills HTML with portrait layout matching reference image
+    const billsHtml = billsWithQr
+      .map((bill, idx) => {
+        const showCredentials = earliestBillIdByAccount[bill.accountNumber] === bill.id;
+        const creds = getLoginCredentials(bill.accountNumber);
+
+        return `
+          <div class="bill" id="bill-${idx}">
+            <div class="top">
+              <div class="brand">
+                <img src="${logoImage}" class="logo" alt="logo" />
+                <div class="company">
+                  <div style="font-size:15px;font-weight:700;">CENTENNIAL WATER RESOURCE VENTURE CORPORATION</div>
+                  <div style="font-size:10px;font-weight:400;margin-top:2px;">Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna</div>
+                </div>
+              </div>
+              <div class="meta">
+                <div style="font-size:10px;">BILLING STATEMENT NO.</div>
+                <div style="font-size:22px;margin-top:4px;">${bill.billNumber}</div>
+              </div>
+            </div>
+
+            <div class="customer-readings-row">
+              <div class="customer-info">
+                <div style="font-weight:700; font-size:16px; margin-bottom:4px;">${bill.customerName}</div>
+                <div class="small" style="color:#333;">${bill.customerAddress}</div>
+              </div>
+
+              <div class="readings-table small">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Current<br/>Reading</th>
+                      <th>Previous<br/>Reading</th>
+                      <th>Consumption</th>
+                      <th>Billing Month</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="font-weight:700;font-size:12px;">${bill.meterReading?.current || 0}</td>
+                      <td style="font-weight:700;font-size:12px;">${bill.meterReading?.previous || 0}</td>
+                      <td style="font-weight:700;font-size:12px;">${bill.waterUsage || 0}</td>
+                      <td style="font-weight:700;font-size:11px;">${bill.billingPeriod || ""}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="billing-main">
+              <div class="billing-left small">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Billing<br/>Period</th>
+                      <th>Water</th>
+                      <th>Tax</th>
+                      <th>SCF</th>
+                      <th>Senior<br/>Discount</th>
+                      <th>Arrears</th>
+                      <th>Over<br/>Payment</th>
+                      <th>Amount<br/>Due</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="font-size:9px;">${bill.billingPeriod || ""}</td>
+                      <td style="font-weight:600;">${Number(bill.waterChargeBeforeTax || 0).toFixed(2)}</td>
+                      <td style="font-weight:600;">${Number(bill.tax || 0).toFixed(2)}</td>
+                      <td style="font-weight:600;">${Number(bill.scfApplied || 0).toFixed(2)}</td>
+                      <td style="font-weight:600;">${Number(bill.seniorDiscount || 0).toFixed(2)}</td>
+                      <td style="font-weight:600;">${Number(bill.arrears || 0).toFixed(2)}</td>
+                      <td style="font-weight:600;">${Number(bill.appliedOverpayment || 0).toFixed(2)}</td>
+                      <td style="font-weight:800;font-size:11px;">${Number(bill.amountWithArrears || 0).toFixed(2)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="rates-box">
+                ${bill.ratesTableHtml || `<div style="text-align:center;padding:12px;color:#666;border:1px solid #000;">Rates breakdown not available</div>`}
+              </div>
+            </div>
+
+            <div style="margin-bottom:10px;">
+              <table>
+                <thead>
+                  <tr><th>Account#</th><th>Meter#</th><th>Due Date</th><th>Penalty</th><th>Amount After Due Date</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style="font-weight:600;">${bill.accountNumber}</td>
+                    <td style="font-weight:600;">${bill.meterNumber}</td>
+                    <td style="font-weight:600;">${bill.dueDate}</td>
+                    <td style="font-weight:600;">${Number(bill.penalty || 0).toFixed(2)}</td>
+                    <td style="font-weight:800;font-size:11px;">${Number(bill.amountAfterDue || 0).toFixed(2)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="note" style="margin-bottom:10px;">
+              <div style="font-weight:700;margin-bottom:6px;font-size:11px;">MAHALAGANG PAALALA TUNGKOL SA INYONG WATER BILL:</div>
+              <ol style="margin:0;padding-left:18px;">
+                <li>HUWAG PONG KALILIMUTAN DALHIN ANG INYONG BILLING STATEMENT KAPAG KAYO AY MAGBABAYAD</li>
+                <li>PARA MAIWASAN ANG PAGBABAYAD NG MULTA, MAGBAYAD PO NG INYONG BILLING STATEMENT NG MAS MAAGA O DI LALAGPAS SA INYONG DUE DATE.</li>
+                <li>ANG SERBISYO PO NG INYONG TUBIG AY PUPUTULIN NG WALANG PAALALA KUNG DI KAYO MAKAPAGBAYAD SA LOOB NG LIMANG(5) ARAW PAGKATAPOS NG DUE DATE.</li>
+              </ol>
+            </div>
+
+            <div class="receipt-note">
+              "THIS WILL SERVE AS YOUR OFFICIAL RECEIPT WHEN MACHINE VALIDATED"
+            </div>
+
+            <div class="bottom-credentials">
+              ${showCredentials ? `
+                <div class="credentials-box">
+                  <div style="font-weight:700;font-size:11px;margin-bottom:6px;">INITIAL LOGIN CREDENTIALS</div>
+                  <div style="font-size:10px;margin:4px 0;"><span style="font-weight:600;">username:</span> ${creds.username}</div>
+                  <div style="font-size:10px;margin:4px 0;"><span style="font-weight:600;">password:</span> ${creds.password}</div>
+                  <div style="font-size:9px;color:#666;margin-top:6px;">Please change your password after your first login for security purposes.</div>
+                </div>
+              ` : `<div style="flex:1;"></div>`}
+              
+              <div class="qr-box">
+                <img src="${bill.qrDataUrl || ""}" alt="qr" class="qr" />
+                <div style="font-size:9px;color:#666;margin-top:4px;">Scan to view bill details</div>
+              </div>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    const printWindow = window.open("", "_blank", "width=1200,height=900,menubar=yes,toolbar=yes,scrollbars=yes");
+    if (!printWindow) {
+      showNotification("Unable to open print window. Please allow pop-ups.", "error");
+      return;
     }
-  };
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Water Bills</title>
+          ${styles}
+        </head>
+        <body>
+          ${billsHtml}
+          <script>
+            window.onload = function() {
+              setTimeout(function() { window.focus(); window.print(); }, 350);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    showNotification("Bills prepared for print preview (A4 portrait layout).", "success");
+  } catch (error) {
+    console.error("Error printing all receipts:", error);
+    showNotification("Failed to print all receipts. Please try again.", "error");
+  }
+};
+// ...existing code...
   
   // Helper functions
   
@@ -2912,7 +2525,7 @@ useEffect(() => {
       const unpaidBillsSnapshot = await getDocs(
         query(
           collectionGroup(db, "records"),
-          where("status", "in", ["pending", "partially paid"])
+          where("status", "in", ["pending", "partially paid", "overdue"])
         )
       );
 

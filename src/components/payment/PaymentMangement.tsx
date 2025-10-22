@@ -731,8 +731,8 @@ const fetchCustomers = async () => {
         billsSnapshot.docs.forEach((billDoc) => {
           const bill = billDoc.data();
           // Include both "pending" and "partially paid" bills
-          if (
-            (bill.status === "pending" || bill.status === "partially paid") &&
+            if (
+            (bill.status === "pending" || bill.status === "partially paid" || bill.status === "overdue") &&
             parseFloat(bill.amount) > 0
           ) {
               const billCurrent = Number(
@@ -1174,55 +1174,15 @@ if (verificationStatus === "rejected") {
     for (const bill of pendingBills) {
       if (remainingPayment <= 0) break;
 
-        // Ensure bill.amount is numeric and rounded
-        let billAmount = Number(bill.amount) || 0;
-        billAmount = Number(billAmount.toFixed(2));
-        let penaltyApplied = bill.penaltyApplied || false;
+      // Use the canonical current amount due (Cloud Function already applied penalty)
+      let billAmount = Number(bill.amount) || 0;
+      billAmount = Number(billAmount.toFixed(2));
+
       
-      // Apply penalty if needed (due date passed and not yet applied)
-      if (billAmount > 0 && !penaltyApplied) {
-        // Parse the due date correctly
-let dueDate;
-if (bill.dueDate && typeof bill.dueDate === "string") {
-  if (bill.dueDate.includes("/")) {
-    const [day, month, year] = bill.dueDate.split("/");
-    dueDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-  } else {
-    dueDate = new Date(bill.dueDate);
-  }
-} else {
-  dueDate = new Date(bill.dueDate);
-}
 
-// Normalize to date-only (remove time) so same-day payments are not treated as late
-const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
-const today = new Date();
-const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-
-        
-if (todayOnly > dueDateOnly) {
-            // Calculate and persist penalty without overwriting original principal
-            const penaltyAmount = Number((billAmount * 0.1));
-            const newAmountAfterDue = Number((billAmount + penaltyAmount).toFixed(2));
-            penaltyApplied = true;
-          
-          console.log(`✅ Applied penalty of ${penaltyAmount.toFixed(2)} to bill ${bill.billNumber}. New amount: ${billAmount.toFixed(2)}`);
-          
-          // Update the bill with the new amount and penaltyApplied status
-          await updateDoc(bill.ref, {
-            amount: billAmount,
-            currentAmountDue: billAmount,
-            penaltyApplied: true
-          });
-            // Use the rounded amount including penalty for payment calc
-            billAmount = newAmountAfterDue;
-        }
-      }
-              // Round remainingPayment before comparisons
-        remainingPayment = Number(remainingPayment.toFixed(2));
-
-        // Treat tiny floating remainders as zero
-        if (Math.abs(remainingPayment) < 0.01) remainingPayment = 0;
+      // Normalize remainingPayment before comparisons
+      remainingPayment = Number(remainingPayment.toFixed(2));
+      if (Math.abs(remainingPayment) < 0.01) remainingPayment = 0;
 
       // Process payment for this bill
       if (remainingPayment >= billAmount) {
@@ -1231,7 +1191,6 @@ if (todayOnly > dueDateOnly) {
           amount: 0,
           currentAmountDue: 0,
           paidAt: new Date().toISOString(),
-          penaltyApplied: penaltyApplied,
           status: "paid"
         });
         
@@ -1245,7 +1204,6 @@ if (todayOnly > dueDateOnly) {
           await updateDoc(bill.ref, {
             amount: newRemaining,
             currentAmountDue: newRemaining,
-            penaltyApplied: penaltyApplied,
             status: newRemaining < bill.originalAmount ? "partially paid" : "pending"
           });
         
@@ -2631,46 +2589,8 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
                           // Ensure numeric and rounded
                           let billAmount = Number(bill.amount) || 0;
                           billAmount = Number(billAmount.toFixed(2));
-                          let penaltyApplied = bill.penaltyApplied || false;
 
-                          // Apply penalty if needed (due date passed and not yet applied)
-                          if (billAmount > 0 && !penaltyApplied) {
-                            let dueDate;
-                            if (bill.dueDate && typeof bill.dueDate === "string") {
-                              if (bill.dueDate.includes("/")) {
-                                const [day, month, year] = bill.dueDate.split("/");
-                                dueDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-                              } else {
-                                dueDate = new Date(bill.dueDate);
-                              }
-                            } else {
-                              dueDate = new Date(bill.dueDate);
-                            }
-
-                            // Normalize to date-only (remove time) so same-day payments are not treated as late
-                            const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
-                            const today = new Date();
-                            const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-
-                          if (todayOnly > dueDateOnly) {
-                          // Apply penalty (ensure numeric calculations)
-                          const penaltyAmount = Number(billAmount) * 0.1;
-                          const newAmountAfterDue = Number(billAmount) + penaltyAmount;
-                          penaltyApplied = true;
-
-                          console.log(`✅ Applied penalty of ${penaltyAmount.toFixed(2)} to bill ${bill.billNumber}. New amountAfterDue: ${newAmountAfterDue.toFixed(2)}`);
-
-                          // Persist penalty and amount-after-due without overwriting original 'amount' (principal)
-                          await updateDoc(bill.ref, {
-                            penalty: Number(penaltyAmount.toFixed(2)),
-                            amountAfterDue: Number(newAmountAfterDue.toFixed(2)),
-                            currentAmountDue: Number(newAmountAfterDue.toFixed(2)),
-                            penaltyApplied: true
-                          });
-                          // Use amount including penalty for payment calculations below
-                          billAmount = newAmountAfterDue;
-                                                    }
-                                                  }
+                    
 
                           // Normalize remainingPayment and treat tiny remainders as zero
                           remainingPayment = Number(remainingPayment.toFixed(2));
@@ -2683,7 +2603,6 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
                               amount: 0,
                               currentAmountDue: 0,
                               paidAt: new Date().toISOString(),
-                              penaltyApplied: penaltyApplied,
                               status: "paid"
                             });
                             remainingPayment = Number((remainingPayment - billAmount).toFixed(2));
@@ -2694,7 +2613,6 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
                             await updateDoc(bill.ref, {
                               amount: newRemaining,
                               currentAmountDue: newRemaining,
-                              penaltyApplied: penaltyApplied,
                               status: newRemaining < bill.originalAmount ? "partially paid" : "pending"
                             });
                             remainingPayment = 0;

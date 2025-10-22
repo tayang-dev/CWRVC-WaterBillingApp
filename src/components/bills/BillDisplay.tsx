@@ -14,6 +14,291 @@ const formatCurrency = (amount) => {
   }).format(amount);
 };
 
+// Print a single bill by ID
+const handlePrintSingleBill = async (billId: string) => {
+  const printContent = document.getElementById(billId);
+  if (!printContent) return;
+
+  // cast so TS knows we have HTMLElement APIs
+  const original = printContent as HTMLElement;
+  const clone = original.cloneNode(true) as HTMLElement;
+
+  // Convert any <canvas> (QR from qrcode.react) in the original to data URLs
+  // and replace corresponding canvases in the clone with <img> so bitmap is preserved in print.
+  try {
+    const originalCanvases = Array.from(original.querySelectorAll<HTMLCanvasElement>("canvas"));
+    const cloneCanvases = Array.from(clone.querySelectorAll<HTMLCanvasElement>("canvas"));
+
+    originalCanvases.forEach((c, i) => {
+      try {
+        const dataUrl = c.toDataURL("image/png");
+        const img = document.createElement("img");
+        img.src = dataUrl;
+        img.style.maxWidth = c.width ? `${c.width}px` : "128px";
+        img.style.height = "auto";
+        const target = cloneCanvases[i];
+        if (target && target.parentNode) {
+          target.parentNode.replaceChild(img, target);
+        }
+      } catch (err) {
+        // Non-fatal: leave canvas as-is in clone if conversion fails
+        console.warn("Failed to convert canvas to image for printing", err);
+      }
+    });
+  } catch (err) {
+    console.warn("Error while preparing canvases for print:", err);
+  }
+
+  const printWindow = window.open("", "_blank", "width=900,height=700");
+  if (!printWindow) return;
+
+  printWindow.document.write(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Water Bill</title>
+        <style>
+          @page {
+            size: A4 portrait;
+            margin: 0.5cm;
+          }
+          
+          * {
+            box-sizing: border-box;
+          }
+          
+          body { 
+            margin: 0; 
+            padding: 0; 
+            font-family: Arial, sans-serif;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            font-size: 11px;
+          }
+          
+          img { 
+            max-width: 100%; 
+            height: auto;
+          }
+          
+          table { 
+            border-collapse: collapse; 
+            width: 100%; 
+          }
+          
+          th, td { 
+            border: 1px solid black; 
+            padding: 5px; 
+            text-align: center;
+            font-size: 10px;
+          }
+          
+          th {
+            background-color: #efefef !important;
+            font-weight: bold;
+          }
+          
+          /* Layout utilities */
+          .flex { display: flex; }
+          .flex-col { flex-direction: column; }
+          .flex-row { flex-direction: row; }
+          .items-center { align-items: center; }
+          .items-end { align-items: flex-end; }
+          .items-start { align-items: flex-start; }
+          .justify-between { justify-content: space-between; }
+          .justify-center { justify-content: center; }
+          .gap-2 { gap: 0.5rem; }
+          .gap-3 { gap: 0.75rem; }
+          .space-y-1 > * + * { margin-top: 0.25rem; }
+          
+          /* Spacing */
+          .mt-2 { margin-top: 0.5rem; }
+          .mt-3 { margin-top: 0.75rem; }
+          .mt-4 { margin-top: 1rem; }
+          .mb-2 { margin-bottom: 0.5rem; }
+          .mb-3 { margin-bottom: 0.75rem; }
+          .pb-2 { padding-bottom: 0.5rem; }
+          .pt-2 { padding-top: 0.5rem; }
+          .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+          .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+          .p-3 { padding: 0.75rem; }
+          
+          /* Width utilities */
+          .w-full { width: 100%; }
+          
+          /* Border */
+          .border { border: 1px solid black; }
+          .border-2 { border-width: 2px; }
+          .border-t-2 { border-top-width: 2px; }
+          .border-b-2 { border-bottom-width: 2px; }
+          .border-black { border-color: black; }
+          
+          /* Text */
+          .text-center { text-align: center; }
+          .text-right { text-align: right; }
+          .text-xs { font-size: 9px; }
+          .text-sm { font-size: 10px; }
+          .text-base { font-size: 11px; }
+          .text-lg { font-size: 14px; }
+          .text-xl { font-size: 16px; }
+          .text-2xl { font-size: 22px; }
+          .font-bold { font-weight: 700; }
+          .font-semibold { font-weight: 600; }
+          .text-gray-600 { color: #4b5563; }
+          
+          /* List */
+          .list-decimal { list-style-type: decimal; }
+          
+          /* Flex utilities */
+          .flex-1 { flex: 1; }
+          
+          /* Container */
+          .bill-container {
+            width: 100%;
+            max-width: 21cm;
+            margin: 0 auto;
+            border: 2px solid black;
+            padding: 12px;
+            background: white;
+          }
+          
+          /* Header section */
+          .header-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid black;
+            padding-bottom: 10px;
+            margin-bottom: 12px;
+          }
+          
+          .logo-company {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+          }
+          
+          .logo {
+            width: 70px;
+            height: 70px;
+            object-fit: contain;
+          }
+          
+          .company-info {
+            text-align: center;
+            flex: 1;
+          }
+          
+          .bill-number-section {
+            text-align: right;
+            min-width: 180px;
+          }
+          
+          /* Customer and readings section */
+          .customer-readings {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: flex-start;
+          }
+          
+          .customer-info-section {
+            flex: 1;
+          }
+          
+          .readings-table-wrapper {
+            width: 420px;
+          }
+          
+          /* Billing main section */
+          .billing-main {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: flex-start;
+          }
+          
+          .billing-table-wrapper {
+            flex: 1;
+          }
+          
+          .rates-box {
+            width: 320px;
+          }
+          
+          /* Footer credentials section */
+          .footer-section {
+            margin-top: 10px;
+            border-top: 2px solid black;
+            padding-top: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+          }
+          
+          .credentials-box {
+            text-align: center;
+            padding: 8px;
+            border: 1px solid black;
+            flex: 1;
+          }
+          
+          .qr-box {
+            text-align: center;
+          }
+          
+          .qr-image {
+            width: 120px;
+            height: 120px;
+          }
+          
+          .receipt-note {
+            text-align: center;
+            font-weight: 700;
+            margin: 8px 0;
+            padding: 6px;
+            border-top: 1px solid black;
+            border-bottom: 1px solid black;
+          }
+          
+          /* Hide print button */
+          .print\\:hidden {
+            display: none !important;
+          }
+          
+          @media print {
+            body {
+              margin: 0;
+              padding: 0;
+            }
+            
+            .bill-container {
+              margin: 0;
+              max-width: 100%;
+            }
+            
+            .print\\:hidden {
+              display: none !important;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        ${(clone as HTMLElement).innerHTML}
+        <script>
+          window.onload = function() {
+            setTimeout(function() { window.print(); window.close(); }, 150);
+          }
+        </script>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+};
+
 const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills, customersCollection }) => {
   const [ratesConfig, setRatesConfig] = useState(null);
 
@@ -80,21 +365,36 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills, custo
     );
   };
 
+  // Helper function to format date from Firestore timestamp
+  const formatBillDate = (bill) => {
+    try {
+      // Check for 'date' field first (your actual field name)
+      if (bill.date && bill.date.seconds) {
+        return new Date(bill.date.seconds * 1000 + (bill.date.nanoseconds || 0) / 1000000).toLocaleString();
+      }
+      // Fallback to createdAt if date doesn't exist
+      if (bill.createdAt && bill.createdAt.seconds) {
+        return new Date(bill.createdAt.seconds * 1000 + (bill.createdAt.nanoseconds || 0) / 1000000).toLocaleString();
+      }
+      // If it's a direct Date object
+      if (bill.date instanceof Date) {
+        return bill.date.toLocaleString();
+      }
+      if (bill.createdAt instanceof Date) {
+        return bill.createdAt.toLocaleString();
+      }
+      return 'Date not available';
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return 'Date not available';
+    }
+  };
+
   // Sort bills by creation date (newest first)
   const sortedBills = [...selectedBills].sort((a, b) => {
-    let dateA = 0;
-    let dateB = 0;
-    if (a.createdAt) {
-      dateA = a.createdAt.seconds ?
-        a.createdAt.seconds * 1000 + a.createdAt.nanoseconds / 1000000 :
-        new Date(a.createdAt).getTime();
-    }
-    if (b.createdAt) {
-      dateB = b.createdAt.seconds ?
-        b.createdAt.seconds * 1000 + b.createdAt.nanoseconds / 1000000 :
-        new Date(b.createdAt).getTime();
-    }
-    return dateB - dateA;
+    const billNumA = parseInt(a.billNumber) || 0;
+    const billNumB = parseInt(b.billNumber) || 0;
+    return billNumB - billNumA; // Descending order (largest first)
   });
 
   // --- Use dynamic ratesConfig for tiered billing ---
@@ -189,6 +489,10 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills, custo
               );
 
               const getDateObj = (b) => {
+                // Check for 'date' field first
+                if (b.date && b.date.seconds) {
+                  return new Date(b.date.seconds * 1000 + (b.date.nanoseconds || 0) / 1000000);
+                }
                 if (b.dueDate && typeof b.dueDate === "string" && b.dueDate.includes("/")) {
                   const [day, month, year] = b.dueDate.split("/").map(Number);
                   return new Date(year, month - 1, day);
@@ -205,123 +509,130 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills, custo
 
               const showCredentials = bill.id === earliestBill.id;
 
-              return (
-                <div key={index} className="border-2 border-black p-4 print:p-0">
-                  {/* Display creation date for debugging/reference */}
-                  <div className="text-right text-sm text-gray-500 mb-2">
-                    {bill.createdAt ? 
-                      (bill.createdAt.seconds ? 
-                        new Date(bill.createdAt.seconds * 1000 + bill.createdAt.nanoseconds / 1000000).toLocaleString() : 
-                        new Date(bill.createdAt).toLocaleString()
-                      ) : 'Date not available'}
+            return (
+                <div
+                  key={index}
+                  className="border-2 border-black p-4 relative"
+                  id={`bill-${index}`}
+                  style={{ maxWidth: "900px", margin: "0 auto" }}
+                >
+                  {/* Print Button - Only visible on screen, hidden when printing */}
+                  <div className="absolute top-0 right-2 print:hidden z-10">
+                    <Button
+                      onClick={() => handlePrintSingleBill(`bill-${index}`)}
+                      size="sm"
+                      variant="outline"
+                      className="bg-white hover:bg-gray-100"
+                    >
+                      🖨️ Print This Bill
+                    </Button>
                   </div>
-                  
+
                   {/* Header */}
-                  <div className="flex justify-between items-center border-b-2 border-black pb-2">
-                    <div className="flex items-center gap-3">
-                      <div className="w-24 h-24 flex items-center justify-center overflow-hidden">
-                        <img 
-                          src={logoImage} 
-                          alt="Centennial Water Logo" 
-                          className="w-full h-full object-contain"
-                        />
-                      </div>
-                      <div className="text-center">
-                        <h1 className="text-xl font-bold">CENTENNIAL WATER RESOURCE VENTURE CORPORATION</h1>
-                        <p className="text-sm">Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna</p>
+                  <div className="flex justify-between items-center border-b-2 border-black pb-3 mb-3">
+                    <div className="flex items-center gap-3 flex-1">
+                      <img 
+                        src={logoImage} 
+                        alt="Centennial Water Logo" 
+                        className="w-20 h-20 object-contain"
+                      />
+                      <div className="text-center flex-1">
+                        <div className="text-lg font-bold">CENTENNIAL WATER RESOURCE VENTURE CORPORATION</div>
+                        <div className="text-sm">Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna</div>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <h2 className="text-lg font-bold">BILLING STATEMENT NO.</h2>
-                      <p className="text-3xl font-bold">{bill.billNumber || "0000000000"}</p>
+                    <div className="text-right" style={{ minWidth: "180px" }}>
+                      <div className="text-sm">BILLING STATEMENT NO.</div>
+                      <div className="text-2xl font-bold mt-1">{bill.billNumber || "0000000000"}</div>
                     </div>
                   </div>
 
-                  {/* Customer Info */}
-                  <div className="mt-4">
-                    <div className="flex justify-between">
-                      <div>
-                        <h2 className="text-3xl font-bold">{bill.customerName || "CUSTOMER NAME"}</h2>
-                        <p className="text-lg">{bill.customerAddress || "Address information"}</p>
-                      </div>
-                      <div className="border border-black">
-                        <table className="text-center">
-                          <thead>
-                            <tr className="border-b border-black">
-                              <th className="px-4 py-2 border-r border-black">Current Reading</th>
-                              <th className="px-4 py-2 border-r border-black">Previous Reading</th>
-                              <th className="px-4 py-2 border-r border-black">Consumption</th>
-                              <th className="px-4 py-2">Billing Month</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr>
-                              <td className="px-4 py-2 border-r border-black text-xl font-semibold">
-                                {bill.meterReading?.current || 0}
-                              </td>
-                              <td className="px-4 py-2 border-r border-black text-xl font-semibold">
-                                {bill.meterReading?.previous || 0}
-                              </td>
-                              <td className="px-4 py-2 border-r border-black text-xl font-semibold">
-                                {bill.waterUsage || 0}
-                              </td>
-                              <td className="px-4 py-2 text-xl font-semibold">
-                                {bill.billingPeriod || ""}
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
+                  {/* Customer Info and Readings */}
+                  <div className="flex gap-3 mb-3 items-start">
+                    <div className="flex-1">
+                      <div className="text-xl font-bold mb-1">{bill.customerName || "CUSTOMER NAME"}</div>
+                      <div className="text-sm text-gray-600">{bill.customerAddress || "Address information"}</div>
                     </div>
-                  </div>
 
-                  {/* Billing Details */}
-                  <div className="mt-6 flex">
-                    <table className="w-1/2 border border-black text-center">
-                      <thead>
-                        <tr className="bg-gray-200">
-                          <th className="px-2 py-1 border-r border-black">Billing Period</th>
-                          <th className="px-2 py-1 border-r border-black">Water</th>
-                          <th className="px-2 py-1 border-r border-black">Tax</th>
-                          <th className="px-2 py-1 border-r border-black">SCF</th>
-                          <th className="px-2 py-1 border-r border-black">Senior Discount</th>
-                          <th className="px-2 py-1 border-r border-black">Arrears</th>
-                          <th className="px-2 py-1 border-r border-black">Over Payment</th>
-                          <th className="px-2 py-1">Amount Due</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td className="px-2 py-1 border-r border-black">{bill.billingPeriod || "01/01/25 - 01/31/25"}</td>
-                          <td className="px-2 py-1 border-r border-black">{bill.waterChargeBeforeTax?.toFixed(2) || "0.00"}</td>
-                          <td className="px-2 py-1 border-r border-black">{bill.tax?.toFixed(2) || "0.00"}</td>
-                          <td className="px-2 py-1 border-r border-black">{scf.toFixed(2)}</td>
-                          <td className="px-2 py-1 border-r border-black">{bill.seniorDiscount?.toFixed(2) || "0.00"}</td>
-                          <td className="px-2 py-1 border-r border-black">{bill.arrears?.toFixed(2) || "0.00"}</td>
-                          <td className="px-2 py-1 border-r border-black">{bill.appliedOverpayment?.toFixed(2) || "0.00"}</td>
-                          <td className="px-2 py-1 font-bold">{bill.amountWithArrears?.toFixed(2) || "0.00"}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-
-                    <div className="w-1/2 ml-2">
-                      <table className="w-full border border-black text-center">
+                    <div style={{ width: "420px" }}>
+                      <table className="w-full border-collapse border border-black">
                         <thead>
-                          <tr className="bg-gray-200">
-                            <th colSpan={5} className="px-2 py-1 border-b border-black">Rates Breakdown</th>
+                          <tr className="bg-gray-100">
+                            <th className="border border-black p-2 text-xs text-center">Current<br/>Reading</th>
+                            <th className="border border-black p-2 text-xs text-center">Previous<br/>Reading</th>
+                            <th className="border border-black p-2 text-xs text-center">Consumption</th>
+                            <th className="border border-black p-2 text-xs text-center">Billing Month</th>
                           </tr>
-                          <tr className="bg-gray-200">
-                            <th className="px-2 py-1 border-r border-black">Min</th>
-                            <th className="px-2 py-1 border-r border-black">Max</th>
-                            <th className="px-2 py-1 border-r border-black">Rate</th>
-                            <th className="px-2 py-1 border-r border-black">Value</th>
-                            <th className="px-2 py-1">Amount</th>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td className="border border-black p-2 text-center font-semibold">
+                              {bill.meterReading?.current || 0}
+                            </td>
+                            <td className="border border-black p-2 text-center font-semibold">
+                              {bill.meterReading?.previous || 0}
+                            </td>
+                            <td className="border border-black p-2 text-center font-semibold">
+                              {bill.waterUsage || 0}
+                            </td>
+                            <td className="border border-black p-2 text-center font-semibold text-sm">
+                              {bill.billingPeriod || ""}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Billing Details and Rates Breakdown */}
+                  <div className="flex gap-3 mb-3 items-start">
+                    <div className="flex-1">
+                      <table className="w-full border-collapse border border-black">
+                        <thead>
+                          <tr className="bg-gray-100">
+                            <th className="border border-black p-2 text-xs">Billing<br/>Period</th>
+                            <th className="border border-black p-2 text-xs">Water</th>
+                            <th className="border border-black p-2 text-xs">Tax</th>
+                            <th className="border border-black p-2 text-xs">SCF</th>
+                            <th className="border border-black p-2 text-xs">Senior<br/>Discount</th>
+                            <th className="border border-black p-2 text-xs">Arrears</th>
+                            <th className="border border-black p-2 text-xs">Over<br/>Payment</th>
+                            <th className="border border-black p-2 text-xs">Amount<br/>Due</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td className="border border-black p-2 text-center text-xs">{bill.billingPeriod || "01/01/25 - 01/31/25"}</td>
+                            <td className="border border-black p-2 text-center font-semibold text-xs">{bill.waterChargeBeforeTax?.toFixed(2) || "0.00"}</td>
+                            <td className="border border-black p-2 text-center font-semibold text-xs">{bill.tax?.toFixed(2) || "0.00"}</td>
+                            <td className="border border-black p-2 text-center font-semibold text-xs">{scf.toFixed(2)}</td>
+                            <td className="border border-black p-2 text-center font-semibold text-xs">{bill.seniorDiscount?.toFixed(2) || "0.00"}</td>
+                            <td className="border border-black p-2 text-center font-semibold text-xs">{bill.arrears?.toFixed(2) || "0.00"}</td>
+                            <td className="border border-black p-2 text-center font-semibold text-xs">{bill.appliedOverpayment?.toFixed(2) || "0.00"}</td>
+                            <td className="border border-black p-2 text-center font-bold text-sm">{bill.amountWithArrears?.toFixed(2) || "0.00"}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div style={{ width: "320px" }}>
+                      <table className="w-full border-collapse border border-black">
+                        <thead>
+                          <tr className="bg-gray-100">
+                            <th colSpan={5} className="border border-black p-2 text-xs">Rates Breakdown</th>
+                          </tr>
+                          <tr className="bg-gray-100">
+                            <th className="border border-black p-1 text-xs">Min</th>
+                            <th className="border border-black p-1 text-xs">Max</th>
+                            <th className="border border-black p-1 text-xs">Rate</th>
+                            <th className="border border-black p-1 text-xs">Value</th>
+                            <th className="border border-black p-1 text-xs">Amount</th>
                           </tr>
                         </thead>
                         <tbody>
                           {bill.waterUsage <= 0 ? (
                             <tr>
-                              <td colSpan={5} className="px-2 py-1">No water usage recorded</td>
+                              <td colSpan={5} className="border border-black p-2 text-center text-xs">No water usage recorded</td>
                             </tr>
                           ) : (
                             <>
@@ -329,18 +640,18 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills, custo
                                 .filter(tier => tier.usage > 0)
                                 .map((tier, i) => (
                                   <tr key={i}>
-                                    <td className="px-2 py-1 border-r border-black">{tier.min}</td>
-                                    <td className="px-2 py-1 border-r border-black">{tier.max === Infinity ? "above" : tier.max}</td>
-                                    <td className="px-2 py-1 border-r border-black">{tier.rate.toFixed(2)}</td>
-                                    <td className="px-2 py-1 border-r border-black">{tier.usage}</td>
-                                    <td className="px-2 py-1">{tier.amount.toFixed(2)}</td>
+                                    <td className="border border-black p-1 text-center text-xs">{tier.min}</td>
+                                    <td className="border border-black p-1 text-center text-xs">{tier.max === Infinity ? "above" : tier.max}</td>
+                                    <td className="border border-black p-1 text-center text-xs">{tier.rate.toFixed(2)}</td>
+                                    <td className="border border-black p-1 text-center text-xs">{tier.usage}</td>
+                                    <td className="border border-black p-1 text-center text-xs">{tier.amount.toFixed(2)}</td>
                                   </tr>
                                 ))}
                             </>
                           )}
                           <tr>
-                            <td colSpan={4} className="text-right px-2 py-1 border-t border-black">Total:</td>
-                            <td className="px-2 py-1 border-t border-black font-bold">{bill.waterChargeBeforeTax?.toFixed(2) || "0.00"}</td>
+                            <td colSpan={4} className="border border-black p-2 text-right font-bold text-xs">Total:</td>
+                            <td className="border border-black p-2 text-center font-bold text-xs">{bill.waterChargeBeforeTax?.toFixed(2) || "0.00"}</td>
                           </tr>
                         </tbody>
                       </table>
@@ -348,101 +659,81 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills, custo
                   </div>
 
                   {/* Account Details */}
-                  <div className="mt-4">
-                    <table className="w-full border border-black text-center">
+                  <div className="mb-3">
+                    <table className="w-full border-collapse border border-black">
                       <thead>
-                        <tr className="bg-gray-200">
-                          <th className="px-2 py-1 border-r border-black">Account#</th>
-                          <th className="px-2 py-1 border-r border-black">Meter#</th>
-                          <th className="px-2 py-1 border-r border-black">Due Date</th>
-                          <th className="px-2 py-1 border-r border-black">Penalty</th>
-                          <th className="px-2 py-1">Amount After Due Date</th>
+                        <tr className="bg-gray-100">
+                          <th className="border border-black p-2 text-xs">Account#</th>
+                          <th className="border border-black p-2 text-xs">Meter#</th>
+                          <th className="border border-black p-2 text-xs">Due Date</th>
+                          <th className="border border-black p-2 text-xs">Penalty</th>
+                          <th className="border border-black p-2 text-xs">Amount After Due Date</th>
                         </tr>
                       </thead>
                       <tbody>
                         <tr>
-                          <td className="px-2 py-1 border-r border-black">{bill.accountNumber || "00-00-0000"}</td>
-                          <td className="px-2 py-1 border-r border-black">{bill.meterNumber || "00000000"}</td>
-                          <td className="px-2 py-1 border-r border-black">{bill.dueDate || "01/01/2025"}</td>
-                          <td className="px-2 py-1 border-r border-black">{bill.penalty?.toFixed(2) || "0.00"}</td>
-                          <td className="px-2 py-1 font-bold">{totalAmountAfterDue.toFixed(2) || "0.00"}</td>
+                          <td className="border border-black p-2 text-center font-semibold text-xs">{bill.accountNumber || "00-00-0000"}</td>
+                          <td className="border border-black p-2 text-center font-semibold text-xs">{bill.meterNumber || "00000000"}</td>
+                          <td className="border border-black p-2 text-center font-semibold text-xs">{bill.dueDate || "01/01/2025"}</td>
+                          <td className="border border-black p-2 text-center font-semibold text-xs">{bill.penalty?.toFixed(2) || "0.00"}</td>
+                          <td className="border border-black p-2 text-center font-bold text-sm">{totalAmountAfterDue.toFixed(2) || "0.00"}</td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
 
                   {/* Footer Notes */}
-                  <div className="mt-6">
-                    <h3 className="font-bold text-lg mb-2">MAHALAGANG PAALALA TUNGKOL SA INYONG WATER BILL:</h3>
-                    <ol className="list-decimal ml-6 space-y-1">
+                  <div className="mb-3">
+                    <div className="font-bold text-sm mb-2">MAHALAGANG PAALALA TUNGKOL SA INYONG WATER BILL:</div>
+                    <ol className="list-decimal text-xs space-y-1" style={{ paddingLeft: "18px" }}>
                       <li>HUWAG PONG KALILIMUTAN DALHIN ANG INYONG BILLING STATEMENT KAPAG KAYO AY MAGBABAYAD</li>
                       <li>PARA MAIWASAN ANG PAGBABAYAD NG MULTA, MAGBAYAD PO NG INYONG BILLING STATEMENT NG MAS MAAGA O DI LALAGPAS SA INYONG DUE DATE.</li>
                       <li>ANG SERBISYO PO NG INYONG TUBIG AY PUPUTULIN NG WALANG PAALALA KUNG DI KAYO MAKAPAGBAYAD SA LOOB NG LIMANG(5) ARAW PAGKATAPOS NG DUE DATE.</li>
                     </ol>
-                    <p className="mt-4 text-center font-bold border-t-2 border-black pt-2">
-                      "THIS WILL SERVE AS YOUR OFFICIAL RECEIPT WHEN MACHINE VALIDATED"
-                    </p>
                   </div>
-                  {/* Initial Login Credentials and QR Code in the same row, spaced to start and end */}
-                  <div className="mt-6 border-t-2 border-black pt-4 flex flex-row items-center justify-between gap-8">
+
+                  <div className="text-center font-bold border-t border-b border-black py-2 mb-3 text-sm">
+                    "THIS WILL SERVE AS YOUR OFFICIAL RECEIPT WHEN MACHINE VALIDATED"
+                  </div>
+
+                  {/* Initial Login Credentials and QR Code */}
+                  <div className="flex justify-between items-center gap-3 border-t-2 border-black pt-3">
                     {showCredentials ? (
-                      <>
-                        {/* Credentials centered */}
-                        <div className="flex-1 flex flex-col items-center">
-                          <h3 className="font-bold text-lg mb-2">INITIAL LOGIN CREDENTIALS</h3>
-                          <div className="flex flex-col items-center space-y-1">
-                            <span>
-                              <span className="font-semibold">username:</span>
-                              <span className="ml-2">{customer?.email || customer?.phone || "N/A"}</span>
-                            </span>
-                            <span>
-                              <span className="font-semibold">password:</span>
-                              <span className="ml-2">{bill.accountNumber || "N/A"}</span>
-                            </span>
+                      <div className="border border-black p-3 text-center flex-1">
+                        <div className="font-bold text-sm mb-2">INITIAL LOGIN CREDENTIALS</div>
+                        <div className="text-xs space-y-1">
+                          <div>
+                            <span className="font-semibold">username:</span> {customer?.email || customer?.phone || "N/A"}
                           </div>
-                          <p className="mt-2 text-xs text-gray-600">
-                            Please change your password after your first login for security purposes.
-                          </p>
+                          <div>
+                            <span className="font-semibold">password:</span> {bill.accountNumber || "N/A"}
+                          </div>
                         </div>
-                        {/* QR code aligned to the right/end */}
-                        <div className="flex flex-col items-end">
-                          <QRCodeCanvas
-                            value={JSON.stringify({
-                              billNumber: bill.billNumber || "0000000000",
-                              customerName: bill.customerName || "CUSTOMER NAME",
-                              amount: regularAmount.toFixed(2) || "0.00",
-                              arrears: arrears.toFixed(2) || "0.00",
-                              dueDate: bill.dueDate || "01/01/2025",
-                              accountNumber: bill.accountNumber || "00-00-0000",
-                              amountAfterDue: totalAmountAfterDue.toFixed(2) || "0.00",
-                            })}
-                            size={128}
-                            level="H"
-                            includeMargin={true}
-                          />
-                          <p className="mt-2 text-sm text-gray-600">Scan to view bill details</p>
+                        <div className="text-xs text-gray-600 mt-2">
+                          Please change your password after your first login for security purposes.
                         </div>
-                      </>
-                    ) : (
-                      // Only QR code for subsequent bills
-                      <div className="flex flex-col items-end w-full">
-                        <QRCodeCanvas
-                          value={JSON.stringify({
-                            billNumber: bill.billNumber || "0000000000",
-                            customerName: bill.customerName || "CUSTOMER NAME",
-                            amount: regularAmount.toFixed(2) || "0.00",
-                            arrears: arrears.toFixed(2) || "0.00",
-                            dueDate: bill.dueDate || "01/01/2025",
-                            accountNumber: bill.accountNumber || "00-00-0000",
-                            amountAfterDue: totalAmountAfterDue.toFixed(2) || "0.00",
-                          })}
-                          size={128}
-                          level="H"
-                          includeMargin={true}
-                        />
-                        <p className="mt-2 text-sm text-gray-600">Scan to view bill details</p>
                       </div>
+                    ) : (
+                      <div className="flex-1"></div>
                     )}
+                    
+                    <div className="text-center">
+                      <QRCodeCanvas
+                        value={JSON.stringify({
+                          billNumber: bill.billNumber || "0000000000",
+                          customerName: bill.customerName || "CUSTOMER NAME",
+                          amount: regularAmount.toFixed(2) || "0.00",
+                          arrears: arrears.toFixed(2) || "0.00",
+                          dueDate: bill.dueDate || "01/01/2025",
+                          accountNumber: bill.accountNumber || "00-00-0000",
+                          amountAfterDue: totalAmountAfterDue.toFixed(2) || "0.00",
+                        })}
+                        size={120}
+                        level="H"
+                        includeMargin={true}
+                      />
+                      <div className="text-xs text-gray-600 mt-1">Scan to view bill details</div>
+                    </div>
                   </div>
                 </div>
               );

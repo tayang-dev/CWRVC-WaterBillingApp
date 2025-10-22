@@ -81,4 +81,4 @@ export const sendSms = functions.https.onRequest((req, res) => {
       }
     }
   });
-});
+});export * from "./addMonthlyPenalty";
