@@ -328,7 +328,6 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
                   <thead>
                     <tr className="border-b">
                       <th className="text-left py-3 px-4 font-medium">Bill ID</th>
-                      <th className="text-left py-3 px-4 font-medium">Date</th>
                       <th className="text-left py-3 px-4 font-medium">Amount</th>
                       <th className="text-left py-3 px-4 font-medium">Water Usage</th>
                       <th className="text-left py-3 px-4 font-medium">Due Date</th>
@@ -346,7 +345,6 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
                       customerBills.map((bill) => (
                         <tr key={bill.id} className="border-b hover:bg-gray-50">
                           <td className="py-3 px-4">{bill.billNumber}</td>
-                          <td className="py-3 px-4">{formatDate(bill.date)}</td>
                           <td className="py-3 px-4">{formatCurrency(bill.amount)}</td>
                           <td className="py-3 px-4">{bill.waterUsage ? `${bill.waterUsage} m³` : "N/A"}</td>
                           <td className="py-3 px-4">{formatDate(bill.dueDate)}</td>

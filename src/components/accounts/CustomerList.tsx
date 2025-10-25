@@ -9,6 +9,8 @@ import {
   Trash,
   Eye,
   AlertCircle,
+  Archive,
+  RefreshCw,
 } from "lucide-react";
 
 import { Button } from "../ui/button";
@@ -193,6 +195,14 @@ const CustomerList: React.FC<CustomerListProps> = ({
   const [scfError, setScfError] = useState("");
   const [showScfConfirm, setShowScfConfirm] = useState(false); // Add this state at the top inside CustomerList component
 
+  // --- Archive states ---
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [archivedCustomers, setArchivedCustomers] = useState<Customer[]>([]);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [archiveError, setArchiveError] = useState("");
+  const [archiveSearchTerm, setArchiveSearchTerm] = useState("");
+  const [archivePage, setArchivePage] = useState(1);
+
   const itemsPerPage = 10;
 
   // Account Number Generation Logic
@@ -290,7 +300,83 @@ const fetchCustomers = async () => {
     console.error("Error fetching customers:", error);
   }
 };
+
+  // --- Fetch archived customers ---
+  const fetchArchivedCustomers = async () => {
+    setArchiveLoading(true);
+    setArchiveError("");
+    try {
+      const archiveCol = collection(db, "archiveCustomer");
+      const snapshot = await getDocs(archiveCol);
+      const list = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...(doc.data() as any),
+      })) as Customer[];
+      // archived docs may contain archivedAt field; keep it in list (UI can ignore)
+      setArchivedCustomers(list);
+    } catch (e: any) {
+      console.error("Error fetching archived customers:", e);
+      setArchiveError(e.message || "Failed to fetch archived customers");
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
   
+  // Fetch archived customers when dialog opens
+  useEffect(() => {
+    if (archiveDialogOpen) {
+      fetchArchivedCustomers();
+    }
+  }, [archiveDialogOpen]);
+
+    // Restore an archived customer
+  const handleRestoreArchived = async (arch: any) => {
+    if (!arch?.id) return;
+    setIsSubmitting(true);
+    try {
+      // Prepare data to restore (remove archivedAt)
+      const { archivedAt, id, ...rest } = arch;
+      const customerRef = doc(db, "customers", arch.id);
+      // Use setDoc to restore using same id so references remain stable
+      await setDoc(customerRef, {
+        ...rest,
+        // ensure fields that should not be undefined are normalized
+        email: rest.email || null,
+        phone: rest.phone || null,
+      });
+      // remove from archive collection
+      await deleteDoc(doc(db, "archiveCustomer", arch.id));
+      await fetchCustomers();
+      await fetchArchivedCustomers();
+      alert(`Restored ${rest.name || arch.id}`);
+    } catch (e: any) {
+      console.error("Error restoring archived customer:", e);
+      alert("Failed to restore archived customer: " + (e.message || ""));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+    // Permanently delete archived customer
+  const handlePermanentlyDeleteArchived = async (arch: any) => {
+    if (!arch?.id) return;
+    const ok = window.confirm(
+      `Permanently delete archived customer ${arch.name || arch.id}? This action cannot be undone.`
+    );
+    if (!ok) return;
+    setIsSubmitting(true);
+    try {
+      await deleteDoc(doc(db, "archiveCustomer", arch.id));
+      await fetchArchivedCustomers();
+      alert(`Permanently deleted ${arch.name || arch.id}`);
+    } catch (e: any) {
+      console.error("Error deleting archived customer:", e);
+      alert("Failed to delete archived customer: " + (e.message || ""));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const checkIfDetailsExist = async (accountNumber: string, meterNumber: string, email?: string, phone?: string, excludeCustomerId?: string) => {
     try {
       // Check if account number exists
@@ -410,44 +496,43 @@ const handleDeleteCustomer = async () => {
   setIsSubmitting(true);
 
   try {
-    // Prepare sanitized archive data to avoid undefined fields
-    const {
-      id,
-      name = "",
-      email = "",
-      phone = "",
-      address = "",
-      accountNumber = "",
-      block = "",
-      lot = "",
-      site = "",
-      meterNumber = "",
-      isSenior = false,
-      // add any other fields that might exist
-    } = deletingCustomer;
+    const nowIso = new Date().toISOString();
+    // Build a complete archive object with safe defaults, mirror your customers document shape
+    const archiveData = {
+      accountNumber: deletingCustomer.accountNumber || "",
+      firstName: deletingCustomer.firstName || "",
+      lastName: deletingCustomer.lastName || "",
+      middleInitial: deletingCustomer.middleInitial ?? "",
+      name: deletingCustomer.name || `${deletingCustomer.firstName || ""} ${deletingCustomer.middleInitial ? deletingCustomer.middleInitial + ". " : ""}${deletingCustomer.lastName || ""}`.trim(),
+      email: deletingCustomer.email ?? null,
+      phone: deletingCustomer.phone ?? null,
+      address: deletingCustomer.address ?? `Site ${deletingCustomer.site ?? "3"}, Brgy. Dayap, Calauan, Laguna`,
+      site: deletingCustomer.site ?? "site3",
+      block: deletingCustomer.block ?? "",
+      lot: deletingCustomer.lot ?? "",
+      meterNumber: deletingCustomer.meterNumber ?? "",
+      hasSCF: typeof deletingCustomer.hasSCF === "boolean" ? deletingCustomer.hasSCF : false,
+      scfAmount: typeof deletingCustomer.scfAmount === "number" ? deletingCustomer.scfAmount : 0,
+      amountDue: typeof deletingCustomer.amountDue === "number" ? deletingCustomer.amountDue : 0,
+      lastReading: (deletingCustomer as any).lastReading ?? 0,
+      previousReading: (deletingCustomer as any).previousReading ?? "",
+      lastBillingDate: deletingCustomer.lastBillingDate ?? null,
+      joinDate: (deletingCustomer as any).joinDate ?? (deletingCustomer.lastBillingDate ?? null),
+      status: deletingCustomer.status ?? "inactive",
+      archivedAt: nowIso,
+    };
 
-    const archiveRef = doc(db, "archiveCustomer", id);
-    await setDoc(archiveRef, {
-      id,
-      name,
-      email,
-      phone,
-      address,
-      accountNumber,
-      block,
-      lot,
-      site,
-      meterNumber,
-      isSenior,
-      archivedAt: new Date().toISOString(),
-    });
+    // Write to archive collection using same document id so restore is straightforward
+    const archiveRef = doc(db, "archiveCustomer", deletingCustomer.id);
+    await setDoc(archiveRef, archiveData);
 
-    // Delete the customer document
-    const customerRef = doc(db, "customers", id);
+    // Delete the original customer document
+    const customerRef = doc(db, "customers", deletingCustomer.id);
     await deleteDoc(customerRef);
 
-    // Refresh customer list
+    // Refresh lists
     await fetchCustomers();
+    await fetchArchivedCustomers();
 
     // Close dialog
     setDeletingCustomer(null);
@@ -709,11 +794,11 @@ const handleConfirmedSubmit = async () => {
                           maxLength={11}
                           inputMode="numeric"
                           {...field}
-                          value={field.value === "09" ? "" : field.value} // Treat "09" as empty
+                          value={field.value ?? ""}
                           onChange={(e) => {
                             const input = e.target.value;
-                            // Allow only numeric input and ensure it starts with "09" or is empty
-                            if (input === "" || input.startsWith("09") && /^[0-9]*$/.test(input)) {
+                            // Allow digits only (so user can type progressively). final validation handled by schema.
+                            if (/^[0-9]*$/.test(input)) {
                               field.onChange(input);
                             }
                           }}
@@ -958,6 +1043,16 @@ const handleConfirmedSubmit = async () => {
           >
             <Filter className="h-4 w-4" />
           </Button>
+
+          {/* Archive button (opens archived customers dialog) */}
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setArchiveDialogOpen(true)}
+            title="Archived customers"
+          >
+            <Archive className="h-4 w-4" />
+          </Button>
         </div>
         {showFilters && (
           <div className="flex space-x-2 items-center mt-2">
@@ -993,6 +1088,162 @@ const handleConfirmedSubmit = async () => {
           </div>
         )}
       </div>
+
+
+    {/* Archived Customers Dialog - render only when open */}
+{archiveDialogOpen && (
+  <Dialog open={true} onOpenChange={(open) => setArchiveDialogOpen(open)}>
+    <DialogContent className="w-full max-w-3xl">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold">Archived Customers</h3>
+        <div className="flex items-center space-x-2 mr-4">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => fetchArchivedCustomers()}
+          >
+            <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+          </Button>
+        </div>
+      </div>
+
+      {/* Search Field */}
+      <div className="relative mb-4">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+        <Input
+          placeholder="Search archived customers..."
+          className="pl-10 w-full"
+          value={archiveSearchTerm}
+          onChange={(e) => {
+            setArchiveSearchTerm(e.target.value);
+            setArchivePage(1); 
+          }}
+        />
+      </div>
+
+      {archiveLoading ? (
+        <div className="text-center py-8">Loading archived customers...</div>
+      ) : archiveError ? (
+        <div className="text-red-600">{archiveError}</div>
+      ) : archivedCustomers.length === 0 ? (
+        <div className="text-center py-8 text-gray-500">No archived customers</div>
+      ) : (
+        <>
+          {/* Filter and Pagination Logic */}
+          {(() => {
+            const filteredArchived = archivedCustomers.filter((a) => {
+              const t = archiveSearchTerm.toLowerCase();
+              return (
+                (a.name || "").toLowerCase().includes(t) ||
+                (a.accountNumber || "").toLowerCase().includes(t) ||
+                (a.site || "").toLowerCase().includes(t)
+              );
+            });
+
+            const itemsPerPage = 8;
+            const totalPages = Math.ceil(filteredArchived.length / itemsPerPage);
+            const indexOfLast = archivePage * itemsPerPage;
+            const indexOfFirst = indexOfLast - itemsPerPage;
+            const currentArchived = filteredArchived.slice(indexOfFirst, indexOfLast);
+
+
+            return (
+              <>
+                <div className="overflow-auto max-h-96">
+                  <table className="w-full table-auto">
+                    <thead>
+                      <tr className="text-left">
+                        <th className="p-2">Account #</th>
+                        <th className="p-2">Name</th>
+                        <th className="p-2">Site</th>
+                        <th className="p-2">Archived At</th>
+                        <th className="p-2 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {currentArchived.map((a) => (
+                        <tr key={a.id} className="border-t">
+                          <td className="p-2">{(a as any).accountNumber || "-"}</td>
+                          <td className="p-2">{a.name}</td>
+                          <td className="p-2">{(a as any).site || "-"}</td>
+                          <td className="p-2">
+                            {(a as any).archivedAt
+                              ? new Date((a as any).archivedAt).toLocaleString()
+                              : "-"}
+                          </td>
+                          <td className="p-2 text-right space-x-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleRestoreArchived(a)}
+                            >
+                              Restore
+                            </Button>
+                            <Button
+                              size="sm"
+                              className="bg-red-600 hover:bg-red-700"
+                              onClick={() => handlePermanentlyDeleteArchived(a)}
+                            >
+                              Delete
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination */}
+                {filteredArchived.length > itemsPerPage && (
+                  <div className="flex items-center justify-between mt-4">
+                    <div className="text-sm text-gray-500">
+                      Showing {indexOfFirst + 1} to{" "}
+                      {Math.min(indexOfLast, filteredArchived.length)} of{" "}
+                      {filteredArchived.length} archived customers
+                    </div>
+                    <div className="flex space-x-1">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setArchivePage(archivePage - 1)}
+                        disabled={archivePage === 1}
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+
+                      {Array.from({ length: totalPages }, (_, i) => (
+                        <Button
+                          key={i + 1}
+                          variant={archivePage === i + 1 ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setArchivePage(i + 1)}
+                        >
+                          {i + 1}
+                        </Button>
+                      ))}
+
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setArchivePage(archivePage + 1)}
+                        disabled={archivePage === totalPages}
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </>
+      )}
+    </DialogContent>
+  </Dialog>
+)}
+
+
 
       
 <div className="border rounded-md">

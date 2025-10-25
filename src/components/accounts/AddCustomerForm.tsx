@@ -281,6 +281,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
         email: data.email || null,
         phone: data.phone || null,
         site: data.site,
+        isSenior: data.isSenior,
         accountNumber: generatedAccountNumber,
         meterNumber: data.meterNumber,
         address: siteAddresses[data.site as keyof typeof siteAddresses],
