@@ -3,16 +3,22 @@ import ChatList from "./ChatList";
 import CustomerChat from "./CostumerChat";
 import { useLocation } from "react-router-dom";
 import { MessageCircle, Settings } from "lucide-react";
+import { useAuth } from "../../contexts/AuthContext"; // <--- added
 
 interface CustomerSupportProps {
-  userRole?: "admin" | "staff" | "cashier" | "manager";
+  userRole?: "admin" | "staff";
   userName?: string;
 }
 
 const CustomerSupport: React.FC<CustomerSupportProps> = ({ 
-  userRole = "staff",
-  userName = "User" 
+  userRole,
+  userName
 }) => {
+  console.log("🏠 CustomerSupport component mounted");
+  const { userRole: authUserRole, currentUser } = useAuth(); // <--- get role from auth
+  const effectiveRole: "admin" | "staff" = authUserRole === "admin" ? "admin" : "staff";
+  const displayName = currentUser?.displayName || userName || "User";
+
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [selectedCustomerName, setSelectedCustomerName] = useState<string>("");
   const [selectedCustomerAvatar, setSelectedCustomerAvatar] = useState<string>("");
@@ -22,6 +28,16 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({
 
   const location = useLocation();
 
+  // Convert role to internal role (admin or staff only)
+  const getInternalRole = (): "admin" | "staff" => {
+    return effectiveRole;
+  };
+
+  // Get display name for role
+  const getRoleDisplayName = () => {
+    return effectiveRole === "admin" ? "Admin" : "Cashier";
+  };
+  
   // Handle chat selection from URL (for notification redirection)
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
@@ -104,6 +120,7 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({
   };
 
   const statusDisplay = getOnlineStatus();
+  const internalRole = getInternalRole();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
@@ -119,7 +136,9 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({
                 <h1 className="text-2xl sm:text-3xl font-bold text-slate-800">
                   Customer Service
                 </h1>
-               
+                <p className="text-sm text-slate-600 mt-1">
+                  {getRoleDisplayName()} Dashboard • {displayName}
+                </p>
               </div>
             </div>
             
@@ -152,7 +171,7 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({
                   <ChatList
                     onSelectCustomer={handleSelectCustomer}
                     selectedCustomerId={selectedCustomerId || undefined}
-                    userRole={userRole === "cashier" || userRole === "manager" ? "staff" : userRole}
+                    userRole={getInternalRole()}
                   />
                 </div>
               </div>
@@ -167,7 +186,7 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({
                     customerName={selectedCustomerName}
                     customerAvatar={selectedCustomerAvatar}
                     accountNumber={selectedAccount}
-                    userRole={userRole === "cashier" || userRole === "manager" ? "staff" : userRole}
+                    userRole={getInternalRole()}
                     onSendMessage={handleSendMessage}
                     isSending={isSending}
                   />

@@ -77,11 +77,39 @@ function getFileIcon(fileName: string) {
 }
 
 function parseFileMessage(message: string) {
-  // Format: "File attached: originalFileName|chat_files/timestamp_originalFileName"
   if (!message.startsWith("File attached:")) return null;
   const content = message.replace("File attached:", "").trim();
   const [displayName, fileId] = content.split("|");
   return { displayName, fileId };
+}
+
+// Helper function to format date separators
+function getDateSeparator(date: Date): string {
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  
+  const messageDate = new Date(date);
+  messageDate.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+  yesterday.setHours(0, 0, 0, 0);
+  
+  if (messageDate.getTime() === today.getTime()) {
+    return "Today";
+  } else if (messageDate.getTime() === yesterday.getTime()) {
+    return "Yesterday";
+  } else {
+    return messageDate.toLocaleDateString('en-US', { 
+      month: 'long', 
+      day: 'numeric',
+      year: messageDate.getFullYear() !== today.getFullYear() ? 'numeric' : undefined
+    });
+  }
+}
+
+// Helper to check if two dates are on different days
+function isDifferentDay(date1: Date, date2: Date): boolean {
+  return date1.toDateString() !== date2.toDateString();
 }
 
 interface Message {
@@ -120,8 +148,6 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const lastMessageRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  
-  // Add ref for the message input field
   const messageInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -153,7 +179,6 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
       for (const msg of messages) {
         const fileInfo = msg.message && parseFileMessage(msg.message);
         if (fileInfo && fileInfo.fileId) {
-          // Check if URL is already cached
           if (urlCache.has(fileInfo.fileId)) {
             urls[msg.id] = urlCache.get(fileInfo.fileId)!;
           } else {
@@ -183,7 +208,6 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      // Check file size (limit to 10MB)
       if (file.size > 10 * 1024 * 1024) {
         alert("File size must be less than 10MB");
         return;
@@ -198,27 +222,21 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
     setIsUploading(true);
 
     try {
-      // Generate unique filename
       const timestamp = Date.now();
-      const fileExtension = selectedFile.name.split('.').pop();
       const fileName = `${timestamp}_${selectedFile.name}`;
       const filePath = `chat_files/${fileName}`;
 
-      // Upload file to Firebase Storage
       const fileRef = ref(storage, filePath);
       await uploadBytes(fileRef, selectedFile);
 
-      // Create file message
       const fileMessage = `File attached: ${selectedFile.name}|${filePath}`;
 
-      // Use parent's onSendMessage for duplicate prevention
       const canSend = await onSendMessage(fileMessage);
       if (!canSend) {
         setIsUploading(false);
         return;
       }
 
-      // Add message to Firestore
       const chatDocRef = doc(db, "chats", accountNumber);
       const chatSnap = await getDoc(chatDocRef);
       const currentLastMessageAdmin = chatSnap.exists() ? chatSnap.data()?.lastMessageAdmin || "" : "";
@@ -245,13 +263,11 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
         });
       }
 
-      // Clear selected file and focus back to input
       setSelectedFile(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
       
-      // Focus the message input after file upload
       setTimeout(() => {
         messageInputRef.current?.focus();
       }, 100);
@@ -267,7 +283,6 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !accountNumber || isSending) return;
 
-    // Use parent's onSendMessage for duplicate prevention
     const canSend = await onSendMessage(newMessage);
     if (!canSend) return;
 
@@ -300,7 +315,6 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
 
       setNewMessage("");
       
-      // Focus the input field after sending message
       setTimeout(() => {
         messageInputRef.current?.focus();
       }, 50);
@@ -335,11 +349,25 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
-    // Focus back to message input
     setTimeout(() => {
       messageInputRef.current?.focus();
     }, 50);
   };
+
+  function getMessageTimestampDisplay(date: Date) {
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+
+    const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+    if (isToday) {
+      return timeStr;
+    }
+
+    // For non-today show 'Oct 4 at 11:11 AM'
+    const dateStr = date.toLocaleDateString([], { month: "short", day: "numeric", year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined });
+    return `${dateStr} at ${timeStr}`;
+  }
 
   return (
     <Card className="w-full h-full flex flex-col shadow-lg bg-gradient-to-br from-white to-gray-50">
@@ -379,137 +407,149 @@ const CustomerChat: React.FC<CustomerChatProps> = ({
                 const fileInfo = msg.message && parseFileMessage(msg.message);
                 const isLast = idx === messages.length - 1;
                 const isAdminOrSystem = msg.sender === "admin" || msg.sender === "System";
+                const showDateSeparator = idx === 0 || isDifferentDay(messages[idx - 1].timestamp, msg.timestamp);
                 
                 return (
-                  <div
-                    key={msg.id}
-                    ref={isLast ? lastMessageRef : undefined}
-                    className={`flex ${isAdminOrSystem ? "justify-end" : "justify-start"} animate-fade-in`}
-                  >
-                    <div className={`relative group max-w-[75%] ${isAdminOrSystem ? "order-2 mr-12" : "order-1"}`}>
-                      {/* Avatar for customer messages */}
-                      {!isAdminOrSystem && (
-                        <div className="absolute -left-12 top-0">
-                          <Avatar className="h-8 w-8 border-2 border-white shadow-md">
-                            <AvatarImage src={customerAvatar} alt={customerName} />
-                            <AvatarFallback className="bg-gray-400 text-white text-xs">
-                              <User className="h-4 w-4" />
-                            </AvatarFallback>
-                          </Avatar>
-                        </div>
-                      )}
-                      
-                      {/* Avatar for admin messages */}
-                      {isAdminOrSystem && (
-                        <div className="absolute -right-12 top-0">
-                          <Avatar className="h-8 w-8 border-2 border-blue-200 shadow-md">
-                            <AvatarFallback className="bg-blue-500 text-white text-xs">
-                              A
-                            </AvatarFallback>
-                          </Avatar>
-                        </div>
-                      )}
-                      
-                      {/* Message bubble */}
-                      <div
-                        className={`relative rounded-2xl p-4 shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-[1.02] ${
-                          isAdminOrSystem 
-                            ? "bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 text-white shadow-blue-200" 
-                            : "bg-white border border-gray-100 text-gray-800 shadow-gray-200 hover:border-gray-200"
-                        }`}
-                      >
-                        {/* Message content */}
-                        {fileInfo && fileInfo.fileId ? (
-                          <div className="space-y-3">
-                           {fileUrls[msg.id] && isImageFile(fileInfo.displayName) && (
-                              <div className="space-y-2">
-                                <div className="relative group/image">
-                                  <img
-                                    src={fileUrls[msg.id]}
-                                    alt={fileInfo.displayName}
-                                    onClick={() => {
-                                      const link = document.createElement('a');
-                                      link.href = fileUrls[msg.id];
-                                      link.target = '_blank';
-                                      link.rel = 'noopener noreferrer';
-                                      link.click();
-                                    }}
-                                    className="max-w-[250px] rounded-lg cursor-pointer transition-all duration-200 hover:scale-105 shadow-md"
-                                  />
-                                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover/image:bg-opacity-20 transition-all duration-200 rounded-lg flex items-center justify-center pointer-events-none">
-                                    <Eye className="h-6 w-6 text-white opacity-0 group-hover/image:opacity-100 transition-opacity duration-200" />
-                                  </div>
-                                </div>
-                                <p className={`text-xs ${isAdminOrSystem ? 'text-blue-100' : 'text-gray-500'}`}>
-                                  {fileInfo.displayName}
-                                </p>
-                              </div>
-                            )}
-
-                            {fileUrls[msg.id] && isVideoFile(fileInfo.displayName) && (
-                              <div className="space-y-2">
-                                <video
-                                  src={fileUrls[msg.id]}
-                                  controls
-                                  className="max-w-[300px] rounded-lg shadow-md"
-                                />
-                                <p className={`text-xs ${isAdminOrSystem ? 'text-blue-100' : 'text-gray-500'}`}>
-                                  {fileInfo.displayName}
-                                </p>
-                              </div>
-                            )}
-
-                            {fileUrls[msg.id] && !isImageFile(fileInfo.displayName) && !isVideoFile(fileInfo.displayName) && (
-                              <div className={`flex items-center space-x-3 p-3 rounded-lg border transition-all duration-200 hover:shadow-md ${
-                                isAdminOrSystem ? 'bg-white/10 border-white/20' : 'bg-gray-50 border-gray-200'
-                              }`}>
-                                <div className={`p-2 rounded-lg ${isAdminOrSystem ? 'bg-white/20' : 'bg-blue-50'}`}>
-                                  {React.cloneElement(getFileIcon(fileInfo.displayName), {
-                                    className: `h-5 w-5 ${isAdminOrSystem ? 'text-white' : 'text-blue-500'}`
-                                  })}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <a
-                                    href={fileUrls[msg.id]}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className={`text-sm font-medium hover:underline truncate block ${
-                                      isAdminOrSystem ? 'text-white' : 'text-blue-600'
-                                    }`}
-                                  >
-                                    {fileInfo.displayName}
-                                  </a>
-                                </div>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => window.open(fileUrls[msg.id], '_blank')}
-                                  className={`h-8 w-8 p-0 ${
-                                    isAdminOrSystem 
-                                      ? 'hover:bg-white/20 text-white' 
-                                      : 'hover:bg-gray-100 text-gray-600'
-                                  }`}
-                                >
-                                  <Download className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <p className="text-sm leading-relaxed">{msg.message}</p>
-                        )}
-                        
-                        {/* Message timestamp */}
-                        <div className={`text-xs mt-2 ${
-                          isAdminOrSystem ? 'text-blue-100' : 'text-gray-400'
-                        }`}>
-                          {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  <React.Fragment key={msg.id}>
+                    {/* Date separator */}
+                    {showDateSeparator && (
+                      <div className="flex items-center justify-center my-6">
+                        <div className="bg-gray-100 text-gray-600 text-xs font-medium px-4 py-2 rounded-full shadow-sm">
+                          {getDateSeparator(msg.timestamp)}
                         </div>
                       </div>
-                      
+                    )}
+                    
+                    <div
+                      ref={isLast ? lastMessageRef : undefined}
+                      className={`flex ${isAdminOrSystem ? "justify-end" : "justify-start"} animate-fade-in`}
+                    >
+                      <div className={`relative group max-w-[75%] ${isAdminOrSystem ? "order-2 mr-12" : "order-1"}`}>
+                        {/* Avatar for customer messages */}
+                        {!isAdminOrSystem && (
+                          <div className="absolute -left-12 top-0">
+                            <Avatar className="h-8 w-8 border-2 border-white shadow-md">
+                              <AvatarImage src={customerAvatar} alt={customerName} />
+                              <AvatarFallback className="bg-gray-400 text-white text-xs">
+                                <User className="h-4 w-4" />
+                              </AvatarFallback>
+                            </Avatar>
+                          </div>
+                        )}
+                        
+                        {/* Avatar for admin messages */}
+                        {isAdminOrSystem && (
+                          <div className="absolute -right-12 top-0">
+                            <Avatar className="h-8 w-8 border-2 border-blue-200 shadow-md">
+                              <AvatarFallback className="bg-blue-500 text-white text-xs">
+                                A
+                              </AvatarFallback>
+                            </Avatar>
+                          </div>
+                        )}
+                        
+                        {/* Message bubble */}
+                        <div
+                          className={`relative rounded-2xl p-4 shadow-lg transition-all duration-300 hover:shadow-xl hover:scale-[1.02] ${
+                            isAdminOrSystem 
+                              ? "bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 text-white shadow-blue-200" 
+                              : "bg-white border border-gray-100 text-gray-800 shadow-gray-200 hover:border-gray-200"
+                          }`}
+                        >
+                          {/* Message content */}
+                          {fileInfo && fileInfo.fileId ? (
+                            <div className="space-y-3">
+                             {fileUrls[msg.id] && isImageFile(fileInfo.displayName) && (
+                                <div className="space-y-2">
+                                  <div className="relative group/image">
+                                    <img
+                                      src={fileUrls[msg.id]}
+                                      alt={fileInfo.displayName}
+                                      onClick={() => {
+                                        const link = document.createElement('a');
+                                        link.href = fileUrls[msg.id];
+                                        link.target = '_blank';
+                                        link.rel = 'noopener noreferrer';
+                                        link.click();
+                                      }}
+                                      className="max-w-[250px] rounded-lg cursor-pointer transition-all duration-200 hover:scale-105 shadow-md"
+                                    />
+                                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover/image:bg-opacity-20 transition-all duration-200 rounded-lg flex items-center justify-center pointer-events-none">
+                                      <Eye className="h-6 w-6 text-white opacity-0 group-hover/image:opacity-100 transition-opacity duration-200" />
+                                    </div>
+                                  </div>
+                                  <p className={`text-xs ${isAdminOrSystem ? 'text-blue-100' : 'text-gray-500'}`}>
+                                    {fileInfo.displayName}
+                                  </p>
+                                </div>
+                              )}
 
+                              {fileUrls[msg.id] && isVideoFile(fileInfo.displayName) && (
+                                <div className="space-y-2">
+                                  <video
+                                    src={fileUrls[msg.id]}
+                                    controls
+                                    className="max-w-[300px] rounded-lg shadow-md"
+                                  />
+                                  <p className={`text-xs ${isAdminOrSystem ? 'text-blue-100' : 'text-gray-500'}`}>
+                                    {fileInfo.displayName}
+                                  </p>
+                                </div>
+                              )}
+
+                              {fileUrls[msg.id] && !isImageFile(fileInfo.displayName) && !isVideoFile(fileInfo.displayName) && (
+                                <div className={`flex items-center space-x-3 p-3 rounded-lg border transition-all duration-200 hover:shadow-md ${
+                                  isAdminOrSystem ? 'bg-white/10 border-white/20' : 'bg-gray-50 border-gray-200'
+                                }`}>
+                                  <div className={`p-2 rounded-lg ${isAdminOrSystem ? 'bg-white/20' : 'bg-blue-50'}`}>
+                                    {React.cloneElement(getFileIcon(fileInfo.displayName), {
+                                      className: `h-5 w-5 ${isAdminOrSystem ? 'text-white' : 'text-blue-500'}`
+                                    })}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <a
+                                      href={fileUrls[msg.id]}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className={`text-sm font-medium hover:underline truncate block ${
+                                        isAdminOrSystem ? 'text-white' : 'text-blue-600'
+                                      }`}
+                                    >
+                                      {fileInfo.displayName}
+                                    </a>
+                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => window.open(fileUrls[msg.id], '_blank')}
+                                    className={`h-8 w-8 p-0 ${
+                                      isAdminOrSystem 
+                                        ? 'hover:bg-white/20 text-white' 
+                                        : 'hover:bg-gray-100 text-gray-600'
+                                    }`}
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-sm leading-relaxed">{msg.message}</p>
+                          )}
+                          
+                          {/* Message timestamp */}
+                          <div
+                            className={`text-xs mt-2 ${
+                              isAdminOrSystem ? 'text-blue-100' : 'text-gray-400'
+                            }`}
+                            title={msg.timestamp.toLocaleString()}
+                          >
+                            {getMessageTimestampDisplay(msg.timestamp)}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  </React.Fragment>
                 );
               })}
               <div ref={lastMessageRef} />
