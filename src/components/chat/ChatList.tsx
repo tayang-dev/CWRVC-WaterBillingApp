@@ -10,8 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { Search, User, MessageCircle, Clock, Users } from "lucide-react";
-import { collection, onSnapshot, getDocs, query, orderBy, limit } from "firebase/firestore";
+import { Search, User, MessageCircle, Users } from "lucide-react";
+import { collection, onSnapshot, getDocs, query, orderBy, limit, doc, getDoc } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 
 interface ChatCustomer {
@@ -108,6 +108,45 @@ const ChatList: React.FC<ChatListProps> = ({
             
             console.log(`\n💬 Processing chat: ${accountNumber}`);
 
+            // Fetch customer details from customers collection
+            let customerName = "";
+            try {
+              // First try using customerId if it exists in chat data
+              if (data.customerId) {
+                const customerDoc = await getDoc(doc(db, "customers", data.customerId));
+                if (customerDoc.exists()) {
+                  const customerData = customerDoc.data();
+                  // Try to get name from various fields
+                  customerName = customerData.name || 
+                    `${customerData.firstName || ""} ${customerData.middleInitial ? customerData.middleInitial + "." : ""} ${customerData.lastName || ""}`.trim();
+                }
+              }
+              
+              // If still no name, try to find customer by accountNumber
+              if (!customerName) {
+                const customersRef = collection(db, "customers");
+                const q = query(customersRef);
+                const customersSnap = await getDocs(q);
+                
+                for (const customerDoc of customersSnap.docs) {
+                  const customerData = customerDoc.data();
+                  if (customerData.accountNumber === accountNumber) {
+                    customerName = customerData.name || 
+                      `${customerData.firstName || ""} ${customerData.middleInitial ? customerData.middleInitial + "." : ""} ${customerData.lastName || ""}`.trim();
+                    break;
+                  }
+                }
+              }
+              
+              // Final fallback if no name found
+              if (!customerName) {
+                customerName = "Unknown Customer";
+              }
+            } catch (err) {
+              console.error(`Error fetching customer details for ${accountNumber}:`, err);
+              customerName = "Unknown Customer";
+            }
+
             // Try to get latest message from subcollection messages
             let lastMsgText = data.lastMessage || "Conversation active";
             let lastMsgTime: Date | null = null;
@@ -155,7 +194,7 @@ const ChatList: React.FC<ChatListProps> = ({
 
             const customer = {
               id: accountNumber,
-              name: `Account ${accountNumber}`,
+              name: customerName,
               avatar: data.avatar || "",
               lastMessage: lastMsgText,
               lastMessageTime: lastMsgTime,
@@ -349,44 +388,41 @@ const ChatList: React.FC<ChatListProps> = ({
                         )}
                       </div>
                       
-                      <div className="flex-1 min-w-0 space-y-1">
-                        <div className="flex justify-between items-start gap-2 overflow-visible">
-                            <div className="flex-1 min-w-0 pr-3">
-                              <h4 className={`text-sm font-medium truncate ${
-                                isUnread ? "text-blue-900 font-semibold" : "text-slate-900"
-                              }`}>
-                                {customer.name}
-                              </h4>
-                              <div className="flex items-center space-x-2 mt-1">
-                                <Badge variant="outline" className="text-xs px-2 py-0">
-                                  {customer.accountNumber}
-                                </Badge>
-                                {getStatusIndicator(customer)}
-                              </div>
+                      <div className="flex-1 min-w-0 space-y-1.5">
+                        {/* Account Number + Name */}
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-mono font-semibold text-slate-700">
+                                {customer.accountNumber}
+                              </span>
+                              {getStatusIndicator(customer)}
                             </div>
-
-                              <div className="flex flex-col items-end justify-center flex-shrink-0 w-[140px] min-w-[110px] z-20">
-                                <span
-                                  className="text-[11px] text-slate-700 font-medium z-20 whitespace-nowrap"
-                                  title={formatFullLocale(customer.lastMessageTime)}
-                                >
-                                  {formatCompactDateTime(customer.lastMessageTime)}
-                                </span>
-                                <Clock className="h-3 w-3 text-gray-500 opacity-70 mt-1" />
-                              </div>
-
-
-
+                            <h4 className={`text-sm font-medium truncate mt-1 ${
+                              isUnread ? "text-blue-900 font-semibold" : "text-slate-900"
+                            }`}>
+                              {customer.name}
+                            </h4>
                           </div>
+                        </div>
                         
-                        <div className="flex items-center space-x-2">
-                          <p className={`text-xs truncate flex-1 ${
-                            isUnread ? "text-slate-600 font-medium" : "text-slate-500"
-                          }`}>
-                            {userRole === "admin"
-                              ? (customer.lastMessageAdmin || "Waiting for response...")
-                              : (customer.lastMessage || "Conversation active")}
-                          </p>
+                        {/* Last Message */}
+                        <p className={`text-xs truncate ${
+                          isUnread ? "text-slate-600 font-medium" : "text-slate-500"
+                        }`}>
+                          {userRole === "admin"
+                            ? (customer.lastMessageAdmin || "Waiting for response...")
+                            : (customer.lastMessage || "Conversation active")}
+                        </p>
+                        
+                        {/* Timestamp at bottom */}
+                        <div className="flex items-center justify-between">
+                          <span
+                            className="text-[10px] text-slate-400 font-medium"
+                            title={formatFullLocale(customer.lastMessageTime)}
+                          >
+                            {formatCompactDateTime(customer.lastMessageTime)}
+                          </span>
                         </div>
                       </div>
                     </div>

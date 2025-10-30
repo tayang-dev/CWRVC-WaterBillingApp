@@ -3,7 +3,9 @@ import ChatList from "./ChatList";
 import CustomerChat from "./CostumerChat";
 import { useLocation } from "react-router-dom";
 import { MessageCircle, Settings } from "lucide-react";
-import { useAuth } from "../../contexts/AuthContext"; // <--- added
+import { useAuth } from "../../contexts/AuthContext";
+import { collection, query, getDocs, doc, getDoc } from "firebase/firestore";
+import { db } from "../../lib/firebase";
 
 interface CustomerSupportProps {
   userRole?: "admin" | "staff";
@@ -15,7 +17,7 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({
   userName
 }) => {
   console.log("🏠 CustomerSupport component mounted");
-  const { userRole: authUserRole, currentUser } = useAuth(); // <--- get role from auth
+  const { userRole: authUserRole, currentUser } = useAuth();
   const effectiveRole: "admin" | "staff" = authUserRole === "admin" ? "admin" : "staff";
   const displayName = currentUser?.displayName || userName || "User";
 
@@ -45,47 +47,75 @@ const CustomerSupport: React.FC<CustomerSupportProps> = ({
     if (chatId) {
       setSelectedCustomerId(chatId);
       setSelectedAccount(chatId);
+      // Fetch customer data when selecting from URL
+      fetchCustomerData(chatId);
     }
   }, [location.search]);
 
-  const handleSelectCustomer = (customerId: string, accountNumber: string) => {
+  // Fetch customer data from Firestore
+  const fetchCustomerData = async (accountNumber: string) => {
+    try {
+      // First, get the chat document to find the customerId
+      const chatDocRef = doc(db, "chats", accountNumber);
+      const chatSnap = await getDoc(chatDocRef);
+      
+      if (chatSnap.exists()) {
+        const chatData = chatSnap.data();
+        const customerId = chatData.customerId;
+        
+        if (customerId) {
+          // Fetch customer details
+          const customerDocRef = doc(db, "customers", customerId);
+          const customerSnap = await getDoc(customerDocRef);
+          
+          if (customerSnap.exists()) {
+            const customerData = customerSnap.data();
+            const fullName = customerData.name || 
+              `${customerData.firstName || ""} ${customerData.middleInitial ? customerData.middleInitial + "." : ""} ${customerData.lastName || ""}`.trim();
+            
+            setSelectedCustomerName(fullName || "Unknown Customer");
+            setSelectedCustomerAvatar(customerData.avatar || "");
+            return;
+          }
+        }
+      }
+      
+      // If we couldn't find customer data, try searching by account number
+      const customersRef = collection(db, "customers");
+      const customersQuery = query(customersRef);
+      const customersSnap = await getDocs(customersQuery);
+      
+      for (const customerDoc of customersSnap.docs) {
+        const customerData = customerDoc.data();
+        if (customerData.accountNumber === accountNumber) {
+          const fullName = customerData.name || 
+            `${customerData.firstName || ""} ${customerData.middleInitial ? customerData.middleInitial + "." : ""} ${customerData.lastName || ""}`.trim();
+          
+          setSelectedCustomerName(fullName || "Unknown Customer");
+          setSelectedCustomerAvatar(customerData.avatar || "");
+          return;
+        }
+      }
+      
+      // Fallback if no customer found
+      setSelectedCustomerName("Unknown Customer");
+      setSelectedCustomerAvatar("");
+      
+    } catch (error) {
+      console.error("Error fetching customer data:", error);
+      setSelectedCustomerName("Unknown Customer");
+      setSelectedCustomerAvatar("");
+    }
+  };
+
+  const handleSelectCustomer = async (customerId: string, accountNumber: string) => {
     setSelectedCustomerId(customerId);
     setSelectedAccount(accountNumber);
     setIsSending(false);
     lastSentMessage.current = '';
 
-    // Mock customer data - replace with actual API call in production
-    const mockCustomers: { [key: string]: { name: string; avatar: string } } = {
-      "B3AlM9dYpQ8Zy8TLFkDG": {
-        name: "John Doe",
-        avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=john",
-      },
-      "customer-2": {
-        name: "Jane Smith",
-        avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=jane",
-      },
-      "customer-3": {
-        name: "Robert Johnson",
-        avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=robert",
-      },
-      "customer-4": {
-        name: "Emily Williams",
-        avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=emily",
-      },
-      "customer-5": {
-        name: "Michael Brown",
-        avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=michael",
-      },
-    };
-
-    const customer = mockCustomers[customerId];
-    if (customer) {
-      setSelectedCustomerName(customer.name);
-      setSelectedCustomerAvatar(customer.avatar);
-    } else {
-      setSelectedCustomerName(`Account ${accountNumber}`);
-      setSelectedCustomerAvatar("");
-    }
+    // Fetch real customer data from Firestore
+    await fetchCustomerData(accountNumber);
   };
 
   const handleSendMessage = async (message: string) => {

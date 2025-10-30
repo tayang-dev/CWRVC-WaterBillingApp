@@ -203,6 +203,10 @@ const CustomerList: React.FC<CustomerListProps> = ({
   const [archiveSearchTerm, setArchiveSearchTerm] = useState("");
   const [archivePage, setArchivePage] = useState(1);
 
+  // Process state to prevent multiple clicks on restore/delete for archived items
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [deletingArchivedId, setDeletingArchivedId] = useState<string | null>(null);
+
   const itemsPerPage = 10;
 
   // Account Number Generation Logic
@@ -332,6 +336,9 @@ const fetchCustomers = async () => {
     // Restore an archived customer
   const handleRestoreArchived = async (arch: any) => {
     if (!arch?.id) return;
+    // prevent concurrent restores
+    if (restoringId) return;
+    setRestoringId(arch.id);
     setIsSubmitting(true);
     try {
       // Prepare data to restore (remove archivedAt)
@@ -354,16 +361,22 @@ const fetchCustomers = async () => {
       alert("Failed to restore archived customer: " + (e.message || ""));
     } finally {
       setIsSubmitting(false);
+      setRestoringId(null);
     }
   };
 
-    // Permanently delete archived customer
+  // Permanently delete archived customer
   const handlePermanentlyDeleteArchived = async (arch: any) => {
     if (!arch?.id) return;
+    // prevent concurrent deletes
+    if (deletingArchivedId) return;
+
     const ok = window.confirm(
       `Permanently delete archived customer ${arch.name || arch.id}? This action cannot be undone.`
     );
     if (!ok) return;
+
+    setDeletingArchivedId(arch.id);
     setIsSubmitting(true);
     try {
       await deleteDoc(doc(db, "archiveCustomer", arch.id));
@@ -374,6 +387,7 @@ const fetchCustomers = async () => {
       alert("Failed to delete archived customer: " + (e.message || ""));
     } finally {
       setIsSubmitting(false);
+      setDeletingArchivedId(null);
     }
   };
 
@@ -1171,22 +1185,24 @@ const handleConfirmedSubmit = async () => {
                               ? new Date((a as any).archivedAt).toLocaleString()
                               : "-"}
                           </td>
-                          <td className="p-2 text-right space-x-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleRestoreArchived(a)}
-                            >
-                              Restore
-                            </Button>
-                            <Button
-                              size="sm"
-                              className="bg-red-600 hover:bg-red-700"
-                              onClick={() => handlePermanentlyDeleteArchived(a)}
-                            >
-                              Delete
-                            </Button>
-                          </td>
+                            <td className="p-2 text-right space-x-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleRestoreArchived(a)}
+                                disabled={isSubmitting || restoringId === a.id}
+                              >
+                                {restoringId === a.id ? "Restoring..." : "Restore"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="bg-red-600 hover:bg-red-700"
+                                onClick={() => handlePermanentlyDeleteArchived(a)}
+                                disabled={isSubmitting || deletingArchivedId === a.id}
+                              >
+                                {deletingArchivedId === a.id ? "Deleting..." : "Delete"}
+                              </Button>
+                            </td>
                         </tr>
                       ))}
                     </tbody>
