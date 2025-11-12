@@ -66,6 +66,11 @@ const Requests = ({}: RequestsProps) => {
   const [confirmStatus, setConfirmStatus] = useState<string | null>(null);
   const [remarks, setRemarks] = useState("");
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
+// ...existing code...
+
   const location = useLocation();
 
 
@@ -140,6 +145,8 @@ const Requests = ({}: RequestsProps) => {
 
     fetchServiceRequests();
   }, []);
+
+  
 
     // Handle tab and request selection from URL (for notification redirection)
     useEffect(() => {
@@ -216,11 +223,34 @@ const Requests = ({}: RequestsProps) => {
         );
       }
       
+      setCurrentPage(1);
       setFilteredRequests(filtered);
     };
     
     applyFilters();
   }, [serviceRequests, searchTerm, statusFilter, typeFilter, dateRange]);
+
+  // Derived pagination values
+  const totalPages = Math.max(1, Math.ceil(filteredRequests.length / pageSize));
+  const paginatedRequests = filteredRequests.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  const goToPage = (p: number) => {
+    const target = Math.max(1, Math.min(totalPages, p));
+    setCurrentPage(target);
+  };
+
+  const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPageSize(parseInt(e.target.value, 10));
+    setCurrentPage(1);
+  };
+
+  // keep currentPage in range when filteredRequests or pageSize change
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [filteredRequests, pageSize, totalPages, currentPage]);
+
 
   // Handle search
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1164,6 +1194,7 @@ const exportToXLSX = () => {
                     <p className="text-gray-500 mt-1">Try adjusting your search or filters</p>
                   </div>
                 ) : (
+                  <>
                   <div className="rounded-md border">
                     <Table>
                       <TableHeader>
@@ -1178,7 +1209,7 @@ const exportToXLSX = () => {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredRequests.map((request) => (
+                        {paginatedRequests.map((request) => (
                           <TableRow key={request.id}>
                             <TableCell className="font-medium">{request.serviceId}</TableCell>
                             <TableCell>{request.accountNumber}</TableCell>
@@ -1200,11 +1231,68 @@ const exportToXLSX = () => {
                       </TableBody>
                     </Table>
                   </div>
+                
+                {/* Pagination */}
+                <div className="flex flex-col sm:flex-row justify-between items-center mt-4 text-sm text-gray-500 gap-3">
+                  <div className="flex items-center gap-3">
+                    <span>
+                      Showing{" "}
+                      {filteredRequests.length === 0
+                        ? 0
+                        : (currentPage - 1) * pageSize + 1}{" "}
+                      -{" "}
+                      {Math.min(filteredRequests.length, currentPage * pageSize)} of{" "}
+                      {filteredRequests.length}
+                    </span>
+                    <label className="flex items-center gap-2">
+                      <span>Page size</span>
+                      <select
+                        value={pageSize}
+                        onChange={handlePageSizeChange}
+                        className="border rounded px-2 py-1"
+                      >
+                        <option value={5}>5</option>
+                        <option value={10}>10</option>
+                        <option value={25}>25</option>
+                        <option value={50}>50</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="px-3 py-1 border rounded disabled:opacity-50"
+                      onClick={() => goToPage(1)}
+                      disabled={currentPage === 1}
+                    >
+                      First
+                    </button>
+                    <button
+                      className="px-3 py-1 border rounded disabled:opacity-50"
+                      onClick={() => goToPage(currentPage - 1)}
+                      disabled={currentPage === 1}
+                    >
+                      Prev
+                    </button>
+                    <span className="px-2">Page {currentPage} of {totalPages}</span>
+                    <button
+                      className="px-3 py-1 border rounded disabled:opacity-50"
+                      onClick={() => goToPage(currentPage + 1)}
+                      disabled={currentPage === totalPages}
+                    >
+                      Next
+                    </button>
+                    <button
+                      className="px-3 py-1 border rounded disabled:opacity-50"
+                      onClick={() => goToPage(totalPages)}
+                      disabled={currentPage === totalPages}
+                    >
+                      Last
+                    </button>
+                  </div>
+                </div>
+                  </>       
                 )}
                 
-                <div className="flex justify-between items-center mt-4 text-sm text-gray-500">
-                  <span>Showing {filteredRequests.length} of {serviceRequests.length} requests</span>
-                </div>
               </CardContent>
             </Card>
           </TabsContent>

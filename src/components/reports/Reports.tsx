@@ -1,3 +1,4 @@
+// ...existing code...
 import React, { useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 
@@ -76,6 +77,10 @@ const Reports = ({}: ReportsProps) => {
   // New state for confirmation dialog; "resolved" or "rejected"
   const [confirmAction, setConfirmAction] = useState<"resolved" | "rejected" | null>(null);
   const [remarks, setRemarks] = useState("");
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
 
   const location = useLocation();
 
@@ -229,6 +234,8 @@ const Reports = ({}: ReportsProps) => {
       }
 
       setFilteredReports(filtered);
+      // Reset to first page when filters change
+      setCurrentPage(1);
     };
 
     applyFilters();
@@ -242,6 +249,7 @@ const Reports = ({}: ReportsProps) => {
     setSearchTerm("");
     setDateRange("all");
     setStatusFilter("all");
+    setCurrentPage(1);
   };
 
   const handleViewDetails = (report: LeakReport) => {
@@ -372,7 +380,7 @@ const performMarkAsRejected = async (remarks: string) => {
   const handleConfirmAction = (action: "resolved" | "rejected") => {
     setConfirmAction(action);
   };
-
+  
 
   
   const onConfirmAction = async () => {
@@ -1130,11 +1138,11 @@ const exportToXLSX = () => {
   
   // Add data rows with visual bar chart
   timelineData.forEach((item, index) => {
-    const row = timelineSheet.addRow([
+    const row = timelineSheet.addRow([[
       item.date, 
       item.count.toString(),
       ''  // We'll create a visual bar in this cell
-    ]);
+    ]]);
     
     applyDataRowStyle(row, index % 2 === 0);
     
@@ -1260,6 +1268,20 @@ const exportToXLSX = () => {
       data.push({ date: key, count: dateMap[key] });
     }
     return data;
+  };
+
+  // Derived pagination values
+  const totalPages = Math.max(1, Math.ceil(filteredReports.length / pageSize));
+  const paginatedReports = filteredReports.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  const goToPage = (p: number) => {
+    const target = Math.max(1, Math.min(totalPages, p));
+    setCurrentPage(target);
+  };
+
+  const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPageSize(parseInt(e.target.value, 10));
+    setCurrentPage(1);
   };
 
   return (
@@ -1496,7 +1518,7 @@ const exportToXLSX = () => {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredReports.map((report) => (
+                        {paginatedReports.map((report) => (
                           <TableRow key={report.id}>
                             <TableCell className="font-medium">{report.accountNumber}</TableCell>
                             <TableCell className="max-w-[200px] truncate">{report.address}</TableCell>
@@ -1530,10 +1552,63 @@ const exportToXLSX = () => {
                   </div>
                 )}
 
-                <div className="flex justify-between items-center mt-4 text-sm text-gray-500">
-                  <span>
-                    Showing {filteredReports.length} of {leakReports.length} reports
-                  </span>
+                <div className="flex flex-col sm:flex-row justify-between items-center mt-4 text-sm text-gray-500 gap-3">
+                  <div className="flex items-center gap-3">
+                    <span>
+                      Showing{" "}
+                      {filteredReports.length === 0
+                        ? 0
+                        : (currentPage - 1) * pageSize + 1}{" "}
+                      -{" "}
+                      {Math.min(filteredReports.length, currentPage * pageSize)} of{" "}
+                      {filteredReports.length}
+                    </span>
+                    <label className="flex items-center gap-2">
+                      <span>Page size</span>
+                      <select
+                        value={pageSize}
+                        onChange={handlePageSizeChange}
+                        className="border rounded px-2 py-1"
+                      >
+                        <option value={5}>5</option>
+                        <option value={10}>10</option>
+                        <option value={25}>25</option>
+                        <option value={50}>50</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="px-3 py-1 border rounded disabled:opacity-50"
+                      onClick={() => goToPage(1)}
+                      disabled={currentPage === 1}
+                    >
+                      First
+                    </button>
+                    <button
+                      className="px-3 py-1 border rounded disabled:opacity-50"
+                      onClick={() => goToPage(currentPage - 1)}
+                      disabled={currentPage === 1}
+                    >
+                      Prev
+                    </button>
+                    <span className="px-2">Page {currentPage} of {totalPages}</span>
+                    <button
+                      className="px-3 py-1 border rounded disabled:opacity-50"
+                      onClick={() => goToPage(currentPage + 1)}
+                      disabled={currentPage === totalPages}
+                    >
+                      Next
+                    </button>
+                    <button
+                      className="px-3 py-1 border rounded disabled:opacity-50"
+                      onClick={() => goToPage(totalPages)}
+                      disabled={currentPage === totalPages}
+                    >
+                      Last
+                    </button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

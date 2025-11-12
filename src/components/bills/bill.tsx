@@ -162,6 +162,10 @@ const [editRates, setEditRates] = useState(false);
 const [editTiers, setEditTiers] = useState<RateTier[]>([]);
 const [minimumCharge, setMinimumCharge] = useState<number>(94.70);
 
+ // Pagination for Create Bills (meter readings)
+ const [readingsPage, setReadingsPage] = useState<number>(1);
+ const [readingsPageSize, setReadingsPageSize] = useState<number>(10);
+
   const manageRatesRef = useRef<HTMLDivElement>(null);
 
   
@@ -226,6 +230,20 @@ const [minimumCharge, setMinimumCharge] = useState<number>(94.70);
       fetchMeterReadingsByDueDate(formattedDueDate);
     }
   }, [billingData.dueDate]);
+
+  // Ensure current page is valid when filteredReadings or page size change
+  useEffect(() => {
+    const total = filteredReadings.length;
+    const totalPages = Math.max(1, Math.ceil(total / readingsPageSize));
+    if (readingsPage > totalPages) {
+      setReadingsPage(totalPages);
+    }
+  }, [filteredReadings.length, readingsPageSize]);
+
+  // Reset to first page when the set of filtered readings changes (e.g., due date / filters)
+  useEffect(() => {
+    setReadingsPage(1);
+  }, [filteredReadings.length]);
 
   const fetchCustomers = async () => {
     setLoadingState("loading");
@@ -474,10 +492,14 @@ const calculateBillingPeriodFromDueDate = (dueDateStr: string): string => {
   }, [meterReadings, selectedSite]);
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Only toggle selection for currently visible (paginated) readings
+    const start = (readingsPage - 1) * readingsPageSize;
+    const end = readingsPage * readingsPageSize;
+    const visibleIds = filteredReadings.slice(start, end).map(r => r.id).filter(Boolean) as string[];
     if (e.target.checked) {
-      setSelectedReadings(filteredReadings.map(r => r.id || ''));
+      setSelectedReadings(prev => Array.from(new Set([...prev, ...visibleIds])));
     } else {
-      setSelectedReadings([]);
+      setSelectedReadings(prev => prev.filter(id => !visibleIds.includes(id)));
     }
   };
 
@@ -2740,74 +2762,135 @@ const printDisconnectionNotice = (item: DisconnectionItem) => {
               </div>
             ) : (
               <div className="overflow-x-auto shadow rounded-lg border border-gray-200">
-                <table className="w-full text-sm text-left text-gray-700">
-                  <thead className="bg-gray-100 uppercase text-xs text-gray-600">
-                    <tr>
-                      <th className="px-4 py-3">
-                        <input
-                          type="checkbox"
-                          checked={
-                            selectedReadings.length > 0 &&
-                            selectedReadings.length === filteredReadings.filter(r => r.id).length
-                          }
-                          onChange={handleSelectAll}
-                          className="rounded text-blue-600 focus:ring-blue-500"
-                        />
-                      </th>
-                      <th className="px-4 py-3">Account #</th>
-                      <th className="px-4 py-3">Name</th>
-                      <th className="px-4 py-3">Previous Reading</th>
-                      <th className="px-4 py-3">Current Reading</th>
-                      <th className="px-4 py-3">Usage</th>
-                      <th className="px-4 py-3">Site</th>
-                      <th className="px-4 py-3">Month/Year</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredReadings.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className="px-4 py-6 text-center text-gray-500">
-                          No meter readings found for the selected due date
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredReadings.map(reading => {
-                        const usage = reading.currentReading - reading.previousReading;
-                        return (
-                          <tr key={reading.id} className="border-t hover:bg-gray-50">
-                            <td className="px-4 py-2">
+                {/* derive paginated readings */}
+                {(() => {
+                  const total = filteredReadings.length;
+                  const totalPages = Math.max(1, Math.ceil(total / readingsPageSize));
+                  const start = (readingsPage - 1) * readingsPageSize;
+                  const end = readingsPage * readingsPageSize;
+                  const paginatedReadings = filteredReadings.slice(start, end);
+                  const visibleIds = paginatedReadings.map(r => r.id).filter(Boolean) as string[];
+                  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedReadings.includes(id));
+
+                  return (
+                    <>
+                      <table className="w-full text-sm text-left text-gray-700">
+                        <thead className="bg-gray-100 uppercase text-xs text-gray-600">
+                          <tr>
+                            <th className="px-4 py-3">
                               <input
                                 type="checkbox"
-                                checked={selectedReadings.includes(reading.id || '')}
-                                onChange={() => reading.id && handleSelectReading(reading.id)}
+                                checked={allVisibleSelected}
+                                onChange={handleSelectAll}
                                 className="rounded text-blue-600 focus:ring-blue-500"
-                                disabled={!reading.id}
                               />
-                            </td>
-                            <td className="px-4 py-2">{reading.accountNumber}</td>
-                            <td className="px-4 py-2 font-medium">{reading.name}</td>
-                            <td className="px-4 py-2">{reading.previousReading}</td>
-                            <td className="px-4 py-2">{reading.currentReading}</td>
-                            <td className="px-4 py-2">
-                              <span className={`inline-flex px-2 py-1 text-xs rounded-full ${usage > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                {usage}
-                              </span>
-                            </td>
-                            <td className="px-4 py-2">{formatSiteName(reading.site)}</td>
-                            <td className="px-4 py-2">{`${reading.month}/${reading.year}`}</td>
+                            </th>
+                            <th className="px-4 py-3">Account #</th>
+                            <th className="px-4 py-3">Name</th>
+                            <th className="px-4 py-3">Previous Reading</th>
+                            <th className="px-4 py-3">Current Reading</th>
+                            <th className="px-4 py-3">Usage</th>
+                            <th className="px-4 py-3">Site</th>
+                            <th className="px-4 py-3">Month/Year</th>
                           </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                          {paginatedReadings.length === 0 ? (
+                            <tr>
+                              <td colSpan={8} className="px-4 py-6 text-center text-gray-500">
+                                No meter readings found for the selected due date
+                              </td>
+                            </tr>
+                          ) : (
+                            paginatedReadings.map(reading => {
+                              const usage = reading.currentReading - reading.previousReading;
+                              return (
+                                <tr key={reading.id} className="border-t hover:bg-gray-50">
+                                  <td className="px-4 py-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedReadings.includes(reading.id || '')}
+                                      onChange={() => reading.id && handleSelectReading(reading.id)}
+                                      className="rounded text-blue-600 focus:ring-blue-500"
+                                      disabled={!reading.id}
+                                    />
+                                  </td>
+                                  <td className="px-4 py-2">{reading.accountNumber}</td>
+                                  <td className="px-4 py-2 font-medium">{reading.name}</td>
+                                  <td className="px-4 py-2">{reading.previousReading}</td>
+                                  <td className="px-4 py-2">{reading.currentReading}</td>
+                                  <td className="px-4 py-2">
+                                    <span className={`inline-flex px-2 py-1 text-xs rounded-full ${usage > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                      {usage}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-2">{formatSiteName(reading.site)}</td>
+                                  <td className="px-4 py-2">{`${reading.month}/${reading.year}`}</td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                      {/* Pagination controls */}
+                      <div className="flex flex-col sm:flex-row justify-between items-center mt-4 text-sm text-gray-500 gap-3 px-2">
+                        <div className="flex items-center gap-3">
+                          <span>
+                            Showing {total === 0 ? 0 : start + 1} - {Math.min(total, end)} of {total} meter readings with due date:{" "}
+                            {billingData.dueDate ? formatToDDMMYYYY(billingData.dueDate) : ""}                          </span>
+                          <label className="flex items-center gap-2">
+                            <span>Page size</span>
+                            <select
+                              value={readingsPageSize}
+                              onChange={(e) => { setReadingsPageSize(Number(e.target.value)); setReadingsPage(1); }}
+                              className="border rounded px-2 py-1"
+                            >
+                              <option value={5}>5</option>
+                              <option value={10}>10</option>
+                              <option value={25}>25</option>
+                              <option value={50}>50</option>
+                            </select>
+                          </label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            className="px-3 py-1 border rounded disabled:opacity-50"
+                            onClick={() => setReadingsPage(1)}
+                            disabled={readingsPage === 1}
+                          >
+                            First
+                          </button>
+                          <button
+                            className="px-3 py-1 border rounded disabled:opacity-50"
+                            onClick={() => setReadingsPage(Math.max(1, readingsPage - 1))}
+                            disabled={readingsPage === 1}
+                          >
+                            Prev
+                          </button>
+                          <span className="px-2">Page {readingsPage} of {totalPages}</span>
+                          <button
+                            className="px-3 py-1 border rounded disabled:opacity-50"
+                            onClick={() => setReadingsPage(Math.min(totalPages, readingsPage + 1))}
+                            disabled={readingsPage === totalPages}
+                          >
+                            Next
+                          </button>
+                          <button
+                            className="px-3 py-1 border rounded disabled:opacity-50"
+                            onClick={() => setReadingsPage(totalPages)}
+                            disabled={readingsPage === totalPages}
+                          >
+                            Last
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             )}
 
-            <div className="mt-4 text-sm text-gray-600">
-              Showing {filteredReadings.length} meter readings with due date:{" "}
-              {billingData.dueDate ? formatToDDMMYYYY(billingData.dueDate) : ""}
-            </div>
+
           </div>
           {allMeterReadings.length > 0 && (
             <div className="mt-10 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded shadow">
