@@ -2178,11 +2178,7 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
                             {verification?.paymentDate ? formatDate(verification.paymentDate) : "N/A"}
                           </TableCell>
                           <TableCell>{verification?.paymentMethod || "N/A"}</TableCell>
-                          <TableCell>
-                            {verification?.submissionDateTime
-                              ? formatDateTime(verification.submissionDateTime)
-                              : "N/A"}
-                          </TableCell>
+
                           <TableCell>
                             {verification.paymentProofUrl ? (
                               <Button
@@ -2257,12 +2253,6 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
                   <div>
                     <Label className="text-sm text-gray-500">Payment Date</Label>
                     <p className="font-medium">{formatDate(selectedVerification.paymentDate)}</p>
-                  </div>
-                  <div>
-                    <Label className="text-sm text-gray-500">Submitted At</Label>
-                    <p className="font-medium">
-                      {new Date(selectedVerification.submissionDateTime!).toLocaleString()}
-                    </p>
                   </div>
                 </div>
                 <div className="mt-4">

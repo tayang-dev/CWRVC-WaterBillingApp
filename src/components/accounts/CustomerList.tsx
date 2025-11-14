@@ -560,7 +560,10 @@ const handleDeleteCustomer = async () => {
 
 // Update SCF schema to include amount
 const scfSchema = z.object({
-  amount: z.number().min(1, { message: "SCF amount must be at least ₱1." }),
+  amount: z
+  .number()
+  .min(0, { message: "SCF amount must be at least ₱0." })
+  .max(99999, { message: "SCF amount cannot exceed ₱99,999." }),
 });
 
   // SCF Dialog Component
@@ -568,13 +571,18 @@ const scfSchema = z.object({
     const form = useForm<z.infer<typeof scfSchema>>({
       resolver: zodResolver(scfSchema),
       defaultValues: {
-        amount: 1,
+        amount: 0,
       },
     });
 
     // Add confirmation state
     const [showConfirm, setShowConfirm] = useState(false);
     const [pendingData, setPendingData] = useState<z.infer<typeof scfSchema> | null>(null);
+    
+    // Reset form whenever scfCustomer changes so input is prefilled with existing scfAmount
+    useEffect(() => {
+      form.reset({ amount: scfCustomer?.scfAmount ?? 0 });
+    }, [scfCustomer]);
 
     const onSubmit = (data: z.infer<typeof scfSchema>) => {
       setPendingData(data);
@@ -589,9 +597,10 @@ const handleConfirmedSubmit = async () => {
 
   try {
     // Update customer's scfAmount field only (no SCF collection)
+    // Replace customer's scfAmount with the entered value (allows setting to 0)
     const customerRef = doc(db, "customers", scfCustomer.id);
     await updateDoc(customerRef, {
-      scfAmount: (scfCustomer.scfAmount ?? 0) + pendingData.amount
+      scfAmount: pendingData.amount
     });
 
     // Reset everything
@@ -649,9 +658,19 @@ const handleConfirmedSubmit = async () => {
                   <FormControl>
                     <Input
                       type="number"
-                      min={1}
+                      min={0}
+                      max={99999}
                       value={field.value}
-                      onChange={e => field.onChange(Number(e.target.value))}
+                      onChange={(e) => {
+                        // Coerce to number and clamp between 0 and 99999
+                        const raw = e.target.value === "" ? "" : Number(e.target.value);
+                        if (raw === "") {
+                          field.onChange(0);
+                          return;
+                        }
+                        const clamped = Math.max(0, Math.min(99999, Math.floor(raw)));
+                        field.onChange(clamped);
+                      }}
                     />
                   </FormControl>
                   <FormMessage />

@@ -10,7 +10,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { collection, query, orderBy, getDocs } from "firebase/firestore";
+import { collection, query, orderBy, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "../../lib/firebase"; // Ensure correct path to `firebase.ts`
 
 import {
@@ -32,6 +32,7 @@ interface CustomerDetailsProps {
     phone: string;
     address: string;
     accountNumber: string;
+    meterNumber?: string;
     status: "active" | "inactive" | "pending";
     joinDate: string;
     lastBillingDate?: string;
@@ -57,6 +58,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
     phone: "(555) 123-4567",
     address: "123 Main St, Anytown, USA 12345",
     accountNumber: "ACC-10001",
+    meterNumber: "",
     status: "active",
     joinDate: "2022-05-15",
     lastBillingDate: "",
@@ -65,6 +67,7 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
   },
   billingHistory = [],
 }) => {
+  const [fullCustomer, setFullCustomer] = useState<CustomerDetailsProps["customer"] | undefined>(customer);
   const [isGenerateBillDialogOpen, setIsGenerateBillDialogOpen] = useState(false);
   const [customerBills, setCustomerBills] = useState(billingHistory);
   const [loading, setLoading] = useState(true);
@@ -75,6 +78,48 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
     lastPaymentDate: "",
     averageUsage: 0,
   });
+
+    useEffect(() => {
+    // Debug: inspect incoming customer object to verify meterNumber
+    console.log("CustomerDetails received customer:", customer);
+  }, [customer]);
+
+  // Fetch the full customer document by id when a customer id is provided.
+  useEffect(() => {
+    if (!customer?.id) return;
+    let cancelled = false;
+    const fetchCustomer = async () => {
+      try {
+        const ref = doc(db, "customers", customer.id);
+        const snap = await getDoc(ref);
+        if (!snap.exists() || cancelled) return;
+        const data = snap.data();
+        setFullCustomer({
+          id: snap.id,
+           name: data.name ?? customer.name,
+          email: data.email ?? customer.email,
+          phone: data.phone ?? customer.phone,
+          address: data.address ?? customer.address,
+          accountNumber: data.accountNumber ?? customer.accountNumber,
+          meterNumber: data.meterNumber ?? customer.meterNumber,
+          status: data.status ?? customer.status,
+          joinDate: data.joinDate ?? customer.joinDate,
+          lastBillingDate: data.lastBillingDate ?? customer.lastBillingDate,
+          lastReading: data.lastReading ?? customer.lastReading,
+          amountDue: data.amountDue ?? customer.amountDue,
+        });
+      } catch (err) {
+        console.error("Error fetching full customer:", err);
+      }
+    };
+    fetchCustomer();
+    return () => {
+      cancelled = true;
+    };
+  }, [customer?.id]);
+
+  // Use the fetched customer if available, otherwise fall back to the prop
+  const displayCustomer = fullCustomer ?? customer;
 
   useEffect(() => {
     const fetchCustomerBills = async () => {
@@ -239,6 +284,10 @@ const CustomerDetails: React.FC<CustomerDetailsProps> = ({
               <div className="flex justify-between">
                 <span className="text-sm text-gray-500">Account #</span>
                 <span>{customer.accountNumber}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-500">Meter #</span>
+                <span>{(displayCustomer?.meterNumber && displayCustomer.meterNumber.trim()) || "N/A"}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-500">Join Date</span>

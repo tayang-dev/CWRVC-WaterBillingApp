@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
+import { Plus, Edit, Trash } from "lucide-react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,15 @@ interface ServiceRequest {
 
 interface RequestsProps {}
 
+interface Announcement {
+  id?: string;
+  title: string;
+  description: string;
+  dateTime: any;
+  from: string;
+  createdAt?: any;
+}
+
 const Requests = ({}: RequestsProps) => {
   const [serviceRequests, setServiceRequests] = useState<ServiceRequest[]>([]);
   const [filteredRequests, setFilteredRequests] = useState<ServiceRequest[]>([]);
@@ -69,7 +79,19 @@ const Requests = ({}: RequestsProps) => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(10);
-// ...existing code...
+
+  // Announcements state
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [annLoading, setAnnLoading] = useState(true);
+  const [showAnnDialog, setShowAnnDialog] = useState(false);
+  const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
+  const [annTitle, setAnnTitle] = useState("");
+  const [annDescription, setAnnDescription] = useState("");
+  const ANN_FROM = "CWRVC";
+  const [annSaving, setAnnSaving] = useState(false);
+  const [announcementToDelete, setAnnouncementToDelete] = useState<Announcement | null>(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
 
   const location = useLocation();
 
@@ -146,8 +168,116 @@ const Requests = ({}: RequestsProps) => {
     fetchServiceRequests();
   }, []);
 
-  
+  // Fetch announcements from Firestore
+  useEffect(() => {
+    const fetchAnnouncements = async () => {
+      try {
+        const { collection, query, orderBy, getDocs } = await import("firebase/firestore");
+        const { db } = await import("../../lib/firebase");
 
+        const q = query(collection(db, "announcements"), orderBy("createdAt", "desc"));
+        const snap = await getDocs(q);
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          title: d.data().title || "",
+          description: d.data().description || "",
+          dateTime: d.data().createdAt ? d.data().createdAt.toDate() : new Date(),
+          from: d.data().from || ANN_FROM,
+          createdAt: d.data().createdAt || null,
+        }));
+        setAnnouncements(list);
+      } catch (err) {
+        console.error("Error fetching announcements:", err);
+        setAnnouncements([]);
+      } finally {
+        setAnnLoading(false);
+      }
+    };
+
+    fetchAnnouncements();
+  }, []);
+
+  // Add or update announcement
+  const saveAnnouncement = async () => {
+    if (annSaving) return; // guard against double submissions
+    setAnnSaving(true);
+    // validation
+    if (!annTitle.trim()) {
+      setAnnSaving(false);
+      return;
+    }
+    try {
+      const {
+        collection,
+        addDoc,
+        doc,
+        updateDoc,
+        serverTimestamp,
+      } = await import("firebase/firestore");
+      const { db } = await import("../../lib/firebase");
+
+      const payload = {
+        title: annTitle.slice(0, 30),
+        description: annDescription.slice(0, 500),
+        from: ANN_FROM,
+        updatedAt: serverTimestamp(),
+      };
+
+      if (editingAnnouncement && editingAnnouncement.id) {
+        // update
+        await updateDoc(doc(db, "announcements", editingAnnouncement.id), payload);
+      } else {
+        // create
+        await addDoc(collection(db, "announcements"), {
+          ...payload,
+          createdAt: serverTimestamp(),
+        });
+      }
+      // refresh local list (simple refetch)
+      setAnnLoading(true);
+      const { query, orderBy, getDocs } = await import("firebase/firestore");
+      const q = query(collection(db, "announcements"), orderBy("createdAt", "desc"));
+      const snap = await getDocs(q);
+      const list = snap.docs.map((d) => ({
+        id: d.id,
+        title: d.data().title || "",
+        description: d.data().description || "",
+        dateTime: d.data().createdAt ? d.data().createdAt.toDate() : new Date(),
+        from: d.data().from || ANN_FROM,
+      }));
+      setAnnouncements(list);
+      setShowAnnDialog(false);
+      setEditingAnnouncement(null);
+      setAnnTitle("");
+      setAnnDescription("");
+    } catch (err) {
+      console.error("Error saving announcement:", err);
+    } finally {
+      setAnnLoading(false);
+      setAnnSaving(false);
+    }
+  };
+
+  const startEditAnnouncement = (ann: Announcement) => {
+    setEditingAnnouncement(ann);
+    setAnnTitle(ann.title);
+    setAnnDescription(ann.description);
+    setShowAnnDialog(true);
+  };
+
+    const deleteAnnouncement = async (id?: string) => {
+    if (!id) return;
+    try {
+      const { doc, deleteDoc } = await import("firebase/firestore");
+      const { db } = await import("../../lib/firebase");
+      await deleteDoc(doc(db, "announcements", id));
+      setAnnouncements(prev => prev.filter(a => a.id !== id));
+      setAnnouncementToDelete(null);
+      setShowDeleteDialog(false);
+    } catch (err) {
+      console.error("Error deleting announcement:", err);
+    }
+  };
     // Handle tab and request selection from URL (for notification redirection)
     useEffect(() => {
       const searchParams = new URLSearchParams(location.search);
@@ -909,6 +1039,10 @@ const exportToXLSX = () => {
               <FileText className="h-4 w-4 mr-2" />
               Service Requests
             </TabsTrigger>
+            <TabsTrigger value="announcements">
+            <Plus className="h-4 w-4 mr-2" />
+            Announcements
+          </TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
@@ -1295,6 +1429,185 @@ const exportToXLSX = () => {
                 
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="announcements" className="space-y-6">
+            <Card className="shadow-sm">
+              <CardHeader className="border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <CardTitle className="text-2xl">Announcements</CardTitle>
+                    <CardDescription className="mt-1">Create, edit or remove public announcements</CardDescription>
+                  </div>
+                  <Button 
+                    onClick={() => { setEditingAnnouncement(null); setAnnTitle(""); setAnnDescription(""); setShowAnnDialog(true); }}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    <Plus className="mr-2 h-4 w-4" /> New Announcement
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-6">
+                {annLoading ? (
+                  <div className="py-12 text-center">
+                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-3"></div>
+                    <p className="text-gray-600">Loading announcements...</p>
+                  </div>
+                ) : announcements.length === 0 ? (
+                  <div className="py-12 text-center">
+                    <div className="mx-auto w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                      <Plus className="h-8 w-8 text-gray-400" />
+                    </div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-1">No announcements yet</h3>
+                    <p className="text-gray-500 text-sm">Get started by creating your first announcement</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {announcements.map((a) => (
+                      <div 
+                        key={a.id} 
+                        className="group p-5 bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all duration-200"
+                      >
+                        <div className="flex justify-between items-start gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-3 mb-2">
+                              <h4 className="font-semibold text-lg text-gray-900">{a.title}</h4>
+                              <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-full whitespace-nowrap">
+                                {new Date(a.dateTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-700 leading-relaxed mb-3">
+                              {a.description.length > 200 ? a.description.slice(0,200) + "…" : a.description}
+                            </p>
+                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                              <div className="flex items-center gap-1">
+                                <span className="font-medium">From:</span>
+                                <span>{a.from}</span>
+                              </div>
+                              <span>•</span>
+                              <span>{new Date(a.dateTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
+                          </div>
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={() => startEditAnnouncement(a)}
+                              className="hover:bg-blue-50 hover:text-blue-700"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={() => { setAnnouncementToDelete(a); setShowDeleteDialog(true); }}
+                              className="hover:bg-red-50 hover:text-red-700"
+                            >
+                              <Trash className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Announcement Dialog (create/edit) */}
+            <Dialog open={showAnnDialog} onOpenChange={setShowAnnDialog}>
+              <DialogContent className="sm:max-w-[600px]">
+                <DialogHeader className="pb-4 border-b">
+                  <DialogTitle className="text-xl">
+                    {editingAnnouncement ? "Edit Announcement" : "Create New Announcement"}
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-5 mt-6">
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="block text-sm font-medium text-gray-900">Title</label>
+                      <span className="text-xs text-gray-500">{annTitle.length}/30</span>
+                    </div>
+                    <input
+                      value={annTitle}
+                      onChange={(e) => setAnnTitle(e.target.value.slice(0,30))}
+                      maxLength={30}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Enter announcement title"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="block text-sm font-medium text-gray-900">Description</label>
+                      <span className="text-xs text-gray-500">{annDescription.length}/500</span>
+                    </div>
+                    <textarea
+                      value={annDescription}
+                      onChange={(e) => setAnnDescription(e.target.value.slice(0,500))}
+                      maxLength={500}
+                      rows={6}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                      placeholder="Enter announcement description"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => { setShowAnnDialog(false); setEditingAnnouncement(null); }}
+                    className="px-4"
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    onClick={saveAnnouncement} 
+                    disabled={!annTitle.trim() || annSaving}
+                    className="px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300"
+                  >
+                    {editingAnnouncement ? "Update Announcement" : "Create Announcement"}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+           {/* Delete confirmation dialog */}
+           <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+             <DialogContent className="sm:max-w-[420px]">
+               <DialogHeader>
+                 <DialogTitle>Delete Announcement</DialogTitle>
+               </DialogHeader>
+                <div className="mt-2 text-sm text-gray-700">
+                 Are you sure you want to delete this announcement?
+                 <div className="mt-3 p-3 bg-gray-50 rounded">
+                  <div className="font-medium">{announcementToDelete?.title}</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    From: {announcementToDelete?.from}{" "}
+                    {announcementToDelete?.dateTime ? (
+                      <>• {new Date(announcementToDelete.dateTime).toLocaleString()}</>
+                    ) : null}
+                   </div>
+                 </div>
+               </div>
+               <div className="flex justify-end gap-2 mt-4">
+                 <Button variant="outline" onClick={() => { setShowDeleteDialog(false); setAnnouncementToDelete(null); }}>
+                   Cancel
+                 </Button>
+                 <Button
+                   className="bg-red-600 hover:bg-red-700"
+                   onClick={async () => {
+                     if (announcementToDelete?.id) {
+                       await deleteAnnouncement(announcementToDelete.id);
+                     } else {
+                       setShowDeleteDialog(false);
+                       setAnnouncementToDelete(null);
+                     }
+                   }}
+                 >
+                   Delete
+                 </Button>
+               </div>
+             </DialogContent>
+           </Dialog>
           </TabsContent>
         </Tabs>
         
