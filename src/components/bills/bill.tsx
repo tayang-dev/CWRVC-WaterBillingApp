@@ -883,9 +883,11 @@ const handleCreateBills = async (readings: MeterReading[]) => {
           });
         }
 
-        // Commit batch every 500 writes
-        if (batchCount === 500) {
+        // Commit batch every 10 writes 
+        if (batchCount >= 10) {
           await batch.commit();
+          // notify progress after each batch commit
+          showNotification(`Created ${successCount} bills so far (${processedReadingIds.length}/${sortedReadings.length})`, "info");
           batch = writeBatch(db);
           batchCount = 0;
         }
