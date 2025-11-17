@@ -14,290 +14,6 @@ const formatCurrency = (amount) => {
   }).format(amount);
 };
 
-// Print a single bill by ID
-const handlePrintSingleBill = async (billId: string) => {
-  const printContent = document.getElementById(billId);
-  if (!printContent) return;
-
-  // cast so TS knows we have HTMLElement APIs
-  const original = printContent as HTMLElement;
-  const clone = original.cloneNode(true) as HTMLElement;
-
-  // Convert any <canvas> (QR from qrcode.react) in the original to data URLs
-  // and replace corresponding canvases in the clone with <img> so bitmap is preserved in print.
-  try {
-    const originalCanvases = Array.from(original.querySelectorAll<HTMLCanvasElement>("canvas"));
-    const cloneCanvases = Array.from(clone.querySelectorAll<HTMLCanvasElement>("canvas"));
-
-    originalCanvases.forEach((c, i) => {
-      try {
-        const dataUrl = c.toDataURL("image/png");
-        const img = document.createElement("img");
-        img.src = dataUrl;
-        img.style.maxWidth = c.width ? `${c.width}px` : "128px";
-        img.style.height = "auto";
-        const target = cloneCanvases[i];
-        if (target && target.parentNode) {
-          target.parentNode.replaceChild(img, target);
-        }
-      } catch (err) {
-        // Non-fatal: leave canvas as-is in clone if conversion fails
-        console.warn("Failed to convert canvas to image for printing", err);
-      }
-    });
-  } catch (err) {
-    console.warn("Error while preparing canvases for print:", err);
-  }
-
-  const printWindow = window.open("", "_blank", "width=900,height=700");
-  if (!printWindow) return;
-
-  printWindow.document.write(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Water Bill</title>
-        <style>
-          @page {
-            size: A4 portrait;
-            margin: 0.5cm;
-          }
-          
-          * {
-            box-sizing: border-box;
-          }
-          
-          body { 
-            margin: 0; 
-            padding: 0; 
-            font-family: Arial, sans-serif;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-            font-size: 11px;
-          }
-          
-          img { 
-            max-width: 100%; 
-            height: auto;
-          }
-          
-          table { 
-            border-collapse: collapse; 
-            width: 100%; 
-          }
-          
-          th, td { 
-            border: 1px solid black; 
-            padding: 5px; 
-            text-align: center;
-            font-size: 10px;
-          }
-          
-          th {
-            background-color: #efefef !important;
-            font-weight: bold;
-          }
-          
-          /* Layout utilities */
-          .flex { display: flex; }
-          .flex-col { flex-direction: column; }
-          .flex-row { flex-direction: row; }
-          .items-center { align-items: center; }
-          .items-end { align-items: flex-end; }
-          .items-start { align-items: flex-start; }
-          .justify-between { justify-content: space-between; }
-          .justify-center { justify-content: center; }
-          .gap-2 { gap: 0.5rem; }
-          .gap-3 { gap: 0.75rem; }
-          .space-y-1 > * + * { margin-top: 0.25rem; }
-          
-          /* Spacing */
-          .mt-2 { margin-top: 0.5rem; }
-          .mt-3 { margin-top: 0.75rem; }
-          .mt-4 { margin-top: 1rem; }
-          .mb-2 { margin-bottom: 0.5rem; }
-          .mb-3 { margin-bottom: 0.75rem; }
-          .pb-2 { padding-bottom: 0.5rem; }
-          .pt-2 { padding-top: 0.5rem; }
-          .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
-          .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
-          .p-3 { padding: 0.75rem; }
-          
-          /* Width utilities */
-          .w-full { width: 100%; }
-          
-          /* Border */
-          .border { border: 1px solid black; }
-          .border-2 { border-width: 2px; }
-          .border-t-2 { border-top-width: 2px; }
-          .border-b-2 { border-bottom-width: 2px; }
-          .border-black { border-color: black; }
-          
-          /* Text */
-          .text-center { text-align: center; }
-          .text-right { text-align: right; }
-          .text-xs { font-size: 9px; }
-          .text-sm { font-size: 10px; }
-          .text-base { font-size: 11px; }
-          .text-lg { font-size: 14px; }
-          .text-xl { font-size: 16px; }
-          .text-2xl { font-size: 22px; }
-          .font-bold { font-weight: 700; }
-          .font-semibold { font-weight: 600; }
-          .text-gray-600 { color: #4b5563; }
-          
-          /* List */
-          .list-decimal { list-style-type: decimal; }
-          
-          /* Flex utilities */
-          .flex-1 { flex: 1; }
-          
-          /* Container */
-          .bill-container {
-            width: 100%;
-            max-width: 21cm;
-            margin: 0 auto;
-            border: 2px solid black;
-            padding: 12px;
-            background: white;
-          }
-          
-          /* Header section */
-          .header-section {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 2px solid black;
-            padding-bottom: 10px;
-            margin-bottom: 12px;
-          }
-          
-          .logo-company {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex: 1;
-          }
-          
-          .logo {
-            width: 70px;
-            height: 70px;
-            object-fit: contain;
-          }
-          
-          .company-info {
-            text-align: center;
-            flex: 1;
-          }
-          
-          .bill-number-section {
-            text-align: right;
-            min-width: 180px;
-          }
-          
-          /* Customer and readings section */
-          .customer-readings {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 10px;
-            align-items: flex-start;
-          }
-          
-          .customer-info-section {
-            flex: 1;
-          }
-          
-          .readings-table-wrapper {
-            width: 420px;
-          }
-          
-          /* Billing main section */
-          .billing-main {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 10px;
-            align-items: flex-start;
-          }
-          
-          .billing-table-wrapper {
-            flex: 1;
-          }
-          
-          .rates-box {
-            width: 320px;
-          }
-          
-          /* Footer credentials section */
-          .footer-section {
-            margin-top: 10px;
-            border-top: 2px solid black;
-            padding-top: 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 10px;
-          }
-          
-          .credentials-box {
-            text-align: center;
-            padding: 8px;
-            border: 1px solid black;
-            flex: 1;
-          }
-          
-          .qr-box {
-            text-align: center;
-          }
-          
-          .qr-image {
-            width: 120px;
-            height: 120px;
-          }
-          
-          .receipt-note {
-            text-align: center;
-            font-weight: 700;
-            margin: 8px 0;
-            padding: 6px;
-            border-top: 1px solid black;
-            border-bottom: 1px solid black;
-          }
-          
-          /* Hide print button */
-          .print\\:hidden {
-            display: none !important;
-          }
-          
-          @media print {
-            body {
-              margin: 0;
-              padding: 0;
-            }
-            
-            .bill-container {
-              margin: 0;
-              max-width: 100%;
-            }
-            
-            .print\\:hidden {
-              display: none !important;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        ${(clone as HTMLElement).innerHTML}
-        <script>
-          window.onload = function() {
-            setTimeout(function() { window.print(); window.close(); }, 150);
-          }
-        </script>
-      </body>
-    </html>
-  `);
-  printWindow.document.close();
-};
 
 const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills, customersCollection }) => {
   const [ratesConfig, setRatesConfig] = useState(null);
@@ -457,6 +173,272 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills, custo
 
     return { tiers, totalAmount };
   };
+
+  // Print a single bill by ID
+const handlePrintSingleBill = async (billId: string) => {
+  const printContent = document.getElementById(billId);
+  if (!printContent) return;
+
+  // Find the bill data from selectedBills
+  const billIndex = parseInt(billId.replace('bill-', ''));
+  const bill = sortedBills[billIndex];
+  if (!bill) return;
+
+  // Get customer for this bill (using existing function)
+  const customer = getCustomerForBill(bill);
+
+  // Calculate tiers (using existing function)
+  const { tiers } = calculateTieredUsage(bill.waterUsage || 0);
+
+  // Generate QR code
+  let qrDataUrl = "";
+  try {
+    const QRCode = await import("qrcode");
+    const qrPayload = JSON.stringify({
+      billNumber: bill.billNumber || "0000000000",
+      customerName: bill.customerName || "CUSTOMER NAME",
+      amount: (bill.amountWithArrears || 0).toFixed(2),
+      dueDate: bill.dueDate || "01/01/2025",
+      accountNumber: bill.accountNumber || "00-00-0000",
+    });
+    qrDataUrl = await QRCode.default.toDataURL(qrPayload, { 
+      errorCorrectionLevel: "H", 
+      margin: 1, 
+      width: 300 
+    });
+  } catch (err) {
+    console.warn("QR generation failed", err);
+  }
+
+  // Build rates breakdown HTML
+  let ratesTableHtml = "";
+  if (tiers && tiers.length > 0) {
+    ratesTableHtml = `
+      <div style="border:1px solid #000; background:#fff;">
+        <div style="font-weight:700;text-align:center;padding:5px;border-bottom:1px solid #000;background:#efefef;font-size:11px;">Rates Breakdown</div>
+        <table style="width:100%;border-collapse:collapse;font-size:9px;">
+          <thead>
+            <tr>
+              <th style="border:1px solid #000;padding:4px;background:#efefef;">Min</th>
+              <th style="border:1px solid #000;padding:4px;background:#efefef;">Max</th>
+              <th style="border:1px solid #000;padding:4px;background:#efefef;">Rate</th>
+              <th style="border:1px solid #000;padding:4px;background:#efefef;">Value</th>
+              <th style="border:1px solid #000;padding:4px;background:#efefef;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tiers
+              .filter(tier => tier.usage > 0)
+              .map((t: any) => {
+                const maxLabel = t.max === Infinity ? "above" : t.max;
+                const usage = t.usage ?? 0;
+                const amount = t.amount !== undefined ? Number(t.amount).toFixed(2) : Number((usage * (t.rate || 0)).toFixed(2));
+                return `<tr>
+                  <td style="border:1px solid #000;padding:4px;text-align:center;">${t.min}</td>
+                  <td style="border:1px solid #000;padding:4px;text-align:center;">${maxLabel}</td>
+                  <td style="border:1px solid #000;padding:4px;text-align:center;">${Number(t.rate).toFixed(2)}</td>
+                  <td style="border:1px solid #000;padding:4px;text-align:center;">${usage}</td>
+                  <td style="border:1px solid #000;padding:4px;text-align:right;padding-right:6px;">${amount}</td>
+                </tr>`;
+              })
+              .join("")}
+            <tr>
+              <td colspan="4" style="border:1px solid #000;padding:5px;text-align:right;font-weight:700;background:#fafafa;">Total:</td>
+              <td style="border:1px solid #000;padding:5px;text-align:right;font-weight:700;background:#fafafa;padding-right:6px;">${Number(bill.waterChargeBeforeTax || 0).toFixed(2)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+  } else {
+    ratesTableHtml = `<div style="text-align:center;padding:12px;color:#666;border:1px solid #000;">Rates breakdown not available</div>`;
+  }
+
+  // Get credentials (always show for single bill print)
+  const creds = {
+    username: customer?.email || customer?.phone || "N/A",
+    password: bill.accountNumber || "N/A"
+  };
+
+  // Build the bill HTML using the same structure as handlePrintAllReceipts
+  const billHtml = `
+    <div style="max-width:600px;margin:40px auto 60px auto;border:2px solid #000;padding:32px 28px 28px 28px;background:#fff;">
+      <!-- Header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:10px;flex:1;">
+          <img src="${logoImage}" alt="logo" style="width:70px;height:70px;object-fit:contain;" />
+          <div style="text-align:center;font-weight:700;font-size:14px;flex:1;">
+            <div style="font-size:15px;font-weight:700;">CENTENNIAL WATER RESOURCE VENTURE CORPORATION</div>
+            <div style="font-size:10px;font-weight:400;margin-top:2px;">Southville 7, Site 3, Brgy. Sto. Tomas, Calauan, Laguna</div>
+          </div>
+        </div>
+        <div style="text-align:right;min-width:180px;">
+          <div style="font-size:10px;">BILLING STATEMENT NO.</div>
+          <div style="font-size:22px;margin-top:4px;font-weight:700;">${bill.billNumber || "0000000000"}</div>
+        </div>
+      </div>
+
+      <!-- Customer Info and Readings -->
+      <div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-start;">
+        <div style="flex:1;">
+          <div style="font-weight:700;font-size:16px;margin-bottom:4px;">${bill.customerName || "CUSTOMER NAME"}</div>
+          <div style="font-size:10px;color:#333;">${bill.customerAddress || "Address information"}</div>
+        </div>
+        <div style="width:420px;">
+          <table style="width:100%;border-collapse:collapse;font-size:10px;">
+            <thead>
+              <tr>
+                <th style="border:1px solid #000;padding:5px;background:#efefef;text-align:center;">Current<br/>Reading</th>
+                <th style="border:1px solid #000;padding:5px;background:#efefef;text-align:center;">Previous<br/>Reading</th>
+                <th style="border:1px solid #000;padding:5px;background:#efefef;text-align:center;">Consumption</th>
+                <th style="border:1px solid #000;padding:5px;background:#efefef;text-align:center;">Billing Month</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:700;font-size:12px;">${bill.meterReading?.current || 0}</td>
+                <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:700;font-size:12px;">${bill.meterReading?.previous || 0}</td>
+                <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:700;font-size:12px;">${bill.waterUsage || 0}</td>
+                <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:700;font-size:11px;">${bill.billingPeriod || ""}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Billing Main Section -->
+      <div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-start;">
+        <div style="flex:1;">
+          <table style="width:100%;border-collapse:collapse;font-size:10px;">
+            <thead>
+              <tr>
+                <th style="border:1px solid #000;padding:5px;background:#efefef;">Billing<br/>Period</th>
+                <th style="border:1px solid #000;padding:5px;background:#efefef;">Water</th>
+                <th style="border:1px solid #000;padding:5px;background:#efefef;">Tax</th>
+                <th style="border:1px solid #000;padding:5px;background:#efefef;">SCF</th>
+                <th style="border:1px solid #000;padding:5px;background:#efefef;">Senior<br/>Discount</th>
+                <th style="border:1px solid #000;padding:5px;background:#efefef;">Arrears</th>
+                <th style="border:1px solid #000;padding:5px;background:#efefef;">Over<br/>Payment</th>
+                <th style="border:1px solid #000;padding:5px;background:#efefef;">Amount<br/>Due</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="border:1px solid #000;padding:5px;text-align:center;font-size:9px;">${bill.billingPeriod || ""}</td>
+                <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:600;">${Number(bill.waterChargeBeforeTax || 0).toFixed(2)}</td>
+                <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:600;">${Number(bill.tax || 0).toFixed(2)}</td>
+                <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:600;">${Number(bill.scfApplied || 0).toFixed(2)}</td>
+                <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:600;">${Number(bill.seniorDiscount || 0).toFixed(2)}</td>
+                <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:600;">${Number(bill.arrears || 0).toFixed(2)}</td>
+                <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:600;">${Number(bill.appliedOverpayment || 0).toFixed(2)}</td>
+                <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:800;font-size:11px;">${Number(bill.amountWithArrears || 0).toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="width:320px;">
+          ${ratesTableHtml}
+        </div>
+      </div>
+
+      <!-- Account Details -->
+      <div style="margin-bottom:10px;">
+        <table style="width:100%;border-collapse:collapse;font-size:10px;">
+          <thead>
+            <tr>
+              <th style="border:1px solid #000;padding:5px;background:#efefef;">Account#</th>
+              <th style="border:1px solid #000;padding:5px;background:#efefef;">Meter#</th>
+              <th style="border:1px solid #000;padding:5px;background:#efefef;">Due Date</th>
+              <th style="border:1px solid #000;padding:5px;background:#efefef;">Penalty</th>
+              <th style="border:1px solid #000;padding:5px;background:#efefef;">Amount After Due Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:600;">${bill.accountNumber || "00-00-0000"}</td>
+              <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:600;">${bill.meterNumber || "00000000"}</td>
+              <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:600;">${bill.dueDate || "01/01/2025"}</td>
+              <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:600;">${Number(bill.penalty || 0).toFixed(2)}</td>
+              <td style="border:1px solid #000;padding:5px;text-align:center;font-weight:800;font-size:11px;">${Number(bill.amountAfterDue || 0).toFixed(2)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Notes -->
+      <div style="font-size:10px;line-height:1.3;margin-bottom:10px;">
+        <div style="font-weight:700;margin-bottom:6px;font-size:11px;">MAHALAGANG PAALALA TUNGKOL SA INYONG WATER BILL:</div>
+        <ol style="margin:0;padding-left:18px;">
+          <li>HUWAG PONG KALILIMUTAN DALHIN ANG INYONG BILLING STATEMENT KAPAG KAYO AY MAGBABAYAD</li>
+          <li>PARA MAIWASAN ANG PAGBABAYAD NG MULTA, MAGBAYAD PO NG INYONG BILLING STATEMENT NG MAS MAAGA O DI LALAGPAS SA INYONG DUE DATE.</li>
+          <li>ANG SERBISYO PO NG INYONG TUBIG AY PUPUTULIN NG WALANG PAALALA KUNG DI KAYO MAKAPAGBAYAD SA LOOB NG LIMANG(5) ARAW PAGKATAPOS NG DUE DATE.</li>
+        </ol>
+      </div>
+
+      <div style="text-align:center;font-weight:700;margin:8px 0;padding:6px;border-top:1px solid #000;border-bottom:1px solid #000;">
+        "THIS WILL SERVE AS YOUR OFFICIAL RECEIPT WHEN MACHINE VALIDATED"
+      </div>
+
+      <!-- Footer with Credentials and QR -->
+      <div style="display:flex;gap:10px;margin-top:10px;align-items:center;justify-content:space-between;">
+        <div style="text-align:center;padding:8px;border:1px solid #000;flex:1;">
+          <div style="font-weight:700;font-size:11px;margin-bottom:6px;">INITIAL LOGIN CREDENTIALS</div>
+          <div style="font-size:10px;margin:4px 0;"><span style="font-weight:600;">username:</span> ${creds.username}</div>
+          <div style="font-size:10px;margin:4px 0;"><span style="font-weight:600;">password:</span> ${creds.password}</div>
+          <div style="font-size:9px;color:#666;margin-top:6px;">Please change your password after your first login for security purposes.</div>
+        </div>
+        
+        <div style="text-align:center;">
+          <img src="${qrDataUrl || ""}" alt="qr" style="width:120px;height:120px;object-fit:contain;" />
+          <div style="font-size:9px;color:#666;margin-top:4px;">Scan to view bill details</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Print styles
+  const printStyles = `
+    <style>
+      @page { size: A4 portrait; margin: 0.5cm; }
+      html, body { height:100%; margin:0; padding:0; background:#fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { font-family: Arial, Helvetica, sans-serif; font-size:11px; color:#000; }
+      @media print {
+        body { background: #fff; }
+        .print-hidden { display: none !important; }
+      }
+    </style>
+  `;
+
+  // Open print window
+  const printWindow = window.open("", "_blank", "width=900,height=1200");
+  if (!printWindow) {
+    alert("Unable to open print window. Please allow pop-ups.");
+    return;
+  }
+
+  printWindow.document.write(`
+    <html>
+      <head>
+        <title>Water Bill</title>
+        ${printStyles}
+      </head>
+      <body>
+        <div style="margin:0;padding:0;">
+          ${billHtml}
+        </div>
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+              window.close();
+            }, 400);
+          }
+        </script>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+};
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
