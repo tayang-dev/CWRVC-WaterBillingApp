@@ -500,6 +500,7 @@ const Feedbacks: React.FC = () => {
                             onSelect={(date) =>
                               setFilters({ ...filters, dateFrom: date })
                             }
+                            disabled={(date) => date > new Date()}
                             initialFocus
                           />
                         </PopoverContent>
@@ -531,6 +532,12 @@ const Feedbacks: React.FC = () => {
                             onSelect={(date) =>
                               setFilters({ ...filters, dateTo: date })
                             }
+                            disabled={(date) => {
+                              const today = new Date();
+                              today.setHours(23, 59, 59, 999);
+                              // Disable if date is in the future or before From Date
+                              return date > today || (filters.dateFrom ? date < filters.dateFrom : false);
+                            }}
                             initialFocus
                           />
                         </PopoverContent>
