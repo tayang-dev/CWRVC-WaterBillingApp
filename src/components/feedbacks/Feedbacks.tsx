@@ -218,6 +218,8 @@ const Feedbacks: React.FC = () => {
         (feedback) => feedback.timestamp.seconds <= toTimestamp
       );
     }
+
+    result.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
     
     setFilteredFeedback(result);
     // Reset to first page when filters change

@@ -70,6 +70,8 @@ const Reports = ({}: ReportsProps) => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [dateRange, setDateRange] = useState("all");
+  // New: per-card quick range (week | month | all)
+  const [cardRange, setCardRange] = useState<"week" | "month" | "all">("month");
   // New state for status filtering: "all", "resolved", "pending", or "rejected"
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedReport, setSelectedReport] = useState<LeakReport | null>(null);
@@ -317,7 +319,7 @@ const performMarkAsResolved = async (remarks: string) => {
       {
         timestamp: serverTimestamp(),
         accountNumber: selectedReport.accountNumber,
-        description: "Report marked as resolved",
+        description: `Your leak report at ${selectedReport.address} has been marked as resolved.${remarks ? ` Remarks: ${remarks}` : ''}`,
         status: "resolved",
         type: "report",
         verificationId: selectedReport.id,
@@ -360,7 +362,7 @@ const performMarkAsRejected = async (remarks: string) => {
       {
         timestamp: serverTimestamp(),
         accountNumber: selectedReport.accountNumber,
-        description: "Report marked as rejected",
+        description: `Your leak report at ${selectedReport.address} has been marked as rejected.${remarks ? ` Remarks: ${remarks}` : ''}`,
         status: "rejected",
         type: "report",
         verificationId: selectedReport.id,
@@ -1247,28 +1249,43 @@ const exportToXLSX = () => {
 
   const resolvedCount = leakReports.filter((report) => report.resolved).length;
 
-  const getReportDistributionData = (reports: LeakReport[]) => {
-    const data: { date: string; count: number }[] = [];
-    const dateMap: { [key: string]: number } = {};
+
+  // Enhanced: accept an optional range so the card buttons actually change the chart.
+  // range: 'week' => last 7 days, 'month' => last 30 days (default), 'all' => aggregate all time by day
+  const getReportDistributionData = (reports: LeakReport[], range: "week" | "month" | "all" = "month") => {
+    const toISO = (d: Date) => d.toISOString().split("T")[0];
+    const toLabel = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+    // ALL: aggregate all reports by day (sorted)
+    if (range === "all") {
+      const map: Record<string, number> = {};
+      reports.forEach((r) => {
+        const iso = toISO(new Date(r.timestamp));
+        map[iso] = (map[iso] || 0) + 1;
+      });
+      return Object.keys(map)
+        .sort()
+        .map((iso) => ({ date: toLabel(iso), count: map[iso] }));
+    }
+
+    // week -> last 7 days, month -> last 30 days
+    const days = range === "week" ? 6 : 29;
     const today = new Date();
-    for (let i = 29; i >= 0; i--) {
+    const dateMap: Record<string, number> = {};
+    for (let i = days; i >= 0; i--) {
       const d = new Date();
       d.setDate(today.getDate() - i);
-      const key = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      dateMap[key] = 0;
+      dateMap[toISO(d)] = 0;
     }
+
     reports.forEach((report) => {
-      const d = new Date(report.timestamp);
-      const key = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      if (key in dateMap) {
-        dateMap[key]++;
-      }
+      const iso = toISO(new Date(report.timestamp));
+      if (iso in dateMap) dateMap[iso]++;
     });
-    for (const key in dateMap) {
-      data.push({ date: key, count: dateMap[key] });
-    }
-    return data;
+
+    return Object.keys(dateMap).map((iso) => ({ date: toLabel(iso), count: dateMap[iso] }));
   };
+
 
   // Derived pagination values
   const totalPages = Math.max(1, Math.ceil(filteredReports.length / pageSize));
@@ -1332,7 +1349,7 @@ const exportToXLSX = () => {
               <Card className="shadow-lg rounded-lg text-center">
                 <CardHeader className="pb-2 border-b">
                   <CardTitle className="text-base font-medium">With Images</CardTitle>
-                  <CardDescription className="text-sm">Visual documentation</CardDescription>
+                  <CardDescription className="text-sm">Image total</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-green-600">{stats.withImages}</div>
@@ -1384,25 +1401,72 @@ const exportToXLSX = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Card className="shadow-lg rounded-lg">
-                <CardHeader>
-                  <CardTitle>Report Distribution</CardTitle>
-                  <CardDescription>Timeline of reports</CardDescription>
+              <Card>
+                <CardHeader >
+                  <div>
+                    <CardTitle>Report Distribution</CardTitle>
+                    <CardDescription>Timeline of reports</CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className={`px-3 py-1 rounded text-sm ${cardRange === "week" ? "bg-blue-600 text-white" : "bg-gray-100"}`}
+                      onClick={() => setCardRange("week")}
+                      aria-label="Last 7 days"
+                    >
+                      7d
+                    </button>
+                    <button
+                      className={`px-3 py-1 rounded text-sm ${cardRange === "month" ? "bg-blue-600 text-white" : "bg-gray-100"}`}
+                      onClick={() => setCardRange("month")}
+                      aria-label="Last 30 days"
+                    >
+                      30d
+                    </button>
+                    <button
+                      className={`px-3 py-1 rounded text-sm ${cardRange === "all" ? "bg-blue-600 text-white" : "bg-gray-100"}`}
+                      onClick={() => setCardRange("all")}
+                      aria-label="All time"
+                    >
+                      All
+                    </button>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="h-60">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={getReportDistributionData(leakReports)}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis allowDecimals={false} />
-                        <Tooltip />
-                        <Line type="monotone" dataKey="count" stroke="#8884d8" />
-                      </LineChart>
+                      {(() => {
+                        // Use the existing getReportDistributionData function unchanged.
+                        // For 'week' we pass only reports from last 7 days so the existing function
+                        // will render counts for its 30-day window with values concentrated in the last 7 days.
+                        const now = new Date();
+                        let reportsForChart = leakReports;
+                        if (cardRange === "week") {
+                          const cutoff = new Date(now);
+                          cutoff.setDate(now.getDate() - 6); // last 7 days (inclusive)
+                          reportsForChart = leakReports.filter(r => new Date(r.timestamp) >= cutoff);
+                        } else if (cardRange === "month") {
+                          // pass all reports - existing function already renders last 30 days
+                          reportsForChart = leakReports;
+                        } else if (cardRange === "all") {
+                          // pass all reports (existing function still draws a 30-day window)
+                          reportsForChart = leakReports;
+                        }
+
+                        return (
+                          <LineChart data={getReportDistributionData(reportsForChart, cardRange)}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="date" />
+                            <YAxis allowDecimals={false} />
+                            <Tooltip />
+                            <Line type="monotone" dataKey="count" stroke="#8884d8" />
+                          </LineChart>
+                        );
+                      })()}
                     </ResponsiveContainer>
                   </div>
                 </CardContent>
               </Card>
+
 
               <Card className="shadow-lg rounded-lg">
                 <CardHeader>

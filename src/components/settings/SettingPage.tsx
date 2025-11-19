@@ -29,9 +29,26 @@ const passwordSchema = z
     currentPassword: z.string().min(6, {
       message: "Current password must be at least 6 characters.",
     }),
-    newPassword: z.string().min(6, {
-      message: "New password must be at least 6 characters.",
-    }),
+    newPassword: z
+      .string()
+      .min(8, {
+        message: "New password must be at least 8 characters.",
+      })
+      .max(30, {
+        message: "New password must not exceed 30 characters.",
+      })
+      .regex(/[A-Z]/, {
+        message: "New password must contain at least one uppercase letter.",
+      })
+      .regex(/[a-z]/, {
+        message: "New password must contain at least one lowercase letter.",
+      })
+      .regex(/[0-9]/, {
+        message: "New password must contain at least one number.",
+      })
+      .regex(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/, {
+        message: "New password must contain at least one special character.",
+      }),
     confirmPassword: z.string().min(6, {
       message: "Confirm password must be at least 6 characters.",
     }),
@@ -159,7 +176,7 @@ const SettingsPage = () => {
                     </Label>
                     <Input
                       id="role"
-                      value={userRole === "admin" ? "Administrator" : "Staff"}
+                      value={userRole === "admin" ? "Administrator" : "Cashier"}
                       disabled
                       className="mt-1"
                     />
@@ -223,9 +240,9 @@ const SettingsPage = () => {
                               className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
                             >
                               {showCurrentPassword ? (
-                                <EyeOff className="h-4 w-4" />
-                              ) : (
                                 <Eye className="h-4 w-4" />
+                              ) : (
+                                <EyeOff className="h-4 w-4" />
                               )}
                             </button>
                           </div>
@@ -256,9 +273,9 @@ const SettingsPage = () => {
                               className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
                             >
                               {showNewPassword ? (
-                                <EyeOff className="h-4 w-4" />
-                              ) : (
                                 <Eye className="h-4 w-4" />
+                              ) : (
+                                <EyeOff className="h-4 w-4" />
                               )}
                             </button>
                           </div>
@@ -291,9 +308,9 @@ const SettingsPage = () => {
                               className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
                             >
                               {showConfirmPassword ? (
-                                <EyeOff className="h-4 w-4" />
-                              ) : (
                                 <Eye className="h-4 w-4" />
+                              ) : (
+                                <EyeOff className="h-4 w-4" />
                               )}
                             </button>
                           </div>
@@ -302,13 +319,34 @@ const SettingsPage = () => {
                       )}
                     />
 
-                    <Button
-                      type="submit"
-                      className="w-full mt-4 bg-blue-600 hover:bg-blue-700"
-                      disabled={isSubmitting}
-                    >
-                      {isSubmitting ? "Changing Password..." : "Change Password"}
-                    </Button>
+                    <div className="flex flex-col sm:flex-row gap-2 mt-4 items-stretch">
+                      <Button
+                        type="submit"
+                        className="w-full sm:flex-1 bg-blue-600 hover:bg-blue-700 flex items-center justify-center gap-2"
+                        disabled={isSubmitting}
+                        aria-label="Change password"
+                      >
+                        {isSubmitting ? "Changing Password..." : "Change Password"}
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full sm:w-auto px-4 py-2 border-gray-300 text-gray-700 hover:bg-gray-50"
+                        disabled={isSubmitting}
+                        onClick={() => {
+                          form.reset();
+                          setSuccessMessage("");
+                          setErrorMessage("");
+                          setShowCurrentPassword(false);
+                          setShowNewPassword(false);
+                          setShowConfirmPassword(false);
+                        }}
+                        aria-label="Clear inputs"
+                      >
+                        Clear Inputs
+                      </Button>
+                    </div>
                   </form>
                 </Form>
               </CardContent>

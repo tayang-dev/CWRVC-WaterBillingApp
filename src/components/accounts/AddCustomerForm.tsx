@@ -85,10 +85,7 @@ const formSchema = z.object({
     .max(3, { message: "Lot cannot exceed 3 characters." })
     .regex(/^[A-Za-z0-9]+$/, "Lot can only contain letters and numbers"),
 })
-.refine((data) => data.email || data.phone, {
-    message: "At least one of Email or Phone is required.",
-    path: ["email"], // Highlight the email field by default
-  });
+
 
 interface AddCustomerFormProps {
   defaultValues?: Partial<z.infer<typeof formSchema>>;

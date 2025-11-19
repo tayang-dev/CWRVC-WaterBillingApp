@@ -333,7 +333,9 @@ const fetchCustomers = async () => {
     }
   }, [archiveDialogOpen]);
 
-    // Restore an archived customer
+
+
+  // Restore an archived customer
   const handleRestoreArchived = async (arch: any) => {
     if (!arch?.id) return;
     // prevent concurrent restores
@@ -341,6 +343,24 @@ const fetchCustomers = async () => {
     setRestoringId(arch.id);
     setIsSubmitting(true);
     try {
+      // Check if account number, meter number, email, or phone already exists in active customers
+      const conflictExists = await checkIfDetailsExist(
+        arch.accountNumber,
+        arch.meterNumber,
+        arch.email,
+        arch.phone,
+        arch.id // Exclude the archived customer itself
+      );
+
+      if (conflictExists) {
+        alert(
+          `Cannot restore ${arch.name || arch.id}. A customer with the same account number, meter number, email, or phone already exists.`
+        );
+        setIsSubmitting(false);
+        setRestoringId(null);
+        return;
+      }
+
       // Prepare data to restore (remove archivedAt)
       const { archivedAt, id, ...rest } = arch;
       const customerRef = doc(db, "customers", arch.id);
@@ -364,6 +384,8 @@ const fetchCustomers = async () => {
       setRestoringId(null);
     }
   };
+
+
 
   // Permanently delete archived customer
   const handlePermanentlyDeleteArchived = async (arch: any) => {
@@ -522,6 +544,7 @@ const handleDeleteCustomer = async () => {
       phone: deletingCustomer.phone ?? null,
       address: deletingCustomer.address ?? `Site ${deletingCustomer.site ?? "3"}, Brgy. Dayap, Calauan, Laguna`,
       site: deletingCustomer.site ?? "site3",
+      isSenior: typeof deletingCustomer.isSenior === "boolean" ? deletingCustomer.isSenior : false,
       block: deletingCustomer.block ?? "",
       lot: deletingCustomer.lot ?? "",
       meterNumber: deletingCustomer.meterNumber ?? "",
@@ -980,8 +1003,8 @@ const handleConfirmedSubmit = async () => {
         <AlertDialogHeader>
           <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
           <AlertDialogDescription>
-            This will permanently delete the customer record for {deletingCustomer?.name}. 
-            This action cannot be undone.
+            This will move the customer <strong>{deletingCustomer?.name}</strong> to the archive.
+            The customer can be restored later from the Archived Customers.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -1172,6 +1195,14 @@ const handleConfirmedSubmit = async () => {
                 (a.site || "").toLowerCase().includes(t)
               );
             });
+
+
+            // Sort by archivedAt date (newest first)
+            filteredArchived.sort((a, b) => {
+             const dateA = (a as any).archivedAt ? new Date((a as any).archivedAt).getTime() : 0;
+             const dateB = (b as any).archivedAt ? new Date((b as any).archivedAt).getTime() : 0;
+             return dateB - dateA;
+           });
 
             const itemsPerPage = 8;
             const totalPages = Math.ceil(filteredArchived.length / itemsPerPage);

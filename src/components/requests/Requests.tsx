@@ -316,7 +316,7 @@ const Requests = ({}: RequestsProps) => {
           (request) =>
             request.serviceId.toLowerCase().includes(term) ||
             request.accountNumber.toLowerCase().includes(term) ||
-            request.subject.toLowerCase().includes(term) ||
+            request.type.toLowerCase().includes(term) ||
             request.email.toLowerCase().includes(term)
         );
       }
@@ -454,7 +454,7 @@ const updateRequestStatus = async (newStatus: string, remarks?: string) => {
       accountNumber: selectedRequest.accountNumber,
       type: selectedRequest.type,
       subject: selectedRequest.subject,
-      description: `Your service request ${selectedRequest.serviceId} is now ${newStatus}.`,
+      description: `Your service request ${selectedRequest.serviceId} is now ${newStatus}.${remarks ? ` Remarks: ${remarks}` : ''}`,
       ...(remarks ? { remarks } : {}),
       email: selectedRequest.email,
       read: false,
@@ -1260,7 +1260,7 @@ const exportToXLSX = () => {
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                       <Input
-                        placeholder="Search by ID, account, or subject..."
+                        placeholder="Search by ID, account, or type..."
                         className="pl-10"
                         value={searchTerm}
                         onChange={handleSearch}
@@ -1336,7 +1336,6 @@ const exportToXLSX = () => {
                           <TableHead>Service ID</TableHead>
                           <TableHead>Account #</TableHead>
                           <TableHead>Type</TableHead>
-                          <TableHead>Subject</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Date</TableHead>
                           <TableHead>Actions</TableHead>
@@ -1348,7 +1347,6 @@ const exportToXLSX = () => {
                             <TableCell className="font-medium">{request.serviceId}</TableCell>
                             <TableCell>{request.accountNumber}</TableCell>
                             <TableCell>{request.type}</TableCell>
-                            <TableCell className="max-w-[200px] truncate">{request.subject}</TableCell>
                             <TableCell>{getStatusBadge(request.status)}</TableCell>
                             <TableCell>{formatDate(request.timestamp)}</TableCell>
                             <TableCell>

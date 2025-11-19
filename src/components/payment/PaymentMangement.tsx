@@ -1098,8 +1098,7 @@ const handleVerifyPayment = async () => {
       return;
     }
 
-    // If verification is rejected (via admin action), handle that case.
-  // ...existing code...
+
 // If verification is rejected (via admin action), handle that case.
 if (verificationStatus === "rejected") {
   // Update the verification document status to "rejected" instead of deleting
@@ -1120,7 +1119,7 @@ if (verificationStatus === "rejected") {
       accountNumber: accountNumber,
       status: "rejected",
       paymentAmount: paymentAmount,
-      description: "Your payment verification has been rejected.",
+      description: `Your payment verification has been rejected.${verificationNotes ? ` Reason: ${verificationNotes}` : ""}`,
       reason: verificationNotes, // <-- Add this line to include the rejection reason
       createdAt: formatNotificationTimestamp(),
     }
@@ -1134,7 +1133,7 @@ if (verificationStatus === "rejected") {
   setIsProcessing(false);
   return;
 }
-// ...existing code...
+
 
     // Process verified payment - work directly with bills
     const billsCollectionRef = collection(db, "bills", accountNumber, "records");
@@ -2334,7 +2333,7 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
               <CardHeader>
                 <CardTitle>Cash Payment</CardTitle>
                 <CardDescription>
-                  Select a customer and create a cash receipt (auto-verified).
+                  Select a customer and create a cash receipt.
                 </CardDescription>
               </CardHeader>
                 <CardContent>
