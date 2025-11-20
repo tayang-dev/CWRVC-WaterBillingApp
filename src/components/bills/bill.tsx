@@ -645,6 +645,9 @@ const handleCreateBills = async (readings: MeterReading[]) => {
       await import("firebase/firestore");
     const { db } = await import("../../lib/firebase");
 
+    // queue notifications to write after bill documents are committed
+    const pendingNotifications: any[] = [];
+
     let currentGlobalBillNumber = await getLatestGlobalBillNumber();
     const processedReadingIds: string[] = [];
 
@@ -876,6 +879,17 @@ const handleCreateBills = async (readings: MeterReading[]) => {
         processedReadingIds.push(reading.id!);
         successCount++;
 
+         pendingNotifications.push({
+         accountNumber: reading.accountNumber,
+         customerId: customer.id,
+         type: "bill_created",
+         message: `A new billing statement (No. ${billNumber}) has been generated for Account No. ${reading.accountNumber}. The current amount due is ₱${Number(currentAmountDue.toFixed(2))}. Please review the statement at your earliest convenience or contact our office if you have any questions.`,
+         billNumber,
+         amount: Number(currentAmountDue.toFixed(2)),
+         createdAt: Timestamp.now(),
+         read: false,
+       });
+
         // Subtract SCF from customer if applied (must be outside batch, as batch only supports one doc per collection)
         if (scfToApply > 0) {
           await updateDoc(customerRef, {
@@ -899,6 +913,15 @@ const handleCreateBills = async (readings: MeterReading[]) => {
 
     if (batchCount > 0) {
       await batch.commit();
+    }
+
+   // Write queued notifications under notifications/{accountNumber}/records
+    try {
+      for (const n of pendingNotifications) {
+        await addDoc(collection(db, "notifications", n.accountNumber, "records"), n);
+      }
+    } catch (err) {
+      console.warn("Failed to write notifications:", err);
     }
 
     setMeterReadings((prev) => prev.filter((reading) => !processedReadingIds.includes(reading.id!)));
