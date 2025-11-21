@@ -37,14 +37,14 @@ const formSchema = z.object({
   firstName: z.string()
     .trim()
     .min(2, { message: "First name must be at least 2 characters." })
-    .max(15, { message: "First name cannot exceed 15 characters." }) // Added max length validation
+    .max(25, { message: "First name cannot exceed 25 characters." }) // Added max length validation
     .regex(/^[A-Za-zÑñ.\- ]+$/, "Only letters (including Ñ, ñ), dot (.), dash (-), and spaces are allowed")
     .refine((val) => val.trim().length > 0, { message: "First name cannot be empty or spaces only." }),
 
   lastName: z.string()
     .trim()
     .min(2, { message: "Last name must be at least 2 characters." })
-    .max(15, { message: "Last name cannot exceed 15 characters." }) // Added max length validation
+    .max(25, { message: "Last name cannot exceed 25 characters." }) // Added max length validation
     .regex(/^[A-Za-zÑñ.\- ]+$/, "Only letters (including Ñ, ñ), dot (.), dash (-), and spaces are allowed")
     .refine((val) => val.trim().length > 0, { message: "Last name cannot be empty or spaces only." }),
 
@@ -91,10 +91,25 @@ interface AddCustomerFormProps {
   defaultValues?: Partial<z.infer<typeof formSchema>>;
   onSubmit?: (data: z.infer<typeof formSchema>) => void;
   onCancel?: () => void;
+  noCard?: boolean;
+    noFooter?: boolean; // NEW: when true, don't render internal footer/buttons
+  setSubmitHandler?: (fn: () => void) => void; // NEW: expose submit function to parent
 }
 
 const handleNumberOnly = (e: React.KeyboardEvent<HTMLInputElement>) => {
-  if (!/^[0-9]$/.test(e.key) && e.key !== "Backspace" && e.key !== "Tab") {
+  // Allow digits and common navigation/control keys
+  const allowedKeys = [
+    "Backspace",
+    "Tab",
+    "ArrowLeft",
+    "ArrowRight",
+    "ArrowUp",
+    "ArrowDown",
+    "Delete",
+    "Home",
+    "End",
+  ];
+  if (!/^[0-9]$/.test(e.key) && !allowedKeys.includes(e.key)) {
     e.preventDefault();
   }
 };
@@ -102,6 +117,9 @@ const handleNumberOnly = (e: React.KeyboardEvent<HTMLInputElement>) => {
 const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
   onSubmit = () => {},
   onCancel = () => {},
+  noCard = false,
+  noFooter = false,
+  setSubmitHandler,
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -115,7 +133,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
       lastName: "",  
       middleInitial: "",
       email: "",
-      phone: "",
+      phone: "09",
       site: "",
       isSenior: false,
       accountNumber: "",
@@ -326,12 +344,39 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
     }
   };
 
-  return (
-    <Card className="w-full max-w-4xl mx-auto bg-white">
-      <CardHeader>
-        <CardTitle className="text-2xl font-bold text-blue-700">Add New Customer</CardTitle>
-        <CardDescription>Fill out the form below to add a new customer to the system.</CardDescription>
-      </CardHeader>
+    // Expose submit handler to parent if requested
+  useEffect(() => {
+    if (setSubmitHandler) {
+      // provide a function that triggers form submission
+      setSubmitHandler(() => {
+        // call react-hook-form submit programmatically
+        form.handleSubmit(handleSubmit)();
+      });
+      // clear on unmount
+      return () => setSubmitHandler(() => {});
+    }
+  }, [setSubmitHandler, form, handleSubmit]);
+
+
+
+  // build footer separately so parent can render footer (used by dialog)
+  const formFooter = (
+    <CardFooter className="flex justify-between border-t p-6">
+      <Button variant="outline" onClick={onCancel} disabled={isSubmitting || isValidatingDetails}>Cancel</Button>
+      <Button 
+        onClick={form.handleSubmit(handleSubmit)} 
+        disabled={isSubmitting || isValidatingDetails} 
+        className="bg-blue-600 hover:bg-blue-700"
+      >
+        {isSubmitting ? "Adding Customer..." : 
+         isValidatingDetails ? "Validating Details..." : "Add Customer"}
+      </Button>
+    </CardFooter>
+  );
+
+  // build the inner content (CardContent + CardFooter) so we can reuse inside Card or plain div
+  const formContent = (
+    
       <CardContent>
         {error && (
           <div className="flex items-center gap-2 p-3 mb-4 text-sm rounded-md bg-red-50 text-red-600">
@@ -346,7 +391,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
             <FormField control={form.control} name="firstName" render={({ field }) => (
                 <FormItem>
                   <FormLabel>First Name <span className="text-red-500">*</span></FormLabel>
-                  <FormControl><Input placeholder="Juan" {...field} /></FormControl>
+                  <FormControl><Input placeholder="Juan" maxLength={25} {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -354,7 +399,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
               <FormField control={form.control} name="lastName" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Last Name <span className="text-red-500">*</span></FormLabel>
-                  <FormControl><Input placeholder="Dela Cruz" {...field} /></FormControl>
+                  <FormControl><Input placeholder="Dela Cruz" maxLength={25} {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -362,7 +407,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
               <FormField control={form.control} name="middleInitial" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Middle Initial (Optional)</FormLabel>
-                  <FormControl><Input placeholder="M" {...field} /></FormControl>
+                  <FormControl><Input placeholder="M" maxLength={2} {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -370,7 +415,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
               <FormField control={form.control} name="email" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Email Address</FormLabel>
-                  <FormControl><Input placeholder="juandelacruz@example.com" {...field} /></FormControl>
+                  <FormControl><Input placeholder="juandelacruz@example.com" maxLength={254} {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -429,7 +474,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
               <FormField control={form.control} name="meterNumber" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Meter Number <span className="text-red-500">*</span></FormLabel>
-                  <FormControl><Input placeholder="Enter meter number" {...field} /></FormControl>
+                  <FormControl><Input placeholder="Enter meter number" maxLength={15} {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -437,7 +482,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
               <FormField control={form.control} name="block" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Block <span className="text-red-500">*</span></FormLabel>
-                  <FormControl><Input placeholder="Block" {...field} /></FormControl>
+                  <FormControl><Input placeholder="Block" maxLength={3} {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -445,7 +490,7 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
               <FormField control={form.control} name="lot" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Lot <span className="text-red-500">*</span></FormLabel>
-                  <FormControl><Input placeholder="Lot" {...field} /></FormControl>
+                  <FormControl><Input placeholder="Lot" maxLength={3} {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -466,17 +511,35 @@ const AddCustomerForm: React.FC<AddCustomerFormProps> = ({
           </form>
         </Form>
       </CardContent>
-      <CardFooter className="flex justify-between border-t p-6">
-        <Button variant="outline" onClick={onCancel} disabled={isSubmitting || isValidatingDetails}>Cancel</Button>
-        <Button 
-          onClick={form.handleSubmit(handleSubmit)} 
-          disabled={isSubmitting || isValidatingDetails} 
-          className="bg-blue-600 hover:bg-blue-700"
-        >
-          {isSubmitting ? "Adding Customer..." : 
-           isValidatingDetails ? "Validating Details..." : "Add Customer"}
-        </Button>
-      </CardFooter>
+  );
+
+  
+
+  // If noCard is true (dialog), render only the inner content but keep styling consistent
+  if (noCard) {
+    return (
+      <div className="w-full">
+        {/* In dialog mode we skip the CardHeader/title to avoid duplicated headings.
+            Wrap content in a rounded container so spacing/scrolling remains good. */}
+        <div className="bg-white rounded-lg overflow-auto max-h-[72vh] border border-gray-100">
+          {formContent}
+          {/* render footer only when allowed */}
+          {!noFooter && formFooter}
+        </div>
+      </div>
+    );
+  }
+
+  // Default: render full Card as before
+  return (
+    <Card className="w-full max-w-4xl mx-auto bg-white">
+      <CardHeader>
+        <CardTitle className="text-2xl font-bold text-blue-700">Add New Customer</CardTitle>
+        <CardDescription>Fill out the form below to add a new customer to the system.</CardDescription>
+      </CardHeader>
+
+      {formContent}
+      {!noFooter && formFooter}
     </Card>
   );
 };

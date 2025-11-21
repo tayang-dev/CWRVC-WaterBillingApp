@@ -40,6 +40,8 @@ const AccountsManagement = ({
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
 
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [dialogSubmitFn, setDialogSubmitFn] = useState<(() => void) | null>(null);
 
 
   // ...existing code...
@@ -1182,7 +1184,7 @@ const handlePrintLoginCredentials = () => {
             {/* Add Customer Button */}
             <Button
               className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
-              onClick={() => setView("add")}
+              onClick={() => setAddDialogOpen(true)}
             >
               <PlusCircle className="h-4 w-4" />
               Add Customer
@@ -1396,6 +1398,88 @@ const handlePrintLoginCredentials = () => {
               )}
             </div>
           </div>
+
+
+          {addDialogOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl border border-gray-200 flex flex-col">
+                <div className="p-6 flex items-center justify-between">
+                  <div className="min-w-0">
+                    <h2 className="text-2xl font-bold text-blue-700">Add New Customer</h2>
+                    <p className="text-gray-600 text-sm mt-1">Fill out the form below to add a new customer.</p>
+                  </div>
+                  <button 
+                    onClick={() => setAddDialogOpen(false)}
+                    className="text-gray-500 hover:text-gray-700 transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Scrollable form area */}
+                <div className="overflow-y-auto max-h-[75vh]">
+                  <AddCustomerForm
+                    onSubmit={(data) => {
+                      // Refresh customer list after adding and close dialog
+                      const fetchCustomers = async () => {
+                        try {
+                          const { collection, getDocs } = await import(
+                            "firebase/firestore"
+                          );
+                          const { db } = await import("../../lib/firebase");
+
+                          const customersCollection = collection(
+                            db,
+                            "customers",
+                          );
+                          const customersSnapshot =
+                            await getDocs(customersCollection);
+
+                          const customersList = customersSnapshot.docs.map(
+                            (doc) => ({
+                              id: doc.id,
+                              ...doc.data(),
+                            }),
+                          );
+                         setCustomers(customersList);
+                        } catch (error) {
+                          console.error("Error fetching customers:", error);
+                        }
+                      };
+
+                      fetchCustomers();
+                      setAddDialogOpen(false);
+                      setView("list");
+                    }}
+                    onCancel={() => setAddDialogOpen(false)}
+                    noCard={true} // compact form for dialog
+                    noFooter={true} // hide internal footer so we can render a small fixed footer
+                    setSubmitHandler={(fn) => setDialogSubmitFn(() => fn)} // capture submit
+                  />
+                </div>
+
+                {/* Compact footer outside the scroll area so it's visible immediately */}
+                <div className="flex justify-end gap-3 p-4 border-t">
+                  <Button 
+                    variant="ghost" 
+                    onClick={() => setAddDialogOpen(false)}
+                    className="text-gray-700"
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    variant="default"
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={() => dialogSubmitFn && dialogSubmitFn()}
+                  >
+                    Add Customer
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
 
         <div className="mt-6 text-center text-sm text-gray-500">

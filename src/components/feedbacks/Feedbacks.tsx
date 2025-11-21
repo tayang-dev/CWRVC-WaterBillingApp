@@ -664,7 +664,10 @@ const Feedbacks: React.FC = () => {
 
         {/* Feedback Detail Modal */}
         <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-          <DialogContent className="sm:max-w-lg">
+          <DialogContent className="sm:max-w-lg"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}>
             {selectedFeedback && (
               <>
                 <DialogHeader>

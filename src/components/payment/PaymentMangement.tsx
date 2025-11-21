@@ -174,7 +174,17 @@ const PaymentManagement = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
 
-
+  const [alertDialog, setAlertDialog] = useState<{
+  isOpen: boolean;
+  title: string;
+  message: string;
+  type: "success" | "error" | "info" | "warning";
+}>({
+  isOpen: false,
+  title: "",
+  message: "",
+  type: "info",
+});
   
   // Payment Method form states
   const [methodType, setMethodType] = useState("");
@@ -349,7 +359,7 @@ setSelectedCashCustomer(null);
 setCashAmount(0);
 setCashPaymentDate(formatPaymentDate(new Date()));
 setCashReferenceNumber(generateReferenceNumber());
-alert("Cash receipt created and verified successfully!");
+showAlert("Success", "Cash receipt created and payment verified successfully.", "success");
 } catch (error: any) {
 setCashError(error.message || "Failed to create cash receipt.");
 } finally {
@@ -799,7 +809,7 @@ const fetchCustomers = async () => {
           const auth = getAuth();
 
           if (!auth.currentUser) {
-            alert("You must be logged in to upload.");
+            showAlert("Error", "You must be logged in to upload.", "error");
             return;
           }
 
@@ -811,7 +821,7 @@ const fetchCustomers = async () => {
           qrUrl = await getDownloadURL(snapshot.ref);
         } catch (error) {
           console.error("Error uploading QR code:", error);
-          alert("Error uploading QR Code. Please check Firebase Storage settings.");
+          showAlert("Error", "Error uploading QR Code. Please check Firebase Storage settings.", "error");
         }
       }
 
@@ -833,11 +843,11 @@ const fetchCustomers = async () => {
 
       setPaymentMethods([...paymentMethods, addedMethod]);
 
-      alert("Payment method added successfully!");
+      showAlert("Success", "Payment method added successfully!", "success");
       setIsAddMethodDialogOpen(false);
     } catch (error) {
       console.error("Error adding payment method:", error);
-      alert("Error adding payment method. Please try again.");
+      showAlert("Error", "Error adding payment method. Please try again.", "error");
     }
   };
 
@@ -869,7 +879,7 @@ const fetchCustomers = async () => {
           const auth = getAuth();
 
           if (!auth.currentUser) {
-            alert("You must be logged in to upload.");
+            showAlert("Error", "You must be logged in to upload.", "error");
             return;
           }
 
@@ -881,7 +891,7 @@ const fetchCustomers = async () => {
           qrUrl = await getDownloadURL(snapshot.ref);
         } catch (error) {
           console.error("Error uploading QR code:", error);
-          alert("Error uploading QR Code. Please check Firebase Storage settings.");
+          showAlert("Error", "Error uploading QR Code. Please check Firebase Storage settings.", "error");
         }
       }
 
@@ -972,7 +982,7 @@ const handleVerifyPayment = async () => {
   try {
     if (!selectedVerification) {
       console.error("❌ Error: No selected verification.");
-      alert("No verification selected. Please choose a payment to verify.");
+      showAlert("Error", "No verification selected. Please choose a payment to verify.", "error");
       setIsProcessing(false);
       return;
     }
@@ -1007,7 +1017,7 @@ const handleVerifyPayment = async () => {
     // Check if accountNumber is valid
     if (!accountNumber) {
       console.error("❌ Error: No account number found.");
-      alert("No account number found. Please check the verification details.");
+      showAlert("Error", "No account number found. Please check the verification details.", "error");
       setIsProcessing(false);
       return;
     }
@@ -1023,9 +1033,7 @@ const handleVerifyPayment = async () => {
       console.error(`❌ No customer found with accountNumber: ${accountNumber}`);
       // Reject the verification if the account number is wrong
       await deleteDoc(doc(db, "paymentVerifications", selectedVerification.id));
-      alert(
-        "No customer found with the provided account number. Payment verification has been rejected."
-      );
+      showAlert("Error", "No customer found with the provided account number. Payment verification has been rejected.", "error");
       setSelectedVerification(null);
       setVerificationStatus("rejected");
       setVerificationNotes("");
@@ -1046,7 +1054,7 @@ const handleVerifyPayment = async () => {
         : selectedVerification.amount;
     if (isNaN(paymentAmount)) {
       console.error("❌ Error: Invalid payment amount.");
-      alert("Invalid payment amount. Please check the payment details.");
+      showAlert("Error", "Invalid payment amount. Please check the payment details.", "error");
       setIsProcessing(false);
       return;
     }
@@ -1071,8 +1079,12 @@ const handleVerifyPayment = async () => {
     });
 
     if (alreadyVerified) {
-      // Delete the current verification doc and create a rejected notification.
-      await deleteDoc(doc(db, "paymentVerifications", selectedVerification.id));
+      // Mark the current verification as rejected (keep doc) and create a notification
+      await updateDoc(doc(db, "paymentVerifications", selectedVerification.id), {
+        status: "rejected",
+        notes: `Reference ${selectedVerification.referenceNumber} already verified`,
+        rejectedAt: new Date().toISOString(),
+      });
       console.log("❌ Payment verification deleted due to duplicate verified reference.");
 
       await addDoc(
@@ -1089,7 +1101,7 @@ const handleVerifyPayment = async () => {
         }
       );
 
-      alert("Payment verification rejected because this reference number has already been verified.");
+      showAlert("Warning", "Payment verification rejected because this reference number has already been verified.", "warning");
       setSelectedVerification(null);
       setVerificationStatus("rejected");
       setVerificationNotes("");
@@ -1125,7 +1137,7 @@ if (verificationStatus === "rejected") {
     }
   );
 
-  alert("Payment has been rejected and notification created.");
+  showAlert("Success", "Payment has been rejected and notification created.", "success");
   setSelectedVerification(null);
   setVerificationStatus("verified");
   setVerificationNotes("");
@@ -1292,7 +1304,7 @@ if (verificationStatus === "rejected") {
       console.warn("⚠️ No email found for customer.");
     }
 
-    alert(`✅ Payment of ₱${paymentAmount.toFixed(2)} verified successfully.`);
+    showAlert("Success", `Payment of ₱${paymentAmount.toFixed(2)} verified successfully!`, "success");
     await addDoc(
       collection(db, "notifications", accountNumber, "records"),
       {
@@ -1326,6 +1338,18 @@ if (verificationStatus === "rejected") {
       }
     }
 
+        // Create receipt data and open print window
+    const receiptData = {
+      accountNumber,
+      customerName: customerData?.name || selectedVerification.customerName,
+      amount: paymentAmount,
+      referenceNumber: selectedVerification.referenceNumber,
+      paymentDate: selectedVerification.paymentDate || formatPaymentDate(new Date()),
+      paymentMethod: selectedVerification.paymentMethod || "Unknown",
+      verifiedAt: new Date().toISOString()
+    };
+
+    openPrintReceipt(receiptData);
     // Reset state and close the dialog.
     setSelectedVerification(null);
     setVerificationStatus("verified");
@@ -1333,7 +1357,7 @@ if (verificationStatus === "rejected") {
     setIsVerificationDialogOpen(false);
   } catch (error) {
     console.error("❌ Error verifying payment:", error);
-    alert("An error occurred while verifying the payment. Please try again.");
+    showAlert("Error", "An error occurred while verifying the payment. Please try again.", "error");
   } finally {
     // Always re-enable the button, regardless of success or failure
     setIsProcessing(false);
@@ -1347,7 +1371,7 @@ const handlePrintReceipts = () => {
   const filtered = filteredHistory;
 
   if (filtered.length === 0) {
-    alert("No receipts found for the selected filters.");
+    showAlert("Info", "No receipts found for the selected filters.", "info");
     return;
   }
   
@@ -1488,9 +1512,156 @@ const handlePrintReceipts = () => {
     
   }
   
-  
-  
 
+const openPrintReceipt = (payment: Partial<PaymentVerification> & { customerName?: string; accountNumber?: string; amount?: number | string; referenceNumber?: string; paymentDate?: string; paymentMethod?: string; verifiedAt?: string }) => {
+  try {
+    const amountNum = typeof payment.amount === "string" ? parseFloat(payment.amount) : payment.amount || 0;
+    const verifiedAtDisplay = payment.verifiedAt ? new Date(payment.verifiedAt).toLocaleString("en-US", {
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true,
+    }) : new Date().toLocaleString();
+
+    // Use the same small receipt layout as handlePrintReceipts (100 x 180 mm)
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: [100, 180],
+    });
+
+    const img = new Image();
+    img.src = logo;
+
+    const render = (useImage = true) => {
+      // Clear first page (jsPDF starts with one)
+      // Header band (light blue)
+      doc.setFillColor(62, 84, 172);
+      doc.rect(0, 0, 100, 35, "F");
+
+      // Logo (if available)
+      if (useImage && img.width && img.height) {
+        try {
+          const logoWidth = 10;
+          const aspectRatio = img.height / img.width;
+          const logoHeight = logoWidth * aspectRatio;
+          doc.addImage(img, "PNG", 10, 10, logoWidth, logoHeight);
+        } catch (e) {
+          // ignore image errors and continue rendering text-only header
+        }
+      }
+
+      // Header text
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("CENTENNIAL WATER RESOURCE", 25, 15);
+      doc.text("VENTURE CORPORATION", 25, 20);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.text("Official Payment Receipt", 25, 25);
+
+      // Verified badge
+      doc.setFillColor(76, 175, 80);
+      doc.roundedRect(65, 30, 25, 7, 3, 3, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.text("VERIFIED", 77.5, 35, { align: "center" });
+
+      // Reference row
+      doc.setFillColor(240, 240, 250);
+      doc.rect(0, 40, 100, 10, "F");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(0, 0, 0);
+      doc.text("Reference #:", 10, 46);
+      doc.setFont("helvetica", "bold");
+      doc.text(payment.referenceNumber || "N/A", 30, 46);
+      // timestamp right
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.text(verifiedAtDisplay, 90, 46, { align: "right" });
+
+      // Customer information
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(62, 84, 172);
+      doc.text("CUSTOMER INFORMATION", 10, 58);
+      doc.setTextColor(0, 0, 0);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text("Customer Name:", 10, 65);
+      doc.text(payment.customerName || "N/A", 50, 65);
+      doc.text("Account Number:", 10, 72);
+      doc.text(payment.accountNumber || "N/A", 50, 72);
+
+      // Payment details
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(62, 84, 172);
+      doc.text("PAYMENT DETAILS", 10, 85);
+      doc.setTextColor(0, 0, 0);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text("Payment Date:", 10, 92);
+      doc.text(payment.paymentDate || "N/A", 50, 92);
+      doc.text("Payment Method:", 10, 99);
+      doc.text(payment.paymentMethod || "N/A", 50, 99);
+
+      // Amount paid section
+      doc.setFillColor(240, 240, 250);
+      doc.rect(0, 110, 100, 30, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(62, 84, 172);
+      doc.text("AMOUNT PAID", 50, 120, { align: "center" });
+
+      doc.setFontSize(18);
+      doc.setTextColor(62, 84, 172);
+      const amountLabel =
+        typeof amountNum === "number"
+          ? `Php ${formatCurrency(amountNum)}`
+          : `Php ${formatCurrency(Number(amountNum || 0))}`;
+      doc.text(amountLabel, 50, 130, { align: "center" });
+
+      // Footer notes
+      doc.setTextColor(100, 100, 100);
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(9);
+      doc.text("Thank you for your payment!", 50, 145, { align: "center" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.text("For inquiries, please contact:", 50, 152, { align: "center" });
+      doc.text("centennialwaterresourceventure@gmail.com", 50, 157, { align: "center" });
+    };
+
+    // Wait for image load; if it fails, render without it
+    if (img.complete) {
+      render(true);
+      const blob = doc.output("blob");
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, "_blank");
+      if (!win) window.open(doc.output("bloburl"), "_blank");
+    } else {
+      img.onload = () => {
+        render(true);
+        const blob = doc.output("blob");
+        const url = URL.createObjectURL(blob);
+        const win = window.open(url, "_blank");
+        if (!win) window.open(doc.output("bloburl"), "_blank");
+      };
+      img.onerror = () => {
+        // render without image
+        render(false);
+        const blob = doc.output("blob");
+        const url = URL.createObjectURL(blob);
+        const win = window.open(url, "_blank");
+        if (!win) window.open(doc.output("bloburl"), "_blank");
+      };
+    }
+  } catch (err) {
+    console.error("Error opening print receipt:", err);
+  }
+};
 
 
   
@@ -1895,6 +2066,7 @@ const handleExportPaymentHistory = async () => {
     }),
     fileName
   );
+  showAlert("Success", "Payment history exported to Excel successfully!", "success");
 };
 
 // Add this state at the top of the component
@@ -1909,7 +2081,11 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
 }) => {
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl">
+    <DialogContent className="max-w-3xl"
+      onInteractOutside={(e) => e.preventDefault()}
+      onPointerDownOutside={(e) => e.preventDefault()}
+      onEscapeKeyDown={(e) => e.preventDefault()}
+    >
         <DialogHeader>
           <DialogTitle>Payment Proof</DialogTitle>
         </DialogHeader>
@@ -1924,6 +2100,53 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
     </Dialog>
   );
 };
+
+// Add this component before the main return statement:
+const AlertDialog = ({ isOpen, onClose, title, message, type }: {
+  isOpen: boolean;
+  onClose: () => void;
+  title: string;
+  message: string;
+  type: "success" | "error" | "info" | "warning";
+}) => {
+  const typeStyles = {
+    success: { icon: Check, color: "text-green-600", bgColor: "bg-green-50", borderColor: "border-green-200" },
+    error: { icon: AlertCircle, color: "text-red-600", bgColor: "bg-red-50", borderColor: "border-red-200" },
+    info: { icon: AlertCircle, color: "text-blue-600", bgColor: "bg-blue-50", borderColor: "border-blue-200" },
+    warning: { icon: AlertCircle, color: "text-yellow-600", bgColor: "bg-yellow-50", borderColor: "border-yellow-200" },
+  };
+
+  const { icon: IconComponent, color, bgColor, borderColor } = typeStyles[type];
+
+
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className={`sm:max-w-[400px] ${bgColor} border-2 ${borderColor}`}
+        onInteractOutside={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+      >
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            <IconComponent className={`h-6 w-6 ${color}`} />
+            <DialogTitle className={color}>{title}</DialogTitle>
+          </div>
+        </DialogHeader>
+        <div className="py-4">
+          <p className="text-gray-700 text-sm leading-relaxed">{message}</p>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+
+  // Replace all alert() calls with this helper function:
+  const showAlert = (title: string, message: string, type: "success" | "error" | "info" | "warning" = "info") => {
+    setAlertDialog({ isOpen: true, title, message, type });
+  };
+
 
   return (
     <div className="w-full h-full bg-gray-50 p-6">
@@ -1964,7 +2187,11 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
                     {editingMethod ? "Edit Payment Method" : "Add Payment Method"}
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="sm:max-w-[500px]">
+                  <DialogContent className="sm:max-w-[500px]"
+                  onInteractOutside={(e) => e.preventDefault()}
+                  onPointerDownOutside={(e) => e.preventDefault()}
+                  onEscapeKeyDown={(e) => e.preventDefault()}
+                >
                   <DialogHeader>
                     <DialogTitle>{editingMethod ? "Edit Payment Method" : "Add Payment Method"}</DialogTitle>
                     <DialogDescription>
@@ -2219,7 +2446,11 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
             </Card>
 
             <Dialog open={isVerificationDialogOpen} onOpenChange={setIsVerificationDialogOpen}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="sm:max-w-[600px]"
+            onInteractOutside={(e) => e.preventDefault()}
+            onPointerDownOutside={(e) => e.preventDefault()}
+            onEscapeKeyDown={(e) => e.preventDefault()}
+          >
             <DialogHeader>
               <DialogTitle>Verify Payment</DialogTitle>
               <DialogDescription>
@@ -2460,7 +2691,11 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
 
             {/* Cash Receipt Dialog */}
             <Dialog open={isCashReceiptDialogOpen} onOpenChange={setIsCashReceiptDialogOpen}>
-              <DialogContent className="sm:max-w-[500px]">
+              <DialogContent className="sm:max-w-[500px]"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}
+              >                
                 <DialogHeader>
                   <DialogTitle>Create Cash Receipt</DialogTitle>
                   <DialogDescription>
@@ -2652,12 +2887,22 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
                           console.error("Failed to update customer's amountDue after cash receipt:", err);
                         }
 
+                        openPrintReceipt({
+                          accountNumber: paymentVerification.accountNumber,
+                          customerName: paymentVerification.customerName,
+                          amount: paymentVerification.amount,
+                          referenceNumber: paymentVerification.referenceNumber,
+                          paymentDate: paymentVerification.paymentDate,
+                          paymentMethod: paymentVerification.paymentMethod,
+                          verifiedAt: paymentVerification.verifiedAt
+                        });
+
                         setIsCashReceiptDialogOpen(false);
                         setSelectedCashCustomer(null);
                         setCashAmount(0);
                         setCashPaymentDate(formatPaymentDate(new Date()));
                         setCashReferenceNumber(generateReferenceNumber());
-                        alert("Cash receipt created, verified, and applied to bills successfully!");
+                        showAlert("Success", "Cash receipt created, verified, and applied to bills successfully.", "success");
                       } catch (error: any) {
                         setCashError(error.message || "Failed to create cash receipt.");
                       } finally {
@@ -2852,6 +3097,15 @@ const ImagePreviewDialog = ({ isOpen, onClose, imageUrl }: {
           onClose={() => setIsImagePreviewOpen(false)}
           imageUrl={selectedImageUrl}
         />
+
+        <AlertDialog
+          isOpen={alertDialog.isOpen}
+          onClose={() => setAlertDialog({ ...alertDialog, isOpen: false })}
+          title={alertDialog.title}
+          message={alertDialog.message}
+          type={alertDialog.type}
+        />
+        
       </div>
     </div>
 

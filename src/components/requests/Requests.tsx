@@ -1514,7 +1514,10 @@ const exportToXLSX = () => {
 
             {/* Announcement Dialog (create/edit) */}
             <Dialog open={showAnnDialog} onOpenChange={setShowAnnDialog}>
-              <DialogContent className="sm:max-w-[600px]">
+              <DialogContent className="sm:max-w-[600px]"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}>
                 <DialogHeader className="pb-4 border-b">
                   <DialogTitle className="text-xl">
                     {editingAnnouncement ? "Edit Announcement" : "Create New Announcement"}
@@ -1570,7 +1573,10 @@ const exportToXLSX = () => {
 
            {/* Delete confirmation dialog */}
            <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-             <DialogContent className="sm:max-w-[420px]">
+             <DialogContent className="sm:max-w-[420px]"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}>
                <DialogHeader>
                  <DialogTitle>Delete Announcement</DialogTitle>
                </DialogHeader>
@@ -1611,7 +1617,10 @@ const exportToXLSX = () => {
         
         {/* Request Details Dialog */}
         <Dialog open={showDetails} onOpenChange={setShowDetails}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}>
             {selectedRequest && (
               <div className="space-y-6 py-2">
                 <DialogHeader className="pb-4 border-b">
@@ -1716,7 +1725,10 @@ const exportToXLSX = () => {
 
         {confirmStatus && (
   <Dialog open={true} onOpenChange={() => setConfirmStatus(null)}>
-    <DialogContent className="sm:max-w-[400px]">
+    <DialogContent className="sm:max-w-[400px]"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}>
       <DialogHeader>
         <DialogTitle>Confirm Status Update</DialogTitle>
         <p className="text-sm text-gray-600">

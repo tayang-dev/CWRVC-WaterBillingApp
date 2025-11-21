@@ -2981,7 +2981,10 @@ const printDisconnectionNotice = (item: DisconnectionItem) => {
                   <DialogTrigger asChild>
                     <Button>Print All Bills</Button>
                   </DialogTrigger>
-                  <DialogContent>
+                  <DialogContent
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}>
                     <DialogHeader>
                       <DialogTitle>Filter Bills to Print</DialogTitle>
                       <DialogDescription>Print all bills for the selected month and year.</DialogDescription>
@@ -3702,7 +3705,10 @@ const printDisconnectionNotice = (item: DisconnectionItem) => {
         selectedBills={selectedBills} customersCollection={customers}      />
     
 <Dialog open={noticeDialogOpen} onOpenChange={setNoticeDialogOpen}>
-  <DialogContent className="max-w-3xl">
+  <DialogContent className="max-w-3xl"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}>
     <DialogHeader>
       <DialogTitle>
         Disconnection Notice for {selectedNotice?.accountNumber}

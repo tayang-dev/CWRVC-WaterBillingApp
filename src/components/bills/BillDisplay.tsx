@@ -63,7 +63,10 @@ const BillDisplay = ({ open, onOpenChange, selectedAccount, selectedBills, custo
   if (!selectedBills || selectedBills.length === 0) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-3xl"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Bills for {selectedAccount}</DialogTitle>
           </DialogHeader>
@@ -443,13 +446,17 @@ const handlePrintSingleBill = async (billId: string) => {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-6xl w-full max-h-[90vh] overflow-y-auto"
-        style={{ width: "100%", maxWidth: "1100px" }}
+        className="bill-dialog max-w-6xl w-full overflow-hidden"
+        style={{ width: "100%", maxWidth: "1100px", maxHeight: "100vh" }}
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}
       >
-        <DialogHeader>
-          <DialogTitle>Bills for {selectedAccount}</DialogTitle>
+        <DialogHeader className="border-b border-gray-200 px-6 py-4">
+          <DialogTitle className="text-lg font-semibold">Bills for {selectedAccount}</DialogTitle>
         </DialogHeader>
-        <div className="space-y-8">
+        <div className="space-y-8 overflow-y-auto p-4"
+        style={{ maxHeight: "calc(90vh - 64px)" }}>
           {(() => {
             return sortedBills.map((bill, index) => {
               const { tiers, totalAmount } = calculateTieredUsage(bill.waterUsage || 0);

@@ -522,7 +522,10 @@ const StaffManagement = () => {
 
 {/* Staff Dialog */}
 <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-  <DialogContent className="sm:max-w-[600px] p-0 overflow-hidden rounded-2xl">
+  <DialogContent className="sm:max-w-[600px] p-0 overflow-hidden rounded-2xl"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}>
     <div className="bg-blue-900 p-6">
       <DialogHeader>
         <DialogTitle className="text-xl font-bold text-white">

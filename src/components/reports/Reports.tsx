@@ -1681,7 +1681,10 @@ const exportToXLSX = () => {
 
         {/* Report Details Dialog */}
         <Dialog open={showDetails} onOpenChange={setShowDetails}>
-          <DialogContent className="max-w-3xl">
+          <DialogContent className="max-w-3xl"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}>
             <DialogHeader>
               <DialogTitle>Leak Report Details</DialogTitle>
               <p className="text-sm text-gray-600">
@@ -1758,7 +1761,10 @@ const exportToXLSX = () => {
 
         {confirmAction && (
   <Dialog open={true} onOpenChange={() => setConfirmAction(null)}>
-    <DialogContent className="sm:max-w-[400px]">
+    <DialogContent className="sm:max-w-[400px]"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}>
       <DialogHeader>
         <DialogTitle>Are you sure?</DialogTitle>
         <p className="text-sm text-gray-600">

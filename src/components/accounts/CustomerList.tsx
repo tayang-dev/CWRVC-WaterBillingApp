@@ -195,6 +195,39 @@ const CustomerList: React.FC<CustomerListProps> = ({
   const [scfError, setScfError] = useState("");
   const [showScfConfirm, setShowScfConfirm] = useState(false); // Add this state at the top inside CustomerList component
 
+  // Local app alert dialog state + helper
+  const [appAlert, setAppAlert] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: "success" | "error" | "info" | "warning";
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    type: "info",
+  });
+
+  const showAlert = (title: string, message: string, type: "success" | "error" | "info" | "warning" = "info") => {
+    setAppAlert({ isOpen: true, title, message, type });
+  };
+  // Small Alert modal (uses existing Dialog components)
+  const AppAlert = () => (
+    <Dialog open={appAlert.isOpen} onOpenChange={(open) => setAppAlert(prev => ({ ...prev, isOpen: open }))}>
+      <DialogContent className="sm:max-w-[420px]">
+        <DialogHeader>
+          <DialogTitle>{appAlert.title}</DialogTitle>
+        </DialogHeader>
+        <div className="py-2">
+          <p className="text-sm text-gray-700">{appAlert.message}</p>
+        </div>
+        <div className="flex justify-end pt-4">
+          <Button onClick={() => setAppAlert(prev => ({ ...prev, isOpen: false }))}>Close</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+
   // --- Archive states ---
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [archivedCustomers, setArchivedCustomers] = useState<Customer[]>([]);
@@ -353,9 +386,7 @@ const fetchCustomers = async () => {
       );
 
       if (conflictExists) {
-        alert(
-          `Cannot restore ${arch.name || arch.id}. A customer with the same account number, meter number, email, or phone already exists.`
-        );
+        showAlert("Restore Conflict", "Cannot restore archived customer because account number, meter number, email, or phone already exists in active customers.", "error");
         setIsSubmitting(false);
         setRestoringId(null);
         return;
@@ -375,10 +406,10 @@ const fetchCustomers = async () => {
       await deleteDoc(doc(db, "archiveCustomer", arch.id));
       await fetchCustomers();
       await fetchArchivedCustomers();
-      alert(`Restored ${rest.name || arch.id}`);
+      showAlert("Restore Successful", `Successfully restored archived customer ${arch.name || arch.id}.`, "success");
     } catch (e: any) {
       console.error("Error restoring archived customer:", e);
-      alert("Failed to restore archived customer: " + (e.message || ""));
+      showAlert("Restore Failed", "Failed to restore archived customer: " + (e.message || ""), "error");
     } finally {
       setIsSubmitting(false);
       setRestoringId(null);
@@ -403,10 +434,10 @@ const fetchCustomers = async () => {
     try {
       await deleteDoc(doc(db, "archiveCustomer", arch.id));
       await fetchArchivedCustomers();
-      alert(`Permanently deleted ${arch.name || arch.id}`);
+      showAlert("Delete Successful", `Successfully deleted archived customer ${arch.name || arch.id}.`, "success");
     } catch (e: any) {
       console.error("Error deleting archived customer:", e);
-      alert("Failed to delete archived customer: " + (e.message || ""));
+      showAlert("Delete Failed", "Failed to delete archived customer: " + (e.message || ""), "error");
     } finally {
       setIsSubmitting(false);
       setDeletingArchivedId(null);
@@ -654,7 +685,10 @@ const handleConfirmedSubmit = async () => {
             setPendingData(null);
           }
         }}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="sm:max-w-[500px]"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}>
             <DialogHeader>
               <DialogTitle>Add SCF (Service Customer Fee)</DialogTitle>
               <DialogDescription>
@@ -784,7 +818,10 @@ const handleConfirmedSubmit = async () => {
 
     return (
       <Dialog open={!!editingCustomer} onOpenChange={() => setEditingCustomer(null)}>
-        <DialogContent className="sm:max-w-[600px]">
+        <DialogContent className="sm:max-w-[600px]"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Edit Customer</DialogTitle>
             <DialogDescription>
@@ -1149,7 +1186,10 @@ const handleConfirmedSubmit = async () => {
     {/* Archived Customers Dialog - render only when open */}
 {archiveDialogOpen && (
   <Dialog open={true} onOpenChange={(open) => setArchiveDialogOpen(open)}>
-    <DialogContent className="w-full max-w-3xl">
+    <DialogContent className="w-full max-w-3xl"
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}>
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold">Archived Customers</h3>
         <div className="flex items-center space-x-2 mr-4">
@@ -1443,6 +1483,8 @@ const handleConfirmedSubmit = async () => {
         </div>
       )}
 
+      {/* App-level simple alert modal */}
+      <AppAlert />
       {/* Add these dialogs at the end of the return */}
       <EditCustomerDialog />
       <DeleteConfirmationDialog />
