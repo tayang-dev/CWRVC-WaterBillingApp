@@ -2723,7 +2723,8 @@ const AlertDialog = ({ isOpen, onClose, title, message, type }: {
                       value={cashAmount}
                       onChange={(e) => setCashAmount(Number(e.target.value))}
                       type="number"
-                      min="0"
+                      min="1"
+                      step="0.01"
                     />
                   </div>
                   <div>
@@ -2749,6 +2750,11 @@ const AlertDialog = ({ isOpen, onClose, title, message, type }: {
                   <Button
                     onClick={async () => {
                       if (!selectedCashCustomer) return;
+                      // Validate minimum amount
+                      if (isNaN(Number(cashAmount)) || Number(cashAmount) < 1) {
+                        setCashError("Amount must be at least ₱1.00");
+                        return;
+                      }
                       setCashProcessing(true);
                       setCashError("");
                       try {
