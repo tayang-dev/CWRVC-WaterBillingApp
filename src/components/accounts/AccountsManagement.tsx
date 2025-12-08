@@ -41,7 +41,8 @@ const AccountsManagement = ({
   const [dragging, setDragging] = useState(false);
 
   const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [dialogSubmitFn, setDialogSubmitFn] = useState<(() => void) | null>(null);
+ const [dialogSubmitFn, setDialogSubmitFn] = useState<(() => Promise<void> | void) | null>(null);
+ const [isAdding, setIsAdding] = useState(false);
 
 
   // ...existing code...
@@ -1469,12 +1470,24 @@ const handlePrintLoginCredentials = () => {
                   >
                     Cancel
                   </Button>
-                  <Button 
+                 <Button
                     variant="default"
                     className="bg-blue-600 hover:bg-blue-700 text-white"
-                    onClick={() => dialogSubmitFn && dialogSubmitFn()}
+                    onClick={async () => {
+                      if (isAdding) return;
+                      setIsAdding(true);
+                      try {
+                        // Await the submit handler in case it returns a Promise
+                        await dialogSubmitFn?.();
+                      } catch (err) {
+                        console.error("Add customer failed:", err);
+                      } finally {
+                        setIsAdding(false);
+                      }
+                    }}
+                    disabled={isAdding}
                   >
-                    Add Customer
+                    {isAdding ? "Adding..." : "Add Customer"}
                   </Button>
                 </div>
               </div>
